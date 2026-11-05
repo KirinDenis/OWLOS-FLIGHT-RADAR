@@ -1350,7 +1350,8 @@ static void panel_plane(ui_t *u, canvas_t *cv, const plane_t *p)
     int y = 46;
     if (p->orig[0] || p->dest[0]) {
         snprintf(buf, sizeof buf, "%s > %s", p->orig[0] ? p->orig : "?", p->dest[0] ? p->dest : "?");
-        micro_text(cv, TX, y + 1, buf, C_PRIM, 240, 2);
+        int sc = micro_width(buf, 2) <= PW - 10 ? 2 : 1;   // four-letter ICAO codes may not fit big
+        micro_text(cv, TX, y + 1 + (2 - sc) * 3, buf, C_PRIM, 240, sc);
         y += 14;
     }
     // the height, big, with climbing or descending beside it

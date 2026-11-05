@@ -474,6 +474,132 @@ static void watch_lookup(sky_reader_t *rd, int planes_server)
     ESP_LOGI(TAG, "watch %s: %s by %s, %s%s%s", id, FREE_NAME[server], WATCH_KIND[kind], how, said[0] ? ": " : "", said);
 }
 
+/* --- the route of the picked plane: the free networks only know where it is, adsbdb.com says
+ * where its callsign flies from and to. asked once per callsign, when a plane is picked, and
+ * kept: a tap costs one request at most, nothing while nobody taps. FR24 sends its own --- */
+
+#define ROUTE_KEPT     24
+#define ROUTE_GAP_MS   3000u           /* at most one lookup this often */
+#define ROUTE_RETRY_MS 60000u          /* no answer: that callsign again after this */
+#define ROUTE_BODY     3072            /* an answer is ~1 KB */
+
+typedef struct {
+    char     cs[9];
+    char     orig[5], dest[5];
+    uint8_t  state;                    /* 0 free, 1 found, 2 no route known, 3 failed */
+    uint32_t asked;
+} route_t;
+
+static route_t s_route[ROUTE_KEPT];    // fetch task only
+static int     s_route_next;           // the slot taken next, the oldest
+static uint32_t s_route_asked;
+
+typedef struct { char *buf; int n; } body_t;
+
+static void to_body(void *ctx, const char *data, int len)
+{
+    body_t *b = ctx;
+    if (len > ROUTE_BODY - 1 - b->n) len = ROUTE_BODY - 1 - b->n;
+    if (len <= 0) return;
+    memcpy(b->buf + b->n, data, (size_t)len);
+    b->n += len;
+    b->buf[b->n] = 0;
+}
+
+// the airport's code in the object after "name": IATA, or ICAO if it has none. "" if not found
+static void route_code(const char *body, const char *name, char *out, int cap)
+{
+    out[0] = 0;
+    const char *o = strstr(body, name);
+    if (!o) return;
+    const char *end = strchr(o, '}');                 // the airport objects have nothing nested
+    const char *keys[2] = { "\"iata_code\":\"", "\"icao_code\":\"" };
+    for (int k = 0; k < 2 && !out[0]; k++) {
+        const char *v = strstr(o, keys[k]);
+        if (!v || (end && v > end)) continue;
+        v += strlen(keys[k]);
+        int n = 0;
+        while (v[n] && v[n] != '"' && n < cap - 1) { out[n] = v[n]; n++; }
+        out[n] = 0;
+    }
+}
+
+// the callsign as the networks send it, padded with spaces: trimmed. 0 = none worth asking
+static int route_callsign(const char *in, char *cs)
+{
+    int n = 0;
+    for (int i = 0; in[i] && n < 8; i++) if (in[i] != ' ') cs[n++] = in[i];
+    cs[n] = 0;
+    return n >= 3;
+}
+
+static route_t *route_find(const char *cs)
+{
+    for (int i = 0; i < ROUTE_KEPT; i++) if (s_route[i].state && !strcmp(s_route[i].cs, cs)) return &s_route[i];
+    return NULL;
+}
+
+// what is known goes to every plane flying that callsign. s_lock held
+static void route_apply_locked(const route_t *r)
+{
+    for (int i = 0; i < s_sky.n; i++) {
+        plane_t *p = &s_sky.p[i];
+        char cs[9];
+        if (!p->icao || p->orig[0] || p->dest[0] || !route_callsign(p->flight, cs) || strcmp(cs, r->cs)) continue;
+        memcpy(p->orig, r->orig, sizeof p->orig);
+        memcpy(p->dest, r->dest, sizeof p->dest);
+    }
+}
+
+static void route_lookup(int fr24)
+{
+    if (fr24) return;
+    uint32_t now = now_ms();
+    char cs[9] = "";
+    uint32_t sel = *(volatile uint32_t *)&s_ui.sel;   // the screen task's: read once
+    if (!sel) return;
+    lock();
+    for (int i = 0; i < s_sky.n; i++) {
+        const plane_t *p = &s_sky.p[i];
+        if (p->icao == sel && !p->orig[0] && !p->dest[0]) { route_callsign(p->flight, cs); break; }
+    }
+    unlock();
+    if (!cs[0] || strlen(cs) < 3) return;
+    route_t *r = route_find(cs);
+    if (r && r->state == 1) {                          // known: the plane only lost it
+        lock(); route_apply_locked(r); unlock();
+        return;
+    }
+    if (r && (r->state == 2 || now - r->asked < ROUTE_RETRY_MS)) return;
+    if (s_route_asked && now - s_route_asked < ROUTE_GAP_MS) return;
+    s_route_asked = now;
+    if (!r) {
+        r = &s_route[s_route_next];
+        s_route_next = (s_route_next + 1) % ROUTE_KEPT;
+        memset(r, 0, sizeof *r);
+        memcpy(r->cs, cs, sizeof r->cs);
+    }
+    r->asked = now;
+    char *buf = malloc(ROUTE_BODY);
+    if (!buf) { r->state = 3; return; }
+    buf[0] = 0;
+    body_t b = { buf, 0 };
+    char url[64];
+    snprintf(url, sizeof url, "https://api.adsbdb.com/v0/callsign/%s", cs);
+    int status = 0;
+    net_get(url, NULL, to_body, &b, &status);
+    if (status == 200) {
+        route_code(buf, "\"origin\"", r->orig, sizeof r->orig);
+        route_code(buf, "\"destination\"", r->dest, sizeof r->dest);
+        r->state = r->orig[0] || r->dest[0] ? 1 : 2;
+    } else {
+        r->state = status == 404 ? 2 : 3;              // 404: adsbdb knows no route for it
+    }
+    free(buf);
+    if (r->state == 1) { lock(); route_apply_locked(r); unlock(); }
+    ESP_LOGI(TAG, "route %s: HTTP %d, %s > %s", cs, status, r->orig[0] ? r->orig : "?", r->dest[0] ? r->dest : "?");
+}
+
 static void fetch_task(void *arg)
 {
     (void)arg;
@@ -595,6 +721,7 @@ static void fetch_task(void *arg)
             if (status == 429) every *= 3;            // too many requests: slow down
             geocode();
             if (status != 429) watch_lookup(&rd, server);   // on the free networks, FR24 or not
+            route_lookup(fr24);                        // the picked plane's route, once per callsign
             update_check();
         }
         lock();                                        // the LED's no data: the WiFi set is not there, or no answer

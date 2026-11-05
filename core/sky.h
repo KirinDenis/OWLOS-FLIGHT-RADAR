@@ -24,7 +24,7 @@ typedef struct {
     char     flight[9];          /* callsign */
     char     reg[10];            /* registration */
     char     type[5];            /* ICAO type designator: B738, A320.. */
-    char     orig[4], dest[4];   /* IATA airports, FR24 only */
+    char     orig[5], dest[5];   /* airports, IATA (ICAO if it has none): FR24's, or looked up by callsign */
     uint8_t  kind;
     uint8_t  ground;
     uint8_t  has_alt, has_spd;

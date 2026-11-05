@@ -230,7 +230,16 @@ static void merge(sky_t *s, const plane_t *in, uint32_t now)
     uint32_t first = known ? p->first : now;
     memcpy(tx, p->tx, sizeof tx);
     memcpy(ty, p->ty, sizeof ty);
+    // the free networks say nothing of the route: one looked up for this callsign stays
+    char orig[sizeof p->orig], dest[sizeof p->dest];
+    int keep_route = known && !in->orig[0] && !in->dest[0] && !strcmp(p->flight, in->flight);
+    memcpy(orig, p->orig, sizeof orig);
+    memcpy(dest, p->dest, sizeof dest);
     *p = *in;
+    if (keep_route) {
+        memcpy(p->orig, orig, sizeof orig);
+        memcpy(p->dest, dest, sizeof dest);
+    }
     memcpy(p->tx, tx, sizeof tx);
     memcpy(p->ty, ty, sizeof ty);
     p->tn = tn;

@@ -16,6 +16,10 @@ tools/Guide/bin/
 tools/Guide/obj/
 tools/WorldBake/bin/
 tools/WorldBake/obj/
+server/bin/
+server/obj/
+server/data/
+server/publish/
 web/twin*.js
 web/twin*.wasm
 _public/

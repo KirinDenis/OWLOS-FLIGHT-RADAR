@@ -11,10 +11,18 @@
  *   build is a firmware build's name (BOARDS in flow.js), cc a country's ISO 3166 two letters, versions what the
  *   flashes were, the newest first. "sample": true marks the made-up file of a local test (tools/stats-sample.json)
  */
-/* our server's address. empty till the server is up: the page then asks nothing at all, not even the map,
- * and shows none of this (a local look still works: index.html?stats=sample) */
-const API = '';
+/* our server (server/ in the repository), as the site's version.json says it: "stats", from
+ * server/public-url.txt. the boards read the same line. empty: the page asks nothing and sends nothing, not
+ * even the map, and shows none of this. a local look: index.html?stats=sample (made-up counts, nothing
+ * sent) or index.html?stats=local (the server run on this PC, server/README.md) */
+let SERVER = '';
+const LOCAL_SERVER = 'http://127.0.0.1:5088';
 const EVERY = 60000;                                   // the server counts once a minute too
+
+function server() {
+  const asked = new URLSearchParams(location.search).get('stats');
+  return asked === 'local' ? LOCAL_SERVER : asked === 'sample' ? '' : SERVER;
+}
 /* countries left out: on the map only land, no shade, no number, nothing over it, and not in the list. the
  * server does not count them either; this is so a count that came anyway shows nowhere */
 const IGNORED = new Set(['RU']);
@@ -57,7 +65,10 @@ export function shade(n) {
 
 function sourceUrl() {
   const asked = new URLSearchParams(location.search).get('stats');
-  return asked === 'sample' ? 'stats-sample.json' : API;   // the sample is only in a local build, the site has none
+  if (asked === 'sample') {
+    return 'stats-sample.json';                        // the sample is only in a local build, the site has none
+  }
+  return server() ? `${server()}/api/stats` : '';
 }
 
 function line(s) {
@@ -338,6 +349,11 @@ function tipFor(el) {
   });
 }
 
+function hideStats() {
+  reveal('statline', false);
+  reveal('world', false);
+}
+
 async function show(boards) {
   let s;
   try {
@@ -348,8 +364,7 @@ async function show(boards) {
     s = await r.json();
     s.countries = (s.countries || []).filter((c) => !IGNORED.has(c.cc));
   } catch {
-    document.getElementById('statline').hidden = true;
-    document.getElementById('world').hidden = true;
+    hideStats();
     return false;
   }
   last = s;
@@ -362,7 +377,118 @@ async function show(boards) {
   return true;
 }
 
-export function startStats(boards) {
+/* --- what this page and its boards tell the server, only when the visitor allowed it: asked once, when a
+ * board is connected or flashed, the answer kept in this browser. the boards are told the same answer
+ * (OWLOS SET {"help":1} or 2), flow.js does that through onHelp. no server: never asked, nothing sent --- */
+const ASKED = 'owlos-radar-help';
+const listeners = [];
+let given = null;                                      // the answer on this page, for a browser that keeps nothing
+const reveal = (id, on) => {                             // none of this may stop the page, a flash least of all
+  const el = document.getElementById(id);
+  if (el) {
+    el.hidden = !on;
+  }
+};
+
+// 'yes', 'no', or null: not asked yet
+export function helpAnswer() {
+  try {
+    const a = localStorage.getItem(ASKED);
+    if (a === 'yes' || a === 'no') {
+      return a;
+    }
+  } catch {
+    // a browser that keeps nothing: the answer given on this page, if any
+  }
+  return given;
+}
+
+export function onHelp(f) {
+  listeners.push(f);
+}
+
+export function askHelp() {
+  if (server() && !helpAnswer()) {
+    reveal('helpask', true);
+  }
+}
+
+function setHelp(a) {
+  given = a;
+  try {
+    localStorage.setItem(ASKED, a);
+  } catch {
+    // a browser that keeps nothing: this page goes by the answer, the next one asks again
+  }
+  reveal('helpask', false);
+  helpLine(a);
+  for (const w of waiting.splice(0)) {
+    if (a === 'yes') {
+      post('/api/flash', w);
+    }
+  }
+  for (const f of listeners) {
+    f(a);
+  }
+}
+
+function helpLine(a = helpAnswer()) {
+  reveal('helpline', !!server());
+  const state = document.getElementById('helpstate');
+  if (state) {
+    state.textContent = a === 'yes' ? 'on' : 'off';
+  }
+}
+
+function post(path, body) {
+  if (!server() || helpAnswer() !== 'yes') {
+    return;
+  }
+  fetch(`${server()}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), keepalive: true })
+    .catch((e) => console.warn('the stats server did not take it', e));
+}
+
+// a flash before the visitor answered waits for the answer: sent on ALLOW, dropped on NO
+const waiting = [];
+
+export function reportFlash(build, version) {
+  if (server() && !helpAnswer()) {
+    waiting.push({ build, version });
+    askHelp();
+    return;
+  }
+  post('/api/flash', { build, version });
+}
+
+export function reportCable(n) {
+  if (n > 0) {
+    post('/api/cable', { n });
+  }
+}
+
+function startHelp() {
+  document.getElementById('helpyes')?.addEventListener('click', () => setHelp('yes'));
+  document.getElementById('helpno')?.addEventListener('click', () => setHelp('no'));
+  document.getElementById('helpchange')?.addEventListener('click', () => reveal('helpask', true));
+  helpLine();
+  // the page shown: a count a day and a country, no cookie. not when the visitor said no
+  if (server() && helpAnswer() !== 'no') {
+    try {
+      navigator.sendBeacon(`${server()}/api/visit`);
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+}
+
+export async function startStats(boards) {
+  try {
+    const v = await (await fetch('version.json', { cache: 'no-store' })).json();
+    SERVER = typeof v.stats === 'string' && /^https:\/\/[^\s"?#\\]+$/.test(v.stats) ? v.stats.replace(/\/+$/, '') : '';
+  } catch {
+    SERVER = '';                                       // no version.json: no server either
+  }
+  startHelp();
   if (!sourceUrl()) {
     return;                                            // no server yet: nothing to ask
   }
@@ -385,7 +511,13 @@ export function startStats(boards) {
     let timer = 0;
     const ask = async () => {
       clearTimeout(timer);
-      const ok = await show(boards);
+      let ok = false;
+      try {
+        ok = await show(boards);
+      } catch (e) {
+        console.warn('the stats could not be shown', e);   // an odd answer: hidden, asked again later
+        hideStats();
+      }
       timer = setTimeout(() => {
         if (!document.hidden) {
           ask();

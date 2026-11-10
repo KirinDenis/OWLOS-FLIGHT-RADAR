@@ -165,7 +165,10 @@ jobs:
           VERSION="$VER, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
           cp -r site/. public/
           cp CHANGES.md public/
-          printf '{"version":"%s"}\n' "$VER" > public/version.json
+          # where boards are counted for the map of boards (server/): server/public-url.txt, empty = nowhere.
+          # the page and the boards both read it here, so the counting starts and stops with this file
+          STATS=$(tr -d ' \r\n' < server/public-url.txt 2>/dev/null || true)
+          printf '{"version":"%s","stats":"%s"}\n' "$VER" "$STATS" > public/version.json
           mkdir -p public/shots && cp -r shots/. public/shots/
           bash .github/make-manifests.sh public/fw "$VERSION"
           bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" .github/archive-seed.txt

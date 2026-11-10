@@ -27,6 +27,10 @@ void store_load_light(light_cfg_t *c);         // what lights the LED, the defau
 void store_save_light(const light_cfg_t *c);
 void store_load_opt(scope_opt_t *o);           // the radar's options, all off if none were kept
 void store_save_opt(const scope_opt_t *o);
+/* counted on the site's map of boards: 0 never asked, 1 the owner allowed it, 2 not. kept by itself, so an
+ * older firmware flashed back finds the rest as it left it */
+int  store_load_help(void);
+void store_save_help(int help);
 /* how long this run has lasted, s, saved once a minute: the next start says how long the run
  * before it was, whatever ended it (a reset by the USB line or a power cut too) */
 uint32_t store_load_ran(void);

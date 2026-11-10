@@ -273,3 +273,31 @@ int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, in
     esp_http_client_cleanup(h);
     return len;
 }
+
+int net_post_json(const char *url, const char *body, int *status)
+{
+    *status = 0;
+    if (!s_up) return -1;
+    esp_http_client_config_t c = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = 4000,                           // a server that is down holds the planes up this long, no more
+        .user_agent = NET_USER_AGENT,
+        .buffer_size = 512,
+        .buffer_size_tx = 512,
+    };
+    esp_http_client_handle_t h = esp_http_client_init(&c);
+    if (!h) return -1;
+    esp_http_client_set_header(h, "Content-Type", "application/json");
+    const int len = (int)strlen(body);
+    int r = -1;
+    if (esp_http_client_open(h, len) == ESP_OK && esp_http_client_write(h, body, len) == len) {
+        esp_http_client_fetch_headers(h);
+        *status = esp_http_client_get_status_code(h);
+        r = 0;
+    }
+    esp_http_client_close(h);
+    esp_http_client_cleanup(h);
+    return r;
+}

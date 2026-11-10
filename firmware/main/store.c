@@ -189,6 +189,18 @@ void store_load_opt(scope_opt_t *o)
 
 void store_save_opt(const scope_opt_t *o) { save_blob("scope", o, sizeof *o); }
 
+int store_load_help(void)
+{
+    uint8_t v = 0;
+    return load_blob(NS, "help", &v, sizeof v) && v <= 2 ? v : 0;
+}
+
+void store_save_help(int help)
+{
+    uint8_t v = (uint8_t)help;
+    save_blob("help", &v, sizeof v);
+}
+
 uint32_t store_load_ran(void)
 {
     nvs_handle_t h;

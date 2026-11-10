@@ -102,6 +102,11 @@ The map under them comes from OpenStreetMap.
 - At a home in Rusia the board asks for no planes and no map, and says NOT AVAILABLE IN RUSIA. The
   country is the one OpenStreetMap gives for the home's point: Crimea and the other occupied parts of
   Ukraine are Ukraine there.
+- Counting for the site's map of boards, only when you allow it (the page asks once; on the board SET,
+  DATA, COUNT ME): every 10 minutes the board tells our server its board type and version, and the page
+  tells it a flash it made and how many boards are on its cable. The server turns the address a report
+  comes from into a country and keeps no address, no MAC and no home: `server/README.md`. A page shown is
+  counted by day and country, without a cookie. Rusia is not counted.
 - The password and the Flightradar24 key go into the board and stay there. The board never shows them
   and never sends them back.
 
@@ -320,6 +325,10 @@ and a PC preview.
   Ukraine lands in another country. `site/stats.js` draws the map and the counts from our server's API,
   nothing when it does not answer; `tools/stats-sample.json` is made-up counts for a local look only
   (`bash tools/assemble.sh`, then `index.html?stats=sample`).
+- `server/` (.NET 8) is that server, RadarStats, on `radar.owlos.sk`: `server/README.md` says what it keeps,
+  `server/deploy/README.md` how it goes on the machine. `server/public-url.txt` is the switch: the site's
+  workflow writes it into `version.json`, the page and the boards report only where it says, and empty
+  it says nowhere.
 
 What is where:
 

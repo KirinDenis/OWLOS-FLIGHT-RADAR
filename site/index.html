@@ -213,6 +213,15 @@
   .mapzoom button:hover:not(:disabled) { border-color: var(--prim); box-shadow: 0 0 8px rgba(92, 225, 255, .35); }
   .mapzoom button:disabled { opacity: .35; cursor: default; }
   #worldlegend .hint { margin-left: auto; color: var(--dim); opacity: .75; }
+  .worldcredit { margin: 8px 0 0; color: var(--dim); font: 400 11px var(--mono); opacity: .8; }
+  .helpask {
+    position: fixed; z-index: 30; right: 16px; bottom: 16px; width: min(440px, calc(100vw - 32px)); padding: 16px 18px;
+    background: #050e22; border: 1px solid var(--prim); border-radius: 8px; box-shadow: 0 10px 34px rgba(0, 0, 0, .6), 0 0 22px rgba(92, 225, 255, .18);
+  }
+  .helpask h3 { margin: 0 0 8px; color: var(--prim); font: 700 15px var(--mono); }
+  .helpask p { margin: 0 0 12px; color: var(--dim); font-size: 14px; }
+  .helpask .row { display: flex; flex-wrap: wrap; gap: 10px; }
+  #helpline b { color: var(--prim); }
   #worldmap .land { fill: #0a1c36; stroke: #1d4a78; stroke-width: .6px; vector-effect: non-scaling-stroke; }
   #worldmap .land.has { stroke: #5ce1ff; stroke-opacity: .55; }
   #worldmap .land.has:hover, #worldmap .land.has.on { stroke: #eaf7ff; stroke-opacity: 1; stroke-width: 1.4px; }
@@ -414,13 +423,24 @@
       <div id="worldmap"></div>
       <div id="worldlegend"></div>
       <ul id="countrylist" aria-label="Boards flashed, by country"></ul>
+      <p class="worldcredit">IP to country by <a href="https://db-ip.com">DB-IP</a></p>
     </div>
     <div class="worldpanel" id="boardstats"></div>
   </div>
 </section>
 
+<aside class="helpask" id="helpask" hidden role="dialog" aria-labelledby="helphead">
+  <h3 id="helphead">Help us make OWLOS Flight Radar better</h3>
+  <p>May this page and your boards tell our server their country, their board type and their firmware version?
+     Nothing else: no home, no WiFi name, no MAC. The country is read from the connection, and the address is not
+     kept. You can change it at any time, at the bottom of this page.</p>
+  <div class="row"><button class="btn" id="helpyes">ALLOW</button><button class="btn quiet" id="helpno">NO, THANKS</button></div>
+</aside>
+
 <footer>
   <p>Looking for the page you know, with every firmware version and the full guide? <a href="previous/">Previous page</a>.</p>
+  <p id="helpline" hidden>Counting boards for the map of boards: <b id="helpstate">off</b>. Only the country, the board type
+    and the version, and only when you allow it. <button class="plain" id="helpchange">Change</button></p>
   <p class="credits">With no board connected the planes in the picture on top are a demo. With one they are its own, over the ground around its home. Your board reads <a href="https://www.adsb.lol/">adsb.lol</a> (open data under ODbL 1.0),
     <a href="https://adsb.fi/">adsb.fi</a> or <a href="https://www.flightradar24.com/">Flightradar24</a>.
     Map: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.

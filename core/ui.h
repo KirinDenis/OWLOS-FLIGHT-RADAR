@@ -108,6 +108,7 @@ typedef struct {
     uint8_t light;         /* ui_t.light changed: use it, keep it */
     uint8_t opt;           /* ui_t.opt changed: use it, keep it */
     uint8_t light_test;    /* the LED's red, green, blue */
+    uint8_t help;          /* ui_t.help changed: use it, keep it */
 } ui_cmd_t;
 
 #define TRAIL_GAP INT16_MIN       /* a trail point off the scope: the trail breaks there */
@@ -164,6 +165,7 @@ typedef struct {
     uint8_t  kb_mode;          /* KB_PASS, KB_HOME, KB_WATCH: what the keyboard types */
     watchlist_t watch;         /* the firmware's list, copied in like net: for SET */
     light_cfg_t light;         /* what lights the LED on the back (core/light.h), SET's LED rows */
+    uint8_t  help;             /* counted on the site's map of boards: 0 never asked, 1 yes, 2 no. SET's COUNT ME */
     char     newest[12];       /* the version the site has, "": not heard yet. the firmware copies it in like net */
     int      about_back;       /* the view ABOUT goes back to */
     uint8_t  kb_page;          /* 0 small letters, 1 capitals, 2 signs */

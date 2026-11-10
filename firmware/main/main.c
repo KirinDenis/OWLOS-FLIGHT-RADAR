@@ -430,6 +430,35 @@ static void home_find(void)
 #define UPDATE_EVERY_MS (12u * 3600u * 1000u)
 #define UPDATE_RETRY_MS (30u * 60u * 1000u)   /* no answer, or not one: again in half an hour */
 
+/* --- counted on the site's map of boards, only when the owner allowed it (SET, COUNT ME, or the site's
+ * question): every 10 minutes "this build, this version", nothing else. where to is in the site's
+ * version.json, "stats": it says none, nothing is sent. server/ in the repository is that server --- */
+#define ALIVE_EVERY_MS (10u * 60u * 1000u)
+static uint8_t           s_help;           // 0 never asked, 1 allowed, 2 not (store_load_help). under s_lock
+static volatile int      s_help_new;       // the site changed it: the screen takes it
+static char              s_stats_url[64];  // from version.json, "": none. under s_lock
+
+static const char *board_name(void);
+
+static void alive_report(void)
+{
+    static uint32_t sent;                              // ms of the last report, 0: none yet
+    char base[sizeof s_stats_url];
+    lock();
+    const int help = s_help;
+    memcpy(base, s_stats_url, sizeof base);
+    unlock();
+    const uint32_t now = now_ms();
+    if (help != 1 || !base[0] || !net_up() || (sent && now - sent < ALIVE_EVERY_MS)) return;
+    sent = now ? now : 1;
+    char url[sizeof base + 16], body[80];
+    snprintf(url, sizeof url, "%s/api/alive", base);
+    snprintf(body, sizeof body, "{\"build\":\"%s\",\"version\":\"%s\"}", board_name(), FLIGHT_VERSION);
+    int status = 0;
+    net_post_json(url, body, &status);
+    ESP_LOGI(TAG, "counted on the map of boards: HTTP %d", status);
+}
+
 static void update_check(void)
 {
     static uint32_t asked;                             // ms of the last question, 0: never
@@ -446,8 +475,16 @@ static void update_check(void)
     for (const char *p = v; heard && *p; p++) heard = (*p >= '0' && *p <= '9') || *p == '.';   // digits and dots, or it is not one
     ESP_LOGI(TAG, "the site's version: HTTP %d, %s, this one %s", status, heard ? v : "none", FLIGHT_VERSION);
     if (!heard) return;
+    // where boards are counted: an https address and nothing odd in it, or none. an answer that filled the
+    // buffer may be cut in the middle of it: then none
+    char stats[sizeof s_stats_url] = "";
+    if (t.n < (int)sizeof buf - 1) json_str(buf, "stats", stats, sizeof stats);
+    int fine = !strncmp(stats, "https://", 8) && strlen(stats) < sizeof stats - 1;
+    for (const char *p = stats; fine && *p; p++) fine = *p > ' ' && *p != '"' && *p != '\\' && *p != '?' && *p != '#';
+    for (size_t n = strlen(stats); fine && n > 8 && stats[n - 1] == '/'; n--) stats[n - 1] = 0;   // "/api/alive" goes after it
     lock();
     snprintf(s_newest, sizeof s_newest, "%s", v);
+    snprintf(s_stats_url, sizeof s_stats_url, "%s", fine ? stats : "");
     unlock();
     if (ui_version_cmp(v, FLIGHT_VERSION) > 0) ESP_LOGI(TAG, "the site has a newer version: %s", v);
 }
@@ -702,6 +739,7 @@ static void fetch_task(void *arg)
             if (status == 429) every *= 3;            // too many requests: slow down
             if (status != 429) watch_lookup(&rd, server);   // on the free networks, FR24 or not
             update_check();
+            alive_report();
         }
         lock();                                        // the LED's no data: the WiFi set is not there, or no answer
         light_hold(&s_light, LIGHT_NODATA, configured && (demo || s_sky.status >= SKY_HTTP), now_ms());
@@ -741,7 +779,7 @@ static void say_cfg(void)
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
            "\"led\":%d,\"led_level\":%d,\"led_hold\":%d,\"led_near\":%d,\"led_red\":%d,\"version\":\"%s\",\"newest\":\"%s\","
            "\"uptime\":%u,\"ran\":%u,\"reset\":\"%s\",\"screen\":%d,"
-           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d}\n",
+           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d}\n",
            json_esc(s_sec.ssid, ssid, sizeof ssid), nets, (double)s_cfg.lat, (double)s_cfg.lon,
            json_esc(s_cfg.place, place, sizeof place), json_esc(s_cfg.country, country, sizeof country),
            s_cfg.source == SRC_FR24 ? "fr24" : "free", s_sec.key[0] ? "true" : "false", s_cfg.up, s_cfg.flip,
@@ -750,7 +788,7 @@ static void say_cfg(void)
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
            (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
-           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels);
+           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help);
     unlock();
 }
 
@@ -873,6 +911,13 @@ static void on_line(const char *line)
         if (json_num(j, SWITCHES[i].name, &v)) { *SWITCHES[i].on = v != 0; opted = 1; }
     if (json_num(j, "fl_lo", &v) && v >= 0 && v <= SCOPE_FL_MAX) { opt.fl_lo = (int16_t)v; opted = 1; }
     if (json_num(j, "fl_hi", &v) && v >= 0 && v <= SCOPE_FL_MAX) { opt.fl_hi = (int16_t)v; opted = 1; }
+    if (json_num(j, "help", &v) && v >= 0 && v <= 2) {     // the site's question, answered there
+        lock();
+        s_help = (uint8_t)v;
+        s_help_new = 1;
+        unlock();
+        store_save_help((int)v);
+    }
     char watch[WATCH_TEXT];
     int watched = json_str(j, "watch", watch, sizeof watch);   // "" empties it
     light_cfg_t light;
@@ -1105,6 +1150,7 @@ static void ui_task(void *arg)
     lock();
     s_ui.light = s_light_cfg;                          // what lights the LED on the back
     s_ui.opt = s_opt;
+    s_ui.help = s_help;                                // counted on the site's map: SET's COUNT ME
     unlock();
     led_init(light_red_gpio(&s_ui.light));
     s_ui.map = &s_map;                                 // the fetch task makes it, the scope draws it
@@ -1252,12 +1298,24 @@ static void ui_task(void *arg)
             unlock();
             store_save_opt(&s_ui.opt);
         }
+        if (s_help_new) {                              // counted on the map: the site's answer
+            lock();
+            s_ui.help = s_help;
+            s_help_new = 0;
+            unlock();
+        }
+        if (cmd.help) {                                // SET's COUNT ME
+            lock();
+            s_help = s_ui.help;
+            unlock();
+            store_save_help(s_ui.help);
+        }
         if (s_pick_new) {                              // tapped on the page: picked here too
             s_pick_new = 0;
             s_ui.sel = s_sel_told = s_pick;
         }
         if (page_there()) {                            // and what a finger did here goes there
-            if (cmd.cfg || cmd.opt) say_cfg();
+            if (cmd.cfg || cmd.opt || cmd.help) say_cfg();
             if (s_ui.sel != s_sel_told) {
                 s_sel_told = s_ui.sel;
                 printf("OWLOS SEL %06x\n", (unsigned)s_ui.sel);
@@ -1401,6 +1459,7 @@ void app_main(void)
     watch_set(&s_watch, watch);
     store_load_light(&s_light_cfg);
     store_load_opt(&s_opt);
+    s_help = (uint8_t)store_load_help();
     s_demo_on = !s_sec.ssid[0];                         // no WiFi set: the demo from the first frame
     sky_init(&s_sky, s_cfg.lat, s_cfg.lon);
     demo_init(&s_demo, range_km(&s_cfg), esp_random());

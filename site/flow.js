@@ -12,7 +12,7 @@ import { CORE_COMMANDS, CORE_GROUPS } from './console/commands.js';
 import { Terminal } from './term.js';
 import { Desk } from './win.js';
 import { BoardPaths, BOARD_GROUPS, boardCommands } from './board-console.js';
-import { startStats } from './stats.js';
+import { startStats, askHelp, helpAnswer, onHelp, reportFlash, reportCable } from './stats.js';
 
 const $ = (id) => document.getElementById(id);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -881,8 +881,25 @@ async function attach(link, port, who) {
   link.keep = setInterval(() => {
     link.send('OWLOS SKY ON').catch((e) => console.warn(e));
   }, 30000);
+  tellHelp(u, false);
+  askHelp();
   return u;
 }
+
+/* the visitor's answer about counting, for a board: it reports itself only with a 1. a board its owner
+ * answered on its own screen keeps that answer, unless the visitor answers here again */
+function tellHelp(u, again) {
+  const a = helpAnswer();
+  const want = a === 'yes' ? 1 : 2;
+  if (a && u.link && (again ? u.cfg?.help !== want : !u.cfg?.help)) {
+    u.link.send(`OWLOS SET {"help":${want}}`).catch((e) => console.warn(e));
+  }
+}
+onHelp(() => {
+  for (const u of here()) {
+    tellHelp(u, true);
+  }
+});
 
 /* the try running on each port. the browser's connect event, the look for returns, a click and the
  * start can all reach one port at once: the second waits for the first, the port is opened once */
@@ -1080,6 +1097,7 @@ async function flashing(port, build, name, erase, others) {
       }
       $('barstate').textContent = `FLASHING ${name.toUpperCase()} ${pct}%`;
     }, (t) => say(t, 'page', port));
+    reportFlash(build, newest);                        // counted for the map only when the visitor allowed it
   } finally {
     app.busy = null;
   }
@@ -1770,6 +1788,7 @@ fetch('version.json').then((r) => r.json()).then((v) => {
 }).catch((e) => console.warn(e));
 setInterval(showStates, 10000);                        // an answer that stopped coming shows by itself
 startStats(BOARDS);                                    // the boards out there, when our server answers
+setInterval(() => reportCable(here().length), 5 * 60000);   // how many are on this page's cable, when allowed
 hero.start().then(() => {
   requestAnimationFrame(tickAll);
   return comeBack();

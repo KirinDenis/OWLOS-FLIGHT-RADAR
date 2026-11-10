@@ -9,6 +9,11 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 - At a home in Rusia the board asks for no planes and no map: the screen says NOT AVAILABLE IN RUSIA.
   The country is the one OpenStreetMap gives for the home's point, asked once a home. Crimea and the other
   occupied parts of Ukraine are Ukraine there.
+- The map of boards on the site: how many boards were flashed from it, how many are online and how many are
+  on a cable to it now, by board, by version and by country. A board or a page is counted only when you
+  allow it: the page asks once, and on the board it is SET, DATA, COUNT ME. It tells only the country, the
+  board type and the version: no home, no WiFi name, no MAC, and the address it comes from is not kept.
+  Rusia is not counted and is plain land on the map.
 
 ## 0.11
 

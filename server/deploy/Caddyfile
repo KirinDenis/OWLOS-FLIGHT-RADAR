@@ -1,0 +1,17 @@
+# radar.owlos.sk: the counts of OWLOS Flight Radar boards (RadarStats on 127.0.0.1:5088).
+# goes into /etc/caddy/sites/radar-stats.caddy, which the Caddyfile imports (ViewOwl's deploy writes the
+# Caddyfile anew, the sites folder stays). no access log for it: Caddy keeps no address.
+# handle blocks, not bare directives: Caddy runs respond before reverse_proxy, and a bare respond 404
+# would answer the API too. the longest path wins, the one with none last
+radar.owlos.sk {
+	# the visits are for us, asked on the machine itself, never from outside
+	handle /api/visits {
+		respond 404
+	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:5088
+	}
+	handle {
+		respond 404
+	}
+}

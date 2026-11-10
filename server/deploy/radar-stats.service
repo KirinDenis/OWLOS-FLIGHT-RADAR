@@ -1,0 +1,26 @@
+[Unit]
+Description=RadarStats: the counts of OWLOS Flight Radar boards
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radarstats
+Group=radarstats
+WorkingDirectory=/opt/radar-stats
+ExecStart=/usr/bin/dotnet /opt/radar-stats/RadarStats.dll
+Restart=always
+RestartSec=5
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=ASPNETCORE_ENVIRONMENT=Production
+# what it may touch: its own data folder, nothing else
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/radar-stats/data
+# about 160 MB in use, most of it the country table: past this the service is restarted, the machine stays
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

@@ -79,7 +79,7 @@ void list_draw(ui_t *u, canvas_t *cv)
 
 enum { S_RANGE, S_GROUND, S_WATCH, S_DIST, S_ALT, S_UP, S_FLIP, S_LABELS, S_THEME, S_LOOK, S_MAP,
        S_FL_LO, S_FL_HI, S_BLOCK, S_AUTOPILOT, S_VECTORS, S_BEAM, S_CLOCK, S_LOST, S_CONFLICT,
-       S_SOURCE, S_SERVER, S_HOME, S_WIFI,
+       S_SOURCE, S_SERVER, S_HOME, S_WIFI, S_HELP,
 #if RADAR_HAS_LED
        S_LED_SOS, S_LED_RANGE, S_LED_UP, S_LED_DOWN, S_LED_NEAR, S_LED_NEAR_KM, S_LED_NODATA, S_LED_LEVEL, S_LED_HOLD,
        S_LED_TEST,
@@ -124,6 +124,8 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "FREE SERVER", "tried first, others back up",  K_BTN, T_DATA },
     { "HOME",        "",                             UI_WIFI_PAGE ? K_BTN : K_INFO, T_DATA },   /* typed on the WiFi keyboard */
     { "WIFI",        "",                             UI_WIFI_PAGE ? K_BTN : K_INFO, T_DATA },
+    /* the site's map of boards: country and board type, only when on. the page's radar has no board to count */
+    { "COUNT ME",    "country, board: the site's map", K_BTN, RADAR_WEB ? -1 : T_DATA },
 #if RADAR_HAS_LED
     /* the LED on the back (core/light.h): each event on or off, in the order they win */
     { "SOS",         "7500 7600 7700 round home: red", K_BTN, T_LED },
@@ -231,6 +233,7 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_WIFI:   snprintf(b, (size_t)sz, u->net.configured ? "CHANGE" : "SET UP"); break;
     case S_HOME:   snprintf(b, (size_t)sz, "CHANGE"); break;
     case S_WATCH:  snprintf(b, (size_t)sz, u->watch.n ? "CHANGE" : "SET UP"); break;
+    case S_HELP:   snprintf(b, (size_t)sz, u->help == 1 ? "ON" : "OFF"); break;
     case S_ABOUT:  if (ui_update(u)) snprintf(b, (size_t)sz, "NEW %s", u->newest); else snprintf(b, (size_t)sz, "OPEN"); break;
 #if RADAR_HAS_LED
     case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA:
@@ -430,6 +433,11 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
     case S_WIFI:   wifi_open(u, cmd); return;
     case S_HOME:   home_open(u); return;
     case S_WATCH:  watch_open(u); return;
+    case S_HELP:                                       // asked or not, a tap is an answer
+        u->help = u->help == 1 ? 2 : 1;
+        toast(u, u->help == 1 ? "COUNTED: THANK YOU" : "NOT COUNTED");
+        cmd->help = 1;
+        return;
     case S_ABOUT:  about_open(u); return;
 #if RADAR_HAS_LED
     case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA:

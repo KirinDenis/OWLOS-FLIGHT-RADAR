@@ -20,7 +20,8 @@ cp -r site/. "$OUT/"
 cp CHANGES.md "$OUT/"
 cp tools/stats-sample.json "$OUT/"             # made-up counts for a look at the stats here: index.html?stats=sample
 cp -r shots/. "$OUT/shots/"
-printf '{"version":"%s"}\n' "$VER" > "$OUT/version.json"
+STATS=$(tr -d ' \r\n' < server/public-url.txt 2>/dev/null || true)   # as pages.yml does it
+printf '{"version":"%s","stats":"%s"}\n' "$VER" "$STATS" > "$OUT/version.json"
 tr -d '\r' < .github/make-manifests.sh > "$OUT/.m.sh"
 bash "$OUT/.m.sh" "$OUT/fw" "$VER, local" > /dev/null
 rm "$OUT/.m.sh"

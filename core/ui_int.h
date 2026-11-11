@@ -68,7 +68,11 @@ extern const theme_t *TH;
 #define LOOK_W   62           /* the look's button: top right of the scope, or of the square map */
 #define LOOK_H   20
 #define LOOK_Y   2
-#define DOTS_W   24           /* the square map's three dots: the panel in and out */
+#define DOTS_W   24           /* three dots, the panel in and out: the square map's, the radar's on a wide panel */
+/* the panel's letters go with its width, not with one board or another: the 2.8"'s 91 pixels take the
+ * small ones, the wide panels (the 3.5" and the RPi LCD, the 4.3", the 5" and 7", the Tab5: 171 to 260)
+ * the next size up and more in a row. its rows go with the height too (ui_scope.c) */
+#define PANEL_WIDE (PW >= 150)
 
 /* setup and list: the whole screen. on the round glass the corners are not there, so the pages
  * keep to the square inside the circle (PG_L..PG_R), rows are shorter and say less */
@@ -133,14 +137,27 @@ extern const char *const LOOK_NAME[LOOKS];
 static inline int square_look(const ui_t *u) { return !RADAR_ROUND && u->cfg.look != LOOK_RADAR; }
 static inline int view_up(const ui_t *u) { return square_look(u) ? 0 : u->cfg.up; }   /* what is at the top */
 /* the square map fills the screen, home in its middle. the panel slides in over its right side
- * from the three dots, and by itself while a plane is picked */
-static inline int panel_shown(const ui_t *u) { return !square_look(u) || u->panel_open || u->sel; }
-static inline int view_cx(const ui_t *u) { return square_look(u) ? GFX_W / 2 : SCX; }
-static inline int view_right(const ui_t *u) { return square_look(u) && !panel_shown(u) ? GFX_W : PX - 2; }
+ * from the three dots, and by itself while a plane is picked. the radar has the panel beside the
+ * scope; its three dots, in the panel's corner, take it away and the scope goes to the middle of
+ * the screen. a picked plane brings it back for as long as it is picked */
+static inline int panel_shown(const ui_t *u)
+{
+    if (u->t_panel) return u->t_panel - 1;          /* a finger turns or zooms: nothing moves under it till it lifts */
+    return square_look(u) ? u->panel_open || u->sel : RADAR_ROUND || !u->bare || u->sel;
+}
+static inline int view_cx(const ui_t *u) { return square_look(u) || !panel_shown(u) ? GFX_W / 2 : SCX; }
+static inline int view_right(const ui_t *u) { return !panel_shown(u) ? GFX_W : PX - 2; }
+/* the scope's middle on the glass: G_SCX beside the panel, else moved by the layout's pixels in the
+ * glass's, rounded (GFX_Z alone floors, 3/4 of a pixel off on the 5"). the disc and the grid behind it */
+static inline int scope_glass_cx(const ui_t *u) { return G_SCX + (GFX_Z(2 * (view_cx(u) - SCX)) + 1) / 2; }
+/* the radar's three dots: the top right of the screen, the corner of the panel or where it was */
+#define RDOTS_W (PANEL_WIDE ? DOTS_W : 18)    /* the 2.8"'s panel is narrow: its title needs the room */
+#define RDOTS_X (GFX_W - 6 - RDOTS_W)
 static inline int look_w(const ui_t *u) { return square_look(u) ? LOOK_W : LOOK_W - 10; }   /* the radar's corner is narrower */
 static inline int look_x(const ui_t *u)
 {
-    return square_look(u) ? view_right(u) - 6 - DOTS_W - 4 - LOOK_W : PX - 9 - look_w(u);
+    if (square_look(u)) return view_right(u) - 6 - DOTS_W - 4 - LOOK_W;
+    return panel_shown(u) ? PX - 9 - look_w(u) : RDOTS_X - 4 - look_w(u);
 }
 
 /* helpers (ui.c) */
@@ -233,8 +250,8 @@ int  about_hit(const ui_t *u, int x, int y);
 void about_act(ui_t *u, int hit);
 typedef struct { int x, y, w, h; } note_box_t;
 int  update_note_box(const ui_t *u, note_box_t *b);  /* where the note is now, 0: not shown */
-void update_note(ui_t *u, canvas_t *cv);             /* the square looks and the round glass: a card */
-void update_text(const ui_t *u, char *buf, int sz);  /* NEW VERSION 0.4 */
+void update_note(ui_t *u, canvas_t *cv);             /* the radar panel's title, else a card */
+void update_text(const ui_t *u, char *buf, int sz, int short_form);   /* NEW VERSION 0.4, short NEW 0.4 */
 
 #define CAL_POINTS 5
 extern int CAL_PT[CAL_POINTS][2];

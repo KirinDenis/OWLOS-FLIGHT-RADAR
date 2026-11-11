@@ -29,7 +29,10 @@ int ui_update(const ui_t *u)
     return ui_version && u->newest[0] && ui_version_cmp(u->newest, ui_version) > 0;
 }
 
-void update_text(const ui_t *u, char *buf, int sz) { snprintf(buf, (size_t)sz, "NEW VERSION %s", u->newest); }
+void update_text(const ui_t *u, char *buf, int sz, int short_form)
+{
+    snprintf(buf, (size_t)sz, short_form ? "NEW %s" : "NEW VERSION %s", u->newest);
+}
 
 void about_open(ui_t *u)
 {

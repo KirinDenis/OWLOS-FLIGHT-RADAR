@@ -63,6 +63,7 @@ typedef struct {
 void scope_opt_defaults(scope_opt_t *o);
 float range_km(const fr_cfg_t *c);                 /* the radius of the scope */
 float unit_km(int dist_unit);                      /* km in one of DIST_* */
+const char *unit_name(int dist_unit);              /* KM, NM or MI */
 
 /* a network the board heard when it looked round */
 typedef struct {
@@ -109,6 +110,7 @@ typedef struct {
     uint8_t opt;           /* ui_t.opt changed: use it, keep it */
     uint8_t light_test;    /* the LED's red, green, blue */
     uint8_t help;          /* ui_t.help changed: use it, keep it */
+    uint8_t bare;          /* ui_t.bare changed: keep it */
 } ui_cmd_t;
 
 #define TRAIL_GAP INT16_MIN       /* a trail point off the scope: the trail breaks there */
@@ -142,6 +144,7 @@ typedef struct {
     int      t_down, t_x0, t_y0, t_x, t_y, t_moved, t_long, t_ns, t_hit, t_reps, t_rpt, t_scroll0;
     uint32_t t_since, t_rep;
     int      t_turn;       /* the finger turns the map (1, on the rim) or zooms it (2, inside) */
+    uint8_t  t_panel;      /* 1 + whether the panel was shown when that began: the scope stays put under the finger, 0 none */
     float    t_a0, t_r0, t_up0, t_range0;
     int16_t  t_sx[16], t_sy[16];
     /* touch alignment */
@@ -156,6 +159,7 @@ typedef struct {
     char     toast[40];
     uint32_t menu_until;   /* round glass: the HUE LIST SET row shows till then */
     uint8_t  panel_open;   /* the square map: the panel slid in over it (the three dots) */
+    uint8_t  bare;         /* the radar without its panel, the scope in the middle (its three dots). the firmware keeps it */
     /* the WiFi page and its keyboard. the keyboard types the home and the watch list too */
     int      wifi_scroll;
     char     wifi_ssid[33];

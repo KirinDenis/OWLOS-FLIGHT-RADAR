@@ -69,8 +69,9 @@
 #define GFX_SCALE_SHIFT 2
 #define RADAR_RGB_BUS 1
 #elif RADAR_DISPLAY == DISPLAY_4827S043_480x272
-/* the 4.3" 480x272: a layout of its own, one pixel one pixel. the 2.8"'s choices, as everything
- * under 320 rows takes: its letters, its rows, the panel wider */
+/* the 4.3" 480x272: a layout of its own, one pixel one pixel. the 2.8"'s choices where they go by the
+ * height (the pages, the keyboard, the gear), as everything under 320 rows takes. its panel, 219 wide,
+ * takes the wide panels' letters (PANEL_WIDE), in rows a little shorter */
 #define GFX_W 480
 #define GFX_H 272
 #define RADAR_RGB_BUS 1

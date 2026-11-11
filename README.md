@@ -112,7 +112,8 @@ The map under them comes from OpenStreetMap.
 
 ## Where to tap
 
-The pictures are the 3.5" board, the 2.8" one has the same screens a little smaller.
+The pictures are the 3.5" board. The 2.8" one has the same screens a little smaller, its panel in
+smaller letters and its list of the nearest planes without their heights.
 
 ### The radar
 
@@ -123,6 +124,10 @@ The pictures are the 3.5" board, the 2.8" one has the same screens a little smal
   north up.
 - **Drag inside** to zoom: away from home in, toward home out. BOOT steps through 5, 10, 25, 50, 100 and 200.
 - **The look**, top right, goes round RADAR, MAP and CLASSIC.
+- **The three dots**, in the corner, take the panel away: the scope moves to the middle of the screen. A
+  picked plane brings the panel back while it is picked, and the dots take it away again with the plane.
+  Tapped once more, they bring it back to stay. The board remembers which way it was left; on the site
+  the dots of the board's screen do the same.
 - **HUE** changes the colours, **LIST** shows every flight, **SET** has the settings.
 - **Colour is height**: grey on the ground, warm under 10 000 ft, the theme's colour up to 25 000, white
   above. Emergency squawks blink.
@@ -251,8 +256,8 @@ The pictures are the 3.5" board, the 2.8" one has the same screens a little smal
   key is stored, and a QR code to the site with its address under it.
 - A board on WiFi asks the site which version it has once it is up, then twice a day (`version.json`
   next to the page). When the site's is newer, a small **NEW VERSION** note shows: in the panel's title
-  over the radar, under the town's card over the map, under home on the round glass. A tap on it opens
-  ABOUT. Nothing else changes.
+  over the radar (NEW and the number on the 2.8"), under the town's name over the map and over the radar
+  without its panel, under home on the round glass. A tap on it opens ABOUT. Nothing else changes.
 - To update: the site on a computer, CONNECT & FLASH, no to erase.
 
 ![The radar with the NEW VERSION note in the panel's title](shots/guide/news.png)
@@ -348,8 +353,9 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   `country`), `src`, whether a `key` is stored, `up`, `flip`, `theme`, `look`, `map`, `ground`, `watch`,
   `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`, `conflict`, `fl_lo`, `fl_hi`, `utc` (seconds
   since 1970, 0 not known), `led`, `led_level`, `led_hold`, `led_near`, `led_red`, `version`, `newest` (the site's, `""` not heard
-  yet), `uptime` and `ran` in seconds, `reset`, and `screen` on the
-  2.8" boards. Never the password, never the key.
+  yet), `uptime` and `ran` in seconds, `reset`, `help` (counted on the map of boards: 0 never asked, 1 yes,
+  2 no), `bare` (1 the radar without its panel), and `screen` on the 2.8" boards. Never the password,
+  never the key.
 - `OWLOS SET {...}` with any of `ssid`, `pass`, `key`, `lat`, `lon`, `place`, `country`, `src` (`free` or
   `fr24`), `up` (degrees), `flip`, `theme` (0 to 4), `look` (0 radar, 1 map, 2 classic), `map`, `ground`
   (1 planes on the ground shown, 0 hidden), `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`,
@@ -358,7 +364,8 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   lights it, added up: 1 SOS, 2 in range, 4 take-off, 8 landing, 16 any near, 32 no data), `led_near`
   (1, 2, 5 or 10 of the distance unit), `led_level` (0 low, 1 mid,
   2 high), `led_hold` (0 till touched, 1 10 s, 2 while it lasts), `led_red` (4 or 22, the red one's GPIO),
-  `led_test` (1: red, green, blue once),
+  `led_test` (1: red, green, blue once), `help` (0, 1 or 2, as in GET), `bare` (1 the radar without its
+  panel, 0 with it),
   `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
   What is left out stays as it is. Answered with `OWLOS OK` or `OWLOS ERR <why>`.
 

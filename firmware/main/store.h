@@ -31,6 +31,9 @@ void store_save_opt(const scope_opt_t *o);
  * older firmware flashed back finds the rest as it left it */
 int  store_load_help(void);
 void store_save_help(int help);
+/* the radar without its panel (its three dots): 1, or 0 with the panel. kept by itself like help */
+int  store_load_bare(void);
+void store_save_bare(int bare);
 /* how long this run has lasted, s, saved once a minute: the next start says how long the run
  * before it was, whatever ended it (a reset by the USB line or a power cut too) */
 uint32_t store_load_ran(void);

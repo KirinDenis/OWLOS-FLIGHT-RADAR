@@ -200,12 +200,11 @@ static int led_event(int i)
 static void value_text(const ui_t *u, int i, char *b, int sz)
 {
     const fr_cfg_t *c = &u->cfg;
-    static const char *const DU[3] = { "KM", "NM", "MI" };
     b[0] = 0;
     switch (i) {
     case S_RANGE:  fmt_dist(u, range_km(c), b, sz); break;
     case S_GROUND: snprintf(b, (size_t)sz, c->ground ? "SHOW" : "HIDE"); break;
-    case S_DIST:   snprintf(b, (size_t)sz, "%s", DU[c->dist_unit < 3 ? c->dist_unit : 0]); break;
+    case S_DIST:   snprintf(b, (size_t)sz, "%s", unit_name(c->dist_unit)); break;
     case S_ALT:    snprintf(b, (size_t)sz, c->alt_unit ? "M" : "FT"); break;
     case S_UP:     if (c->up) snprintf(b, (size_t)sz, "%03d\xC2\xB0", c->up); else snprintf(b, (size_t)sz, "NORTH"); break;
     case S_FLIP:   snprintf(b, (size_t)sz, c->flip ? "FLIPPED" : "NORMAL"); break;
@@ -234,12 +233,12 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_HOME:   snprintf(b, (size_t)sz, "CHANGE"); break;
     case S_WATCH:  snprintf(b, (size_t)sz, u->watch.n ? "CHANGE" : "SET UP"); break;
     case S_HELP:   snprintf(b, (size_t)sz, u->help == 1 ? "ON" : "OFF"); break;
-    case S_ABOUT:  if (ui_update(u)) snprintf(b, (size_t)sz, "NEW %s", u->newest); else snprintf(b, (size_t)sz, "OPEN"); break;
+    case S_ABOUT:  if (ui_update(u)) update_text(u, b, sz, 1); else snprintf(b, (size_t)sz, "OPEN"); break;
 #if RADAR_HAS_LED
     case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA:
         snprintf(b, (size_t)sz, u->light.on[led_event(i)] ? "ON" : "OFF");
         break;
-    case S_LED_NEAR_KM: snprintf(b, (size_t)sz, "%d %s", light_near_units(&u->light), DU[c->dist_unit < 3 ? c->dist_unit : 0]); break;
+    case S_LED_NEAR_KM: snprintf(b, (size_t)sz, "%d %s", light_near_units(&u->light), unit_name(c->dist_unit)); break;
     case S_LED_LEVEL: {
         static const char *const L[LIGHT_LEVELS] = { "LOW", "MID", "HIGH" };
         snprintf(b, (size_t)sz, "%s", L[u->light.level < LIGHT_LEVELS ? u->light.level : LIGHT_MID]);

@@ -162,6 +162,9 @@ class Screen {
     this.apply({ range: c.range, up: c.up, theme: c.theme, look: c.look, map: c.map, ground: c.ground, dist_unit: c.dist_unit, alt_unit: c.alt_unit, labels: c.labels });
     Object.assign(this.opts, { vectors: c.vectors, beam_step: c.beam_step, clock: c.clock, block: c.block, autopilot: c.autopilot, lost: c.lost, conflict: c.conflict, fl_lo: c.fl_lo, fl_hi: c.fl_hi });
     this.setOpts();
+    if (c.bare !== undefined) {                        // the radar without its panel: a board before 0.13 does not say
+      this.m._twin_bare(c.bare);
+    }
   }
 
   /* a board's planes, line by line as it sends them */

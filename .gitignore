@@ -23,3 +23,18 @@ server/publish/
 web/twin*.js
 web/twin*.wasm
 _public/
+# the preview's pictures (tools/preview/BUILD.BAT, tools/Guide/GUIDE.BAT) stay on the PC, all but
+# the ones the README and the site show. a picture they start to show gets a line here, or it
+# never reaches the site (the site is built from what git keeps)
+/shots/**
+!/shots/**/
+!/shots/promo.gif
+!/shots/promo.mp4
+!/shots/promo.png
+!/shots/guide/*.png
+!/shots/02-live.png
+!/shots/st7796/02-live.png
+!/shots/ili9486/03-picked-heavy.png
+!/shots/gc9a01/03-picked-heavy.png
+!/shots/crowadv50/02-live.png
+!/shots/esp4827s043/02-live.png

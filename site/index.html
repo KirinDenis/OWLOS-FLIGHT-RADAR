@@ -213,7 +213,9 @@
   .mapzoom button:hover:not(:disabled) { border-color: var(--prim); box-shadow: 0 0 8px rgba(92, 225, 255, .35); }
   .mapzoom button:disabled { opacity: .35; cursor: default; }
   #worldlegend .hint { margin-left: auto; color: var(--dim); opacity: .75; }
-  .worldcredit { margin: 8px 0 0; color: var(--dim); font: 400 11px var(--mono); opacity: .8; }
+  .countryrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 10px 0 0; }
+  .countryrow #countrylist { flex: 1 1 auto; margin: 0; }
+  .worldcredit { margin: 0 0 0 auto; color: var(--dim); font: 400 11px var(--mono); opacity: .8; white-space: nowrap; }
   .helpask {
     position: fixed; z-index: 30; right: 16px; bottom: 16px; width: min(440px, calc(100vw - 32px)); padding: 16px 18px;
     background: #050e22; border: 1px solid var(--prim); border-radius: 8px; box-shadow: 0 10px 34px rgba(0, 0, 0, .6), 0 0 22px rgba(92, 225, 255, .18);
@@ -422,8 +424,10 @@
     <div class="worldpanel">
       <div id="worldmap"></div>
       <div id="worldlegend"></div>
-      <ul id="countrylist" aria-label="Boards flashed, by country"></ul>
-      <p class="worldcredit">IP to country by <a href="https://db-ip.com">DB-IP</a></p>
+      <div class="countryrow">
+        <ul id="countrylist" aria-label="Boards flashed, by country"></ul>
+        <p class="worldcredit">IP to country by <a href="https://db-ip.com">DB-IP</a></p>
+      </div>
     </div>
     <div class="worldpanel" id="boardstats"></div>
   </div>

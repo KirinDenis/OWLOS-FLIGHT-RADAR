@@ -85,7 +85,7 @@ EMSCRIPTEN_KEEPALIVE uint8_t *twin_frame(uint32_t now, uint32_t utc, int down, i
     memset(&cmd, 0, sizeof cmd);
     s_ui.snap = s_sky;
     ui_touch(&s_ui, down, x * GFX_W / GFX_PW, y * GFX_H / GFX_PH, 0, 0, now, &cmd);
-    if (cmd.cfg || cmd.opt) {
+    if (cmd.cfg || cmd.opt || cmd.bare) {
         s_changed |= TWIN_CFG;
     }
     s_ui.net.fetched = s_answered;
@@ -165,10 +165,18 @@ EMSCRIPTEN_KEEPALIVE const char *twin_set_json(void)
     const scope_opt_t *o = &s_ui.opt;
     snprintf(b, sizeof b, "{\"up\":%d,\"theme\":%d,\"look\":%d,\"map\":%d,\"ground\":%d,\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,"
                           "\"labels\":%d,\"vectors\":%d,\"beam_step\":%d,\"clock\":%d,\"block\":%d,\"autopilot\":%d,\"lost\":%d,"
-                          "\"conflict\":%d,\"fl_lo\":%d,\"fl_hi\":%d}",
+                          "\"conflict\":%d,\"fl_lo\":%d,\"fl_hi\":%d,\"bare\":%d}",
              c->up, c->theme, c->look, c->map, c->ground, (double)c->range, c->dist_unit, c->alt_unit, c->labels,
-             o->vectors, o->beam_step, o->clock, o->block, o->autopilot, o->lost, o->conflict, o->fl_lo, o->fl_hi);
+             o->vectors, o->beam_step, o->clock, o->block, o->autopilot, o->lost, o->conflict, o->fl_lo, o->fl_hi, s_ui.bare);
     return b;
+}
+
+// the radar without its panel (its three dots), as the board keeps it. a finger on the page wins, as above
+EMSCRIPTEN_KEEPALIVE void twin_bare(int bare)
+{
+    if (!s_ui.t_down) {
+        s_ui.bare = (uint8_t)(bare == 1);
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE uint32_t twin_sel(void) { return s_ui.sel; }

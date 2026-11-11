@@ -68,6 +68,12 @@ static const float TO_KM[3] = { 1.0f, 1.852f, 1.609344f };
 
 float unit_km(int dist_unit) { return TO_KM[dist_unit >= 0 && dist_unit < 3 ? dist_unit : 0]; }
 
+const char *unit_name(int dist_unit)
+{
+    static const char *const N[3] = { "KM", "NM", "MI" };
+    return N[dist_unit >= 0 && dist_unit < 3 ? dist_unit : 0];
+}
+
 float range_km(const fr_cfg_t *c)
 {
     return clampf(c->range, RANGE_MIN, RANGE_MAX) * TO_KM[c->dist_unit < 3 ? c->dist_unit : 0];
@@ -154,10 +160,9 @@ void fmt_alt(const ui_t *u, const plane_t *p, char *buf, int sz, int short_form)
 void fmt_dist(const ui_t *u, float km, char *buf, int sz)
 {
     static const float K[3] = { 1.0f, 1.0f / 1.852f, 1.0f / 1.609344f };
-    static const char *N[3] = { "KM", "NM", "MI" };
     int du = u->cfg.dist_unit < 3 ? u->cfg.dist_unit : 0;
     float v = km * K[du];
-    snprintf(buf, (size_t)sz, v < 10.0f ? "%.1f %s" : "%.0f %s", (double)v, N[du]);
+    snprintf(buf, (size_t)sz, v < 10.0f ? "%.1f %s" : "%.0f %s", (double)v, unit_name(du));
 }
 
 const char *compass8(float deg)
@@ -305,10 +310,20 @@ void page_header(canvas_t *cv, const char *title, const char *right, uint32_t co
 static uint32_t s_bgrow[GFX_PH];
 static uint16_t s_vigx[GFX_PW], s_vigy[GFX_PH];
 static int16_t  s_gridcols[GFX_PW / BG_GRID + 2];
-static int      s_ngrid;
+static int      s_ngrid, s_grid_cx = -1;
 static struct { int16_t x, y; uint8_t a; } s_stars[128];
 static int      s_nstars, s_bg_theme = -1;
 #define VIG_W GFX_Z(56)
+
+/* the grid's columns: one goes through the scope's middle, wherever that is (the radar without its
+ * panel has it in the middle of the screen). made again only when it moves: ui_frame, between frames */
+static void grid_columns(int cx)
+{
+    if (cx == s_grid_cx) return;
+    s_ngrid = 0;
+    for (int x = cx % BG_GRID; x < GFX_PW; x += BG_GRID) s_gridcols[s_ngrid++] = (int16_t)x;
+    s_grid_cx = cx;
+}
 
 static void build_background(void)
 {
@@ -318,13 +333,12 @@ static void build_background(void)
         float v = ((float)y - GFX_PH / 2.0f) / (GFX_PH * 7.0f / 12.0f);
         s_vigy[y] = (uint16_t)(256.0f * clampf(1.0f - 0.45f * v * v, 0.3f, 1.0f));
     }
-    s_ngrid = 0;
     for (int x = 0; x < GFX_PW; x++) {
         int e = x < GFX_PW / 2 ? x : GFX_PW - 1 - x;
         float v = e < VIG_W ? 1.0f - (float)e / VIG_W : 0.0f;
         s_vigx[x] = (uint16_t)(256.0f * (1.0f - 0.4f * v * v));
-        if (((x - G_SCX + 100 * BG_GRID) % BG_GRID) == 0) s_gridcols[s_ngrid++] = (int16_t)x;
     }
+    grid_columns(s_grid_cx < 0 ? G_SCX : s_grid_cx);
     s_nstars = 0;
     for (int y = 0; y < GFX_H; y++)
         for (int x = 0; x < GFX_W && s_nstars < 128; x++) {
@@ -397,6 +411,7 @@ void ui_frame(ui_t *u, uint32_t now)
     u->now = now;
     u->beam = wrap360((float)(now % BEAM_TURN_MS) * (360.0f / BEAM_TURN_MS));
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
+    grid_columns(scope_glass_cx(u));                        // the background's grid through the scope's middle
     scope_frame(u);
 }
 
@@ -431,6 +446,7 @@ void ui_start_calibration(ui_t *u)
     u->cal_step = 0;
     u->cal_n = 0;
     u->t_down = 0;
+    u->t_turn = u->t_panel = 0;
     u->cal_wait = 1;
 }
 
@@ -619,9 +635,20 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
             if (RADAR_ROUND) u->menu_until = u->now + ROUND_MENU_MS;   // stays up for the next look
             return;
         }
-        if (hit == HIT_DOTS) {                         // the square map's panel: in, or out again
-            u->panel_open ^= 1;
-            if (!u->panel_open) u->sel = 0;
+        if (hit == HIT_DOTS) {
+            if (square_look(u)) {                      // the square map's panel: in, or out again
+                u->panel_open ^= 1;
+                if (!u->panel_open) u->sel = 0;
+            } else {                                   // the radar's: what is shown goes, what is away comes
+                const uint8_t was = u->bare;
+                if (panel_shown(u)) {                  // kept, or there for the picked plane: away, and the plane let go
+                    u->bare = 1;
+                    u->sel = 0;
+                } else {
+                    u->bare = 0;
+                }
+                cmd->bare = u->bare != was;
+            }
             return;
         }
         if ((hit == HIT_BTN + 0 || hit == HIT_PANEL) && u->sel) {   // picked: the next nearest (round: its card)
@@ -661,6 +688,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
         u->t_y0 = u->t_y = y;
         u->t_since = now;
         u->t_moved = u->t_long = u->t_ns = u->t_reps = u->t_rpt = u->t_turn = 0;
+        u->t_panel = 0;
         u->t_hit = hit_at(u, x, y);
         u->t_scroll0 = u->view == VIEW_LIST ? u->list_scroll : u->view == VIEW_WIFI ? u->wifi_scroll : u->setup_scroll;
     }
@@ -678,6 +706,9 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
                  * pinches against home: what was under the finger stays under it */
                 float dx = (float)(u->t_x0 - view_cx(u)), dy = (float)(SCY - u->t_y0), r = sqrtf(dx * dx + dy * dy);
                 u->t_turn = r >= PR - 4 && !square_look(u) ? 1 : r >= 10 ? 2 : 0;   // the flat map has no rim: north stays up
+                /* a plane picked or let go meanwhile (it flew off, a watched one came, the site picked one)
+                 * would bring the panel or take it, and the scope would jump under the finger: it waits */
+                if (u->t_turn) u->t_panel = (uint8_t)(1 + panel_shown(u));
                 u->t_a0 = atan2f(dx, dy) / D2R;
                 u->t_r0 = r;
                 u->t_up0 = (float)u->cfg.up;
@@ -739,6 +770,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
             u->view = dx < 0 ? VIEW_LIST : VIEW_SETUP;  // a swipe on the panel
         }
         u->t_turn = 0;
+        u->t_panel = 0;                                // the panel goes as the plane says again
         u->t_hit = HIT_NONE;
     }
 }

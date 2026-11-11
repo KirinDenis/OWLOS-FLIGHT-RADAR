@@ -192,6 +192,17 @@ int main(int argc, char **argv)
     pick("OWL205");
     shot("05-picked-climbing");
     ui.sel = 0;
+#if !RADAR_ROUND && RADAR_HAS_TOUCH
+    tap(RDOTS_X + RDOTS_W / 2, LOOK_Y + LOOK_H / 2);    // the radar's three dots: the panel away, the scope in the middle
+    printf("radar after the dots: %s\n", ui.bare ? "no panel" : "with its panel");
+    shot("43-radar-bare");
+    pick("OWL77H");                                  // a picked plane brings the panel back while it is picked
+    shot("44-radar-bare-picked");
+    tap(RDOTS_X + RDOTS_W / 2, LOOK_Y + LOOK_H / 2);    // the dots, lit: what is shown goes, and the plane is let go
+    printf("the dots while picked: %s, %s\n", ui.bare ? "no panel" : "with its panel", ui.sel ? "still picked" : "let go");
+    tap(RDOTS_X + RDOTS_W / 2, LOOK_Y + LOOK_H / 2);    // and again: the panel back, kept
+    printf("radar after the dots again: %s\n", ui.bare ? "no panel" : "with its panel");
+#endif
 
     ui.cfg.up = 90;                                  // the screen stands facing east
     fly(5);
@@ -361,6 +372,7 @@ int main(int argc, char **argv)
         tap(GFX_W / 2, LIST_Y0 + 3 * NET_H + NET_H / 2);  // Cafe Corner, one the board remembers
         printf("picked %s, saved: %s\n", ui.wifi_ssid, ui.view == VIEW_MAIN ? "joins, no keyboard" : "the keyboard");
         ui.view = VIEW_WIFI;
+        ui.toast_until = 0;                          // its JOINING THE WIFI would stay over the next pages' shots
         press_bar(1, 2);                             // BACK
         ui.net.n_aps = 0;
         ui.net.scan = SCAN_NONE;

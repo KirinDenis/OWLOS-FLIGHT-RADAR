@@ -201,6 +201,18 @@ void store_save_help(int help)
     save_blob("help", &v, sizeof v);
 }
 
+int store_load_bare(void)
+{
+    uint8_t v = 0;
+    return load_blob(NS, "bare", &v, sizeof v) && v == 1;
+}
+
+void store_save_bare(int bare)
+{
+    uint8_t v = bare ? 1 : 0;
+    save_blob("bare", &v, sizeof v);
+}
+
 uint32_t store_load_ran(void)
 {
     nvs_handle_t h;

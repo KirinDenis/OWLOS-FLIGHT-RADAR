@@ -437,6 +437,9 @@ static void home_find(void)
 static uint8_t           s_help;           // 0 never asked, 1 allowed, 2 not (store_load_help). under s_lock
 static volatile int      s_help_new;       // the site changed it: the screen takes it
 static char              s_stats_url[64];  // from version.json, "": none. under s_lock
+/* the radar without its panel, the scope in the middle (its three dots, or the site): kept like help */
+static uint8_t           s_bare;           // store_load_bare. under s_lock
+static volatile int      s_bare_new;       // the site changed it: the screen takes it
 
 static const char *board_name(void);
 
@@ -779,7 +782,7 @@ static void say_cfg(void)
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
            "\"led\":%d,\"led_level\":%d,\"led_hold\":%d,\"led_near\":%d,\"led_red\":%d,\"version\":\"%s\",\"newest\":\"%s\","
            "\"uptime\":%u,\"ran\":%u,\"reset\":\"%s\",\"screen\":%d,"
-           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d}\n",
+           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d}\n",
            json_esc(s_sec.ssid, ssid, sizeof ssid), nets, (double)s_cfg.lat, (double)s_cfg.lon,
            json_esc(s_cfg.place, place, sizeof place), json_esc(s_cfg.country, country, sizeof country),
            s_cfg.source == SRC_FR24 ? "fr24" : "free", s_sec.key[0] ? "true" : "false", s_cfg.up, s_cfg.flip,
@@ -788,7 +791,7 @@ static void say_cfg(void)
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
            (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
-           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help);
+           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare);
     unlock();
 }
 
@@ -917,6 +920,13 @@ static void on_line(const char *line)
         s_help_new = 1;
         unlock();
         store_save_help((int)v);
+    }
+    if (json_num(j, "bare", &v) && (v == 0 || v == 1)) {   // the radar's panel away or back, from the site
+        lock();
+        s_bare = (uint8_t)v;
+        s_bare_new = 1;
+        unlock();
+        store_save_bare((int)v);
     }
     char watch[WATCH_TEXT];
     int watched = json_str(j, "watch", watch, sizeof watch);   // "" empties it
@@ -1151,6 +1161,7 @@ static void ui_task(void *arg)
     s_ui.light = s_light_cfg;                          // what lights the LED on the back
     s_ui.opt = s_opt;
     s_ui.help = s_help;                                // counted on the site's map: SET's COUNT ME
+    s_ui.bare = s_bare;                                // the radar without its panel, as it was left
     unlock();
     led_init(light_red_gpio(&s_ui.light));
     s_ui.map = &s_map;                                 // the fetch task makes it, the scope draws it
@@ -1310,12 +1321,24 @@ static void ui_task(void *arg)
             unlock();
             store_save_help(s_ui.help);
         }
+        if (s_bare_new) {                              // the site's: the radar's panel away or back
+            lock();
+            s_ui.bare = s_bare;
+            s_bare_new = 0;
+            unlock();
+        }
+        if (cmd.bare) {                                // the radar's three dots
+            lock();
+            s_bare = s_ui.bare;
+            unlock();
+            store_save_bare(s_ui.bare);
+        }
         if (s_pick_new) {                              // tapped on the page: picked here too
             s_pick_new = 0;
             s_ui.sel = s_sel_told = s_pick;
         }
         if (page_there()) {                            // and what a finger did here goes there
-            if (cmd.cfg || cmd.opt || cmd.help) say_cfg();
+            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare) say_cfg();
             if (s_ui.sel != s_sel_told) {
                 s_sel_told = s_ui.sel;
                 printf("OWLOS SEL %06x\n", (unsigned)s_ui.sel);
@@ -1460,6 +1483,7 @@ void app_main(void)
     store_load_light(&s_light_cfg);
     store_load_opt(&s_opt);
     s_help = (uint8_t)store_load_help();
+    s_bare = (uint8_t)store_load_bare();
     s_demo_on = !s_sec.ssid[0];                         // no WiFi set: the demo from the first frame
     sky_init(&s_sky, s_cfg.lat, s_cfg.lon);
     demo_init(&s_demo, range_km(&s_cfg), esp_random());

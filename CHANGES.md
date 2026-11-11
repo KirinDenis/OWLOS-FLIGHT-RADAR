@@ -4,6 +4,16 @@ What changed in each version of OWLOS Flight Radar, the newest first. The first 
 version: the firmware is built with it, the site publishes it, and a board compares its own with it.
 The site keeps the firmware of each version: a new number here keeps the one before it as it was.
 
+## 0.13
+
+- The radar can do without its panel: the three dots in the top right corner take it away and the scope
+  moves to the middle of the screen. A picked plane brings the panel back while it is picked; the dots
+  take it away again, and the plane with it. Tapped once more, they bring the panel back to stay. The
+  board remembers which way it was left, and the site's screen of the board does the same as the board.
+- The panel's letters go with its width. On the 3.5", 4.3", 5" and 7" boards they are the bigger ones, and
+  a row of the nearest planes says each one's height too, and its type where there is room for it. The
+  2.8" keeps its letters; over the radar its panel's title says the picked plane's kind.
+
 ## 0.12
 
 - At a home in Rusia the board asks for no planes and no map: the screen says NOT AVAILABLE IN RUSIA.

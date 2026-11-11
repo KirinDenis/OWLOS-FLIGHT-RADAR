@@ -255,6 +255,9 @@ class Link {
     this.call(this.m._twin_cfg, c.lat, c.lon, c.place || 'HOME', c.country || '', c.range, c.up, c.theme, c.look, c.map,
               c.ground, c.dist_unit, c.alt_unit, c.labels);
     this.m._twin_opt(c.vectors, c.beam_step, c.clock, c.block, c.autopilot, c.lost, c.conflict, c.fl_lo, c.fl_hi);
+    if (c.bare !== undefined) {                        // the radar without its panel: a board before 0.13 does not say
+      this.m._twin_bare(c.bare);
+    }
   }
 
   async close() {

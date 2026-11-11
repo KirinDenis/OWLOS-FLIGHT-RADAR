@@ -247,15 +247,19 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
      * all the registers it can use already */
     uint8_t ground_row[2 * G_RQ + 2];
     memset(ground_row, M_NONE, sizeof ground_row);
+    /* the radar without its panel has the scope in the middle of the screen: x below stays counted
+     * from where the scope stands beside the panel (G_SCX, a constant the loop keeps), the row is
+     * moved under it instead */
+    const int shift = scope_glass_cx(u) - G_SCX;
 
     for (int y = ya; y <= yb; y++) {
         int dy = y - G_SCY, ady = dy < 0 ? -dy : dy;
         if (ady >= G_RQ) continue;
-        uint32_t *row = gfx_row(cv, y);
+        uint32_t *row = gfx_row(cv, y) + shift;
         const uint8_t *lp = s_phi8 + s_tri[ady];
         int span = (int)sqrtf((float)((G_RQ - 1) * (G_RQ - 1) - ady * ady));
-        int xa = G_SCX - span < 0 ? 0 : G_SCX - span;
-        int xb = G_SCX + span > GFX_PW - 1 ? GFX_PW - 1 : G_SCX + span;
+        int xa = G_SCX - span < -shift ? -shift : G_SCX - span;
+        int xb = G_SCX + span > GFX_PW - 1 - shift ? GFX_PW - 1 - shift : G_SCX + span;
         /* a pixel's radius (1/16 px) and angle hang on |dx| only: worked out once a row for both
          * halves of it, not once a pixel. a radius past the disc is RQ16 */
         uint16_t rad[G_RQ + 1], phi[G_RQ + 1];
@@ -380,7 +384,8 @@ static float screen_ang(const ui_t *u, float brg) { return wrap360(brg - (float)
 static int in_view(const ui_t *u, float sx, float sy)
 {
     if (square_look(u)) return sx >= 0 && sx < GFX_W && sy >= 0 && sy < GFX_H;
-    return (sx - SCX) * (sx - SCX) + (sy - SCY) * (sy - SCY) <= (float)(PR * PR);
+    const float dx = sx - view_cx(u);
+    return dx * dx + (sy - SCY) * (sy - SCY) <= (float)(PR * PR);
 }
 
 static float plane_size(void) { return (float)GFX_H / 240.0f; }
@@ -414,6 +419,9 @@ static int overlap(box_t a, box_t b)
 
 static const char *plane_name(const plane_t *p) { return p->flight[0] ? p->flight : p->reg[0] ? p->reg : "------"; }
 
+// what the top left corner calls home
+static inline const char *home_name(const ui_t *u) { return u->net.demo ? "DEMO SKY" : u->cfg.place[0] ? u->cfg.place : "HOME"; }
+
 // the numbers on the rings: quarters of the range, as short as they can be written
 static void ring_value(float v, char *buf, int sz)
 {
@@ -421,15 +429,15 @@ static void ring_value(float v, char *buf, int sz)
     else snprintf(buf, (size_t)sz, v < 100 ? "%.1f" : "%.0f", (double)v);
 }
 
-static void ring_label_at(int k, int *x, int *y)
+static void ring_label_at(const ui_t *u, int k, int *x, int *y)
 {
     float r = PR * (float)k / 4.0f;
-    *x = SCX + (int)(r * 0.7071f) + 2;
+    *x = view_cx(u) + (int)(r * 0.7071f) + 2;
     *y = SCY + (int)(r * 0.7071f) - 2;
 }
 
 static void grid_frame(ui_t *u);
-static int clip_circle(float *ax, float *ay, float *bx, float *by, float r);
+static int clip_circle(float cx, float *ax, float *ay, float *bx, float *by, float r);
 static int plane_lost(const ui_t *u, const plane_t *p);
 
 /* a label's second line: the height, and what the radar's options add to it, the way a real data
@@ -472,8 +480,10 @@ static int data_line(const ui_t *u, canvas_t *cv, int x, int y, const plane_t *p
  * at any zoom, so that zooming in does not fill the scope with lines */
 #define VECTOR_PX ((float)PR / 1620.0f)
 #define CLOCK_Y 26                                     /* under how the sky is: on the right it runs into the rim on the 2.8" */
+/* the right edge of what is round the radar: where the panel starts, or the screen's edge without it */
+static inline int scope_edge(const ui_t *u) { return panel_shown(u) ? PX : GFX_W; }
 #define GEAR_W (GFX_H >= 320 ? 26 : 20)                /* the radar's options: under the scope, on the right */
-#define GEAR_X (PX - 9 - GEAR_W)
+#define GEAR_X(u) (scope_edge(u) - 9 - GEAR_W)
 #define GEAR_Y (GFX_H - 28 - GEAR_W)
 #define LOST_MS 12000                                  /* a position older than this is a guess */
 /* a conflict: both over the floor, closer than 3 NM and 1000 ft within two minutes. under the floor
@@ -572,7 +582,7 @@ void scope_frame(ui_t *u)
         plane_now(p, u->now, &x, &y);
         to_screen(u, x, y, &sx, &sy);
         if (radar && u->opt.beam_step) {               // shown where the beam last saw it, till the next turn
-            float since = wrap360(u->beam - atan2f(sx - (float)SCX, (float)SCY - sy) / D2R);
+            float since = wrap360(u->beam - atan2f(sx - (float)view_cx(u), (float)SCY - sy) / D2R);
             plane_now(p, u->now - (uint32_t)(since * (BEAM_TURN_MS / 360.0f)), &x, &y);
             to_screen(u, x, y, &sx, &sy);
         }
@@ -589,8 +599,8 @@ void scope_frame(ui_t *u)
             sp->vis = 1;
         } else if (d <= range * 1.6f) {                 // just outside: a dart in the band past the ring
             sp->vis = 2;
-            float a = atan2f(sx - (float)SCX, (float)SCY - sy);
-            sx = SCX + (PR + 4) * sinf(a);
+            const float cx = (float)view_cx(u), a = atan2f(sx - cx, (float)SCY - sy);
+            sx = cx + (PR + 4) * sinf(a);
             sy = SCY - (PR + 4) * cosf(a);
         } else {
             sp->vis = 0;
@@ -600,7 +610,7 @@ void scope_frame(ui_t *u)
         if (radar && u->opt.vectors && sp->vis == 1 && p->has_spd && !p->ground) {
             float a = screen_ang(u, p->track) * D2R, len = p->gs * VECTOR_PX;
             float ax = sx, ay = sy, bx = sx + len * sinf(a), by = sy - len * cosf(a);
-            if (clip_circle(&ax, &ay, &bx, &by, (float)PR)) {   // it stops at the range ring
+            if (clip_circle((float)view_cx(u), &ax, &ay, &bx, &by, (float)PR)) {   // it stops at the range ring
                 sp->vx = (int16_t)lroundf(bx);
                 sp->vy = (int16_t)lroundf(by);
             }
@@ -631,7 +641,7 @@ void scope_frame(ui_t *u)
 #if RADAR_ROUND
     for (int k = 1; k <= 4; k++) {
         int x, y;
-        ring_label_at(k, &x, &y);
+        ring_label_at(u, k, &x, &y);
         used[nu++] = (box_t){ x - 1, y - 1, 24, 8 };
     }
     used[nu++] = (box_t){ SCX - 78, SCY + 20, 156, 62 };  // the card or the note under home
@@ -640,19 +650,26 @@ void scope_frame(ui_t *u)
     if (square_look(u)) {                               // the flat square: its corners and edges
         for (int k = 0; k < SQ_BOXES; k++) used[nu++] = sq_box(u, k);
     } else {
+        const int edge = scope_edge(u);
         for (int k = 1; k <= 4; k++) {
             int x, y;
-            ring_label_at(k, &x, &y);
+            ring_label_at(u, k, &x, &y);
             used[nu++] = (box_t){ x - 1, y - 1, 24, 8 };
         }
         used[nu++] = (box_t){ 0, 0, 92, u->opt.clock ? CLOCK_Y + 8 : 30 };   // the corner texts
-        used[nu++] = (box_t){ PX - 82, 0, 82, 34 };
+        int nw = font_width(&FONT_SMALL, home_name(u));   // the town's name, as far as corners() lets it run
+        if (nw > view_cx(u) - 40) nw = view_cx(u) - 40;
+        if (10 + nw > 92) used[nu++] = (box_t){ 0, 0, 10 + nw, 17 };
+        if (panel_shown(u)) used[nu++] = (box_t){ PX - 82, 0, 82, 34 };
+        else used[nu++] = (box_t){ look_x(u) - 8, 0, GFX_W - look_x(u) + 8, 34 };   // the look and the three dots
         used[nu++] = (box_t){ 0, GFX_H - 24, 150, 24 };
-        used[nu++] = (box_t){ PX - 66, GFX_H - 31, 66, 31 };
-        used[nu++] = (box_t){ SCX - 42, SCY + PR - 18, 84, 12 };
+        used[nu++] = (box_t){ edge - 66, GFX_H - 31, 66, 31 };
+        used[nu++] = (box_t){ view_cx(u) - 42, SCY + PR - 18, 84, 12 };
 #if RADAR_HAS_TOUCH
-        used[nu++] = (box_t){ GEAR_X - 2, GEAR_Y - 2, GEAR_W + 4, GEAR_W + 4 };
+        used[nu++] = (box_t){ GEAR_X(u) - 2, GEAR_Y - 2, GEAR_W + 4, GEAR_W + 4 };
 #endif
+        note_box_t nb;                                  // without the panel the note is under the town's name
+        if (!panel_shown(u) && update_note_box(u, &nb)) used[nu++] = (box_t){ nb.x, nb.y, nb.w, nb.h };
     }
 #endif
     if (u->cfg.look != LOOK_RADAR) {
@@ -680,11 +697,11 @@ void scope_frame(ui_t *u)
         const int cand[6][2] = { { 8, -9 }, { -8 - w, -9 }, { 5, -LABEL_H - 5 }, { 5, 6 }, { -5 - w, -LABEL_H - 5 }, { -5 - w, 6 } };
         for (int t = 0; t < 6; t++) {
             box_t r = { sp->x + cand[t][0], sp->y + cand[t][1], w, LABEL_H };
-            if (r.x < 3 || r.x + r.w > (square_look(u) ? view_right(u) : PX) - 5 || r.y < 3 || r.y + r.h > GFX_H - 3) continue;
+            if (r.x < 3 || r.x + r.w > (square_look(u) ? view_right(u) : scope_edge(u)) - 5 || r.y < 3 || r.y + r.h > GFX_H - 3) continue;
 #if RADAR_ROUND
             int out = 0;                                // every corner of it on the glass
             for (int q = 0; q < 4; q++) {
-                int qx = (q & 1 ? r.x + r.w : r.x) - SCX, qy = (q & 2 ? r.y + r.h : r.y) - SCY;
+                int qx = (q & 1 ? r.x + r.w : r.x) - view_cx(u), qy = (q & 2 ? r.y + r.h : r.y) - SCY;
                 out |= qx * qx + qy * qy > (SR - 2) * (SR - 2);
             }
             if (out) continue;
@@ -724,9 +741,10 @@ static void compass(ui_t *u, canvas_t *cv)
 {
     char buf[8];
     if (!gfx_touches(cv, SCY - SR - 10, SCY + SR)) return;
+    const int cx = view_cx(u);
     for (int d = 0; d < 360; d += 30) {                // where they stand comes from the tick lines (scope_frame)
         int k = d / 5;
-        int lx = SCX + ((RL * s_ts[k] + 8192) >> 14), ly = SCY - ((RL * s_tc[k] + 8192) >> 14);
+        int lx = cx + ((RL * s_ts[k] + 8192) >> 14), ly = SCY - ((RL * s_tc[k] + 8192) >> 14);
         if (!gfx_touches(cv, ly - 14, ly + 8)) continue;   // not in this strip: no letters looked up for nothing
         if (d % 90 == 0) {                             // the smooth font: the pixel one doubled reads N as an arch
             const char *L = d == 0 ? "N" : d == 90 ? "E" : d == 180 ? "S" : "W";
@@ -738,7 +756,7 @@ static void compass(ui_t *u, canvas_t *cv)
         }
     }
     float ty = (float)(SCY - SR - 8);
-    if (ty >= 0) gfx_tri(cv, SCX - 4.0f, ty, SCX + 4.0f, ty, (float)SCX, ty + 5.0f, C_FOCUS, 220);   // the top of the screen
+    if (ty >= 0) gfx_tri(cv, cx - 4.0f, ty, cx + 4.0f, ty, (float)cx, ty + 5.0f, C_FOCUS, 220);   // the top of the screen
 }
 
 static void ring_numbers(ui_t *u, canvas_t *cv)
@@ -747,7 +765,7 @@ static void ring_numbers(ui_t *u, canvas_t *cv)
     float range = u->cfg.range;
     for (int k = u->cfg.look == LOOK_RADAR ? 1 : 4; k <= 4; k++) {   // the maps: only the ring, the grid tells the rest
         int x, y;
-        ring_label_at(k, &x, &y);
+        ring_label_at(u, k, &x, &y);
         if (!gfx_touches(cv, y - 1, y + 7)) continue;
         ring_value(range * (float)k / 4.0f, buf, sizeof buf);
         micro_text(cv, x, y, buf, k == 4 ? C_PRIM : C_DIM, 220, 1);
@@ -784,10 +802,10 @@ static void home(ui_t *u, canvas_t *cv)
 
 /* --- the flat looks: meridians and parallels, a round number of degrees or minutes apart --- */
 
-// the part of a line inside the circle round the scope's middle, 0 if none
-static int clip_circle(float *ax, float *ay, float *bx, float *by, float r)
+// the part of a line inside the circle round the scope's middle (cx, SCY), 0 if none
+static int clip_circle(float cx, float *ax, float *ay, float *bx, float *by, float r)
 {
-    float x0 = *ax - SCX, y0 = *ay - SCY, dx = *bx - *ax, dy = *by - *ay;
+    float x0 = *ax - cx, y0 = *ay - SCY, dx = *bx - *ax, dy = *by - *ay;
     float a = dx * dx + dy * dy, b = 2 * (x0 * dx + y0 * dy), c = x0 * x0 + y0 * y0 - r * r;
     float d = b * b - 4 * a * c;
     if (a < 1e-6f || d <= 0) return 0;
@@ -891,7 +909,7 @@ static void grid_frame(ui_t *u)
         float la = n * sd, north = (la - c->lat) * 110.574f, ax, ay, bx, by;
         to_screen(u, -R * 1.5f, north, &ax, &ay);
         to_screen(u, R * 1.5f, north, &bx, &by);
-        if (!clip_circle(&ax, &ay, &bx, &by, r)) continue;
+        if (!clip_circle(SCX, &ax, &ay, &bx, &by, r)) continue;
         gline_t *g = grid_add(0);
         if (!g) return;
         piece_add(g, ax, ay, bx, by);
@@ -908,7 +926,7 @@ static void grid_frame(ui_t *u)
             float la = c->lat - dla + 2.0f * dla * s / 6.0f, x, y;
             to_screen(u, (lo - c->lon) * 111.32f * cosf((c->lat + la) * 0.5f * D2R), (la - c->lat) * 110.574f, &x, &y);
             float ax = px, ay = py, bx = x, by = y;
-            if (s && clip_circle(&ax, &ay, &bx, &by, r)) {
+            if (s && clip_circle(SCX, &ax, &ay, &bx, &by, r)) {
                 piece_add(g, ax, ay, bx, by);
                 lx = bx;
                 ly = by;
@@ -932,11 +950,12 @@ static void attribution(ui_t *u, canvas_t *cv)
 {
     if (!ground(u)) return;
     const char *s = "\xC2\xA9 OpenStreetMap";
-    const int w = font_width(&FONT_SMALL, s), y = RADAR_ROUND ? SCY - PR + 12 : SCY + PR - 17;
+    const int y = RADAR_ROUND ? SCY - PR + 12 : SCY + PR - 17;
     if (!gfx_touches(cv, y, y + 10)) return;
+    const int w = font_width(&FONT_SMALL, s), cx = view_cx(u);
     int classic = u->cfg.look == LOOK_CLASSIC;
-    gfx_fill(cv, SCX - w / 2 - 2, y, w + 4, 10, classic ? RGB(242, 239, 233) : C_BG0, classic ? 170 : 110);
-    font_text(cv, &FONT_SMALL, SCX - w / 2, y, s, classic ? RGB(60, 60, 60) : C_DIM, 220);
+    gfx_fill(cv, cx - w / 2 - 2, y, w + 4, 10, classic ? RGB(242, 239, 233) : C_BG0, classic ? 170 : 110);
+    font_text(cv, &FONT_SMALL, cx - w / 2, y, s, classic ? RGB(60, 60, 60) : C_DIM, 220);
 }
 
 #if !RADAR_ROUND
@@ -1055,7 +1074,6 @@ static void grid_frame(ui_t *u)
 static void sq_scale(ui_t *u, canvas_t *cv, int right, int y)
 {
     static const float NICE_LEN[] = { 0.1f, 0.2f, 0.5f, 1, 2, 5, 10, 20, 50, 100, 200, 500 };
-    static const char *const UNIT[3] = { "KM", "NM", "MI" };
     const float px_unit = unit_km(u->cfg.dist_unit) * k_px(u);   // pixels one unit long
     const int classic = u->cfg.look == LOOK_CLASSIC;
     const uint32_t ink = classic ? CL_INK : C_FOCUS;
@@ -1064,7 +1082,7 @@ static void sq_scale(ui_t *u, canvas_t *cv, int right, int y)
         if (NICE_LEN[i] * px_unit <= 70.0f) len = NICE_LEN[i];
     int w = (int)lroundf(len * px_unit), x = right - w;
     char d[16];
-    snprintf(d, sizeof d, len < 1.0f ? "%.1f %s" : "%.0f %s", (double)len, UNIT[u->cfg.dist_unit < 3 ? u->cfg.dist_unit : 0]);
+    snprintf(d, sizeof d, len < 1.0f ? "%.1f %s" : "%.0f %s", (double)len, unit_name(u->cfg.dist_unit));
     micro_text(cv, x - 4 - micro_width(d, 1), y - 2, d, classic ? CL_INK : C_PRIM, 240, 1);
     gfx_hline(cv, x, right, y, ink, 240);
     gfx_vline(cv, x, y - 3, y + 1, ink, 240);
@@ -1072,21 +1090,22 @@ static void sq_scale(ui_t *u, canvas_t *cv, int right, int y)
     gfx_vline(cv, x + w / 2, y - 2, y, ink, 200);
 }
 
-// the three dots: the panel in and out. lit while it is in
-static void sq_dots(ui_t *u, canvas_t *cv, int x, int y)
+/* the three dots: the panel in and out, lit while it is in. the square map's, and the radar's in the
+ * corner of its panel or where that was (w: the 2.8"'s are narrower there) */
+static void panel_dots(ui_t *u, canvas_t *cv, int x, int y, int w)
 {
-    const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_DOTS, in = u->panel_open || u->sel;
+    const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_DOTS, in = panel_shown(u);
     uint32_t dot;
     if (u->cfg.look == LOOK_CLASSIC) {
-        map_button(cv, x, y, DOTS_W, LOOK_H, NULL, pressed ? 2 : in);
+        map_button(cv, x, y, w, LOOK_H, NULL, pressed ? 2 : in);
         dot = in && !pressed ? CL_BLUE : CL_INK;
         y += pressed;                                  // the dots sink with the button
     } else {
-        chamfer_box(cv, x, y, DOTS_W, LOOK_H, pressed || in ? C_PRIM : C_PANEL, pressed ? 200 : in ? 120 : 200,
+        chamfer_box(cv, x, y, w, LOOK_H, pressed || in ? C_PRIM : C_PANEL, pressed ? 200 : in ? 120 : 200,
                     pressed || in ? C_FOCUS : C_PRIM, 220);
         dot = pressed || in ? C_FOCUS : C_PRIM;
     }
-    for (int i = 0; i < 3; i++) gfx_disc(cv, x + DOTS_W / 2.0f, y + 4.5f + i * 5.5f, 1.6f, dot, 255);
+    for (int i = 0; i < 3; i++) gfx_disc(cv, x + w / 2.0f, y + 4.5f + i * 5.5f, 1.6f, dot, 255);
 }
 
 static void sq_chrome(ui_t *u, canvas_t *cv)
@@ -1097,7 +1116,7 @@ static void sq_chrome(ui_t *u, canvas_t *cv)
     if (gfx_touches(cv, 0, 44)) {
         int bad;
         // top left: where home is, and how the sky is
-        const char *where = u->net.demo ? "DEMO SKY" : u->cfg.place[0] ? u->cfg.place : "HOME";
+        const char *where = home_name(u);
         sky_status(u, buf, sizeof buf, &bad);
         const box_t tl = sq_box(u, 0);
         int w = font_width(&FONT_SMALL, where), ws = micro_width(buf, 1);
@@ -1111,7 +1130,7 @@ static void sq_chrome(ui_t *u, canvas_t *cv)
         const char *name = LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0];
         if (classic) map_button(cv, lx, LOOK_Y, look_w(u), LOOK_H, name, pressed ? 2 : 0);
         else button(cv, lx, LOOK_Y, look_w(u), LOOK_H, name, pressed ? 2 : 0);
-        sq_dots(u, cv, right - 6 - DOTS_W, LOOK_Y);
+        panel_dots(u, cv, right - 6 - DOTS_W, LOOK_Y, DOTS_W);
         int nx = right - 9 - micro_width("NORTH UP", 1) - 9;
         sq_card(u, cv, nx - 4, LOOK_Y + LOOK_H + 4, right - 9 - nx + 6, RADAR_HAS_TOUCH ? 16 : 9);
         float ty = LOOK_Y + LOOK_H + 11.0f;
@@ -1234,7 +1253,7 @@ static void planes(ui_t *u, canvas_t *cv)
             silhouette(cv, p->kind, sp->x, sp->y, head, size * 1.35f, INK, 200);
         } else if (!gone) {
             // phosphor: brighter for a moment after the beam went over it
-            float since = u->cfg.look == LOOK_RADAR ? wrap360(u->beam - wrap360(atan2f((float)(sp->x - SCX), (float)(SCY - sp->y)) / D2R)) : 180.0f;
+            float since = u->cfg.look == LOOK_RADAR ? wrap360(u->beam - wrap360(atan2f((float)(sp->x - view_cx(u)), (float)(SCY - sp->y)) / D2R)) : 180.0f;
             int glow = (int)(70.0f + 100.0f * (1.0f - since / 360.0f));
             gfx_glow(cv, sp->x, sp->y, 10.0f * size, col, glow);
         }
@@ -1274,16 +1293,16 @@ static void planes(ui_t *u, canvas_t *cv)
 static void gesture(ui_t *u, canvas_t *cv)
 {
     if (!u->t_down || !u->t_moved || !u->t_turn) return;
-    float dx = (float)(u->t_x - view_cx(u)), dy = (float)(SCY - u->t_y);
+    const float cx = (float)view_cx(u), dx = (float)u->t_x - cx, dy = (float)(SCY - u->t_y);
     if (u->t_turn == 1) {
         float a = atan2f(dx, dy) / D2R;
-        gfx_arc(cv, SCX, SCY, SR + 3.0f, a - 24.0f, a + 24.0f, 2.2f, C_FOCUS, 220);
+        gfx_arc(cv, cx, SCY, SR + 3.0f, a - 24.0f, a + 24.0f, 2.2f, C_FOCUS, 220);
         float n = screen_ang(u, 0) * D2R;              // where north is now
-        gfx_line(cv, SCX, SCY, SCX + PR * sinf(n), SCY - PR * cosf(n), 1.2f, C_FOCUS, 120);
+        gfx_line(cv, cx, SCY, cx + PR * sinf(n), SCY - PR * cosf(n), 1.2f, C_FOCUS, 120);
     } else {
         float r = sqrtf(dx * dx + dy * dy);
         if (r > PR) r = PR;
-        gfx_ring(cv, (float)view_cx(u), SCY, r, 1.3f, C_FOCUS, 170);
+        gfx_ring(cv, cx, SCY, r, 1.3f, C_FOCUS, 170);
         char d[16];
         fmt_dist(u, range_km(&u->cfg) * r / PR, d, sizeof d);
         int w = micro_width(d, 1);
@@ -1402,17 +1421,18 @@ static void bracket(canvas_t *cv, float x, float y, float sx, float sy)
 static void corners(ui_t *u, canvas_t *cv)
 {
     char buf[48];
+    const int edge = scope_edge(u), cx = view_cx(u), panel = panel_shown(u);
+    const int right = view_right(u) - 4;               // the brackets: off the panel, or as far in as on the left
     bracket(cv, 3, 3, 1, 1);
-    bracket(cv, (float)(PX - 6), 3, -1, 1);
+    if (panel) bracket(cv, (float)right, 3, -1, 1);    // without the panel the three dots are in that corner
     bracket(cv, 3, GFX_H - 4, 1, -1);
-    bracket(cv, (float)(PX - 6), GFX_H - 4, -1, -1);
-    gfx_hatch(cv, SCX - 31, 3, 62, 4, C_QUIET, 120);
-    gfx_hatch(cv, SCX - 31, GFX_H - 7, 62, 4, C_QUIET, 120);
+    bracket(cv, (float)right, GFX_H - 4, -1, -1);
+    gfx_hatch(cv, cx - 31, 3, 62, 4, C_QUIET, 120);
+    gfx_hatch(cv, cx - 31, GFX_H - 7, 62, 4, C_QUIET, 120);
     if (gfx_touches(cv, 0, 30)) {
         int bad;
         // where home is, in the smooth font: a town's name may have letters the pixel font hasn't
-        const char *where = u->net.demo ? "DEMO SKY" : u->cfg.place[0] ? u->cfg.place : "HOME";
-        font_text_clip(cv, &FONT_SMALL, 9, 6, where, C_FOCUS, 255, SCX - 40);
+        font_text_clip(cv, &FONT_SMALL, 9, 6, home_name(u), C_FOCUS, 255, cx - 40);
         sky_status(u, buf, sizeof buf, &bad);
         micro_text(cv, 9, 18, buf, bad ? C_ALARM : C_DIM, 230, 1);
         // the look: a tap goes to the next one
@@ -1420,19 +1440,20 @@ static void corners(ui_t *u, canvas_t *cv)
                u->t_down && !u->t_moved && u->t_hit == HIT_LOOK ? 2 : 0);
         const char *up = u->cfg.up ? buf : "NORTH UP";
         if (u->cfg.up) snprintf(buf, sizeof buf, "UP %03d*", u->cfg.up);
-        micro_text(cv, PX - 9 - micro_width(up, 1), LOOK_Y + LOOK_H + 4, up, u->cfg.up ? C_FOCUS : C_QUIET, 235, 1);
+        micro_text(cv, edge - 9 - micro_width(up, 1), LOOK_Y + LOOK_H + 4, up, u->cfg.up ? C_FOCUS : C_QUIET, 235, 1);
     }
     if (gfx_touches(cv, CLOCK_Y, CLOCK_Y + 6) && clock_text(u, buf, sizeof buf))
         micro_text(cv, 9, CLOCK_Y, buf, C_DIM, 230, 1);
 #if RADAR_HAS_TOUCH
     if (gfx_touches(cv, GEAR_Y, GEAR_Y + GEAR_W)) {       // the radar's options: a cog in a button
-        const float cx = GEAR_X + GEAR_W / 2.0f, cy = GEAR_Y + GEAR_W / 2.0f, r = GEAR_W * 0.2f;
-        button(cv, GEAR_X, GEAR_Y, GEAR_W, GEAR_W, "", u->t_down && !u->t_moved && u->t_hit == HIT_GEAR ? 2 : 0);
+        const int gx = GEAR_X(u);
+        const float gcx = gx + GEAR_W / 2.0f, gcy = GEAR_Y + GEAR_W / 2.0f, r = GEAR_W * 0.2f;
+        button(cv, gx, GEAR_Y, GEAR_W, GEAR_W, "", u->t_down && !u->t_moved && u->t_hit == HIT_GEAR ? 2 : 0);
         for (int i = 0; i < 8; i++) {
             float a = (float)i * 45.0f * D2R;
-            gfx_line(cv, cx + r * sinf(a), cy - r * cosf(a), cx + r * 1.65f * sinf(a), cy - r * 1.65f * cosf(a), 2.0f, C_FOCUS, 245);
+            gfx_line(cv, gcx + r * sinf(a), gcy - r * cosf(a), gcx + r * 1.65f * sinf(a), gcy - r * 1.65f * cosf(a), 2.0f, C_FOCUS, 245);
         }
-        gfx_ring(cv, cx, cy, r, 1.8f, C_FOCUS, 245);
+        gfx_ring(cv, gcx, gcy, r, 1.8f, C_FOCUS, 245);
     }
 #endif
     if (gfx_touches(cv, GFX_H - 31, GFX_H)) {             // the height legend, and how the fingers work the scope
@@ -1447,24 +1468,46 @@ static void corners(ui_t *u, canvas_t *cv)
         micro_text(cv, 9, GFX_H - 17, "HEIGHT", C_QUIET, 220, 1);
         char d[16];
         fmt_dist(u, range_km(&u->cfg), d, sizeof d);
-        micro_text(cv, PX - 9 - micro_width(d, 1), GFX_H - 10, d, C_PRIM, 240, 1);
+        micro_text(cv, edge - 9 - micro_width(d, 1), GFX_H - 10, d, C_PRIM, 240, 1);
         if (RADAR_HAS_TOUCH) {
-            micro_text(cv, PX - 9 - micro_width("DRAG: ZOOM", 1), GFX_H - 17, "DRAG: ZOOM", C_QUIET, 200, 1);
-            micro_text(cv, PX - 9 - micro_width("RIM: TURN", 1), GFX_H - 24, "RIM: TURN", C_QUIET, 200, 1);
+            micro_text(cv, edge - 9 - micro_width("DRAG: ZOOM", 1), GFX_H - 17, "DRAG: ZOOM", C_QUIET, 200, 1);
+            micro_text(cv, edge - 9 - micro_width("RIM: TURN", 1), GFX_H - 24, "RIM: TURN", C_QUIET, 200, 1);
         }
     }
 }
 
-/* --- the panel --- */
+/* --- the panel ---
+ * its letters go with its width (PANEL_WIDE, ui_int.h), its rows with the height: a wide panel on the
+ * 4.3"'s 272 rows takes them shorter, so all a plane says still fits */
+#define WIDE_ROW (GFX_H >= 320 ? 20 : 17)      /* a row of the nearest planes */
+#define WIDE_PROW (GFX_H >= 320 ? 19 : 17)     /* a row of what the picked plane says */
 
-static void panel_title(canvas_t *cv, const char *title, const char *right)
+/* the title's right end: the radar has its three dots in the panel's corner */
+static int title_end(const ui_t *u) { return !square_look(u) && RADAR_HAS_TOUCH ? RDOTS_X - 4 : TX2; }
+
+static int title_width(const char *s) { return PANEL_WIDE ? font_width(&FONT_SMALL, s) : micro_width(s, 1); }
+
+static void title_text(canvas_t *cv, int x, const char *s, uint32_t c)
 {
-    if (!gfx_touches(cv, 6, 16)) return;
-    micro_text(cv, TX, 7, title, C_FOCUS, 240, 1);
-    int w = micro_width(title, 1), rw = right ? micro_width(right, 1) : 0;
-    if (right) micro_text(cv, TX2 - rw, 7, right, C_DIM, 230, 1);
-    gfx_hatch(cv, TX + w + 4, 7, TX2 - (right ? rw + 4 : 0) - (TX + w + 4), 5, C_QUIET, 130);
-    gfx_hline(cv, TX, TX2, 15, C_QUIET, 150);
+    if (PANEL_WIDE) font_text(cv, &FONT_SMALL, x, 4, s, c, 245);
+    else micro_text(cv, x, 7, s, c, 240, 1);
+}
+
+static void panel_title(const ui_t *u, canvas_t *cv, const char *title, const char *right)
+{
+    if (!gfx_touches(cv, 4, 16)) return;
+    const int end = title_end(u);
+    int w = title_width(title), rw = right ? title_width(right) : 0;
+    if (right && TX + w + 6 + rw > end) {              // no room for both: what it says on the right is more
+        title = right;
+        w = rw;
+        right = NULL;
+    }
+    title_text(cv, TX, title, C_FOCUS);
+    if (right) title_text(cv, end - rw, right, C_DIM);
+    const int hx = TX + w + 4, hw = end - (right ? rw + 4 : 0) - hx;
+    if (hw > 0) gfx_hatch(cv, hx, 7, hw, 5, C_QUIET, 130);
+    gfx_hline(cv, TX, end, 15, C_QUIET, 150);
 }
 
 static int btn_x(int i) { return TX - 3 + i * (BTN_W + 3); }
@@ -1490,63 +1533,105 @@ static void buttons(ui_t *u, canvas_t *cv, const char *a, const char *b, const c
 #endif
 }
 
-#define NEAR_Y0 72
-#define NEAR_H  15
-#define NEAR_N  (6 + (GFX_H - 240) / NEAR_H)   /* a taller screen lists more */
+/* the nearest planes. a wide panel: a row of the bigger letters, with each one's height (and its
+ * type, where there is room for it) between its name and how far it is, under a line that says which
+ * column is what */
+#define NEAR_Y0 (PANEL_WIDE ? 89 : 72)
+#define NEAR_H  (PANEL_WIDE ? WIDE_ROW : 15)
+#define NEAR_N  (PANEL_WIDE ? (BTN_Y - 4 - NEAR_Y0) / NEAR_H : 6 + (GFX_H - 240) / NEAR_H)   /* a taller screen lists more */
+#define NEAR_TYPE (TX2 - TX >= 200)            /* the type fits in too */
+#define NEAR_DIST_R TX2                         /* the columns' right edges */
+#define NEAR_ALT_R  (TX2 - 36)
+#define NEAR_TYPE_X (TX2 - 102)
 
+/* the smooth letters (font_text) find every glyph even in a strip they are not in, so each line here
+ * is drawn only in the strips it is in: the 3.5" draws 40 a frame */
 static void panel_overview(ui_t *u, canvas_t *cv)
 {
     char buf[24];
     char d[16];
-    if (ui_update(u) && !square_look(u)) update_note(u, cv);   // a newer version: over the radar the title says so
-    else panel_title(cv, RADAR_NAME, 0);
-    if (gfx_touches(cv, 18, 68)) {                     // how many, in what range, around where
+    const int wide = PANEL_WIDE;
+    if (!ui_update(u) || square_look(u)) panel_title(u, cv, RADAR_NAME, 0);   // a newer version: over the radar the note is the title (main_draw)
+    if (gfx_touches(cv, 19, 45)) {                     // how many, in what range
         int n = 0;
         for (int i = 0; i < u->snap.n; i++) n += u->spot[i].vis == 1;
         snprintf(buf, sizeof buf, "%d", n);
         font_text(cv, &FONT_LARGE, TX - 1, 19, buf, C_FOCUS, 255);
         int w = font_width(&FONT_LARGE, buf);
-        micro_text(cv, TX + w + 4, 22, "AIRCRAFT", C_PRIM, 240, 1);
         fmt_dist(u, range_km(&u->cfg), d, sizeof d);
         snprintf(buf, sizeof buf, "IN %s", d);
-        micro_text(cv, TX + w + 4, 30, buf, C_DIM, 230, 1);
-        // the town is in the corner: its country and the point here
-        if (u->cfg.country[0]) font_text_clip(cv, &FONT_SMALL, TX, 38, u->cfg.country, C_DIM, 235, TX2 - TX);
-        home_coords(u, buf, sizeof buf);
-        micro_text(cv, TX, 50, buf, C_QUIET, 230, 1);
-        micro_text(cv, TX, 60, "NEAREST", C_QUIET, 230, 1);
-        gfx_hline(cv, TX, TX2, 67, C_QUIET, 110);
+        if (wide) {
+            font_text(cv, &FONT_SMALL, TX + w + 6, 21, "AIRCRAFT", C_PRIM, 245);
+            font_text(cv, &FONT_SMALL, TX + w + 6, 33, buf, C_DIM, 240);
+        } else {
+            micro_text(cv, TX + w + 4, 22, "AIRCRAFT", C_PRIM, 240, 1);
+            micro_text(cv, TX + w + 4, 30, buf, C_DIM, 230, 1);
+        }
     }
+    // the town is in the corner: its country and the point here
+    const int cy = wide ? 48 : 38, py = wide ? 64 : 50;
+    if (u->cfg.country[0] && gfx_touches(cv, cy, cy + (wide ? 14 : 10)))
+        font_text_clip(cv, wide ? &FONT_MEDIUM : &FONT_SMALL, TX, cy, u->cfg.country, C_DIM, 235, TX2 - TX);
+    if (gfx_touches(cv, py, py + (wide ? 10 : 6))) {
+        home_coords(u, buf, sizeof buf);
+        if (wide) font_text(cv, &FONT_SMALL, TX, py, buf, C_QUIET, 240);
+        else micro_text(cv, TX, py, buf, C_QUIET, 230, 1);
+    }
+    const int hy = wide ? 79 : 60;                     // NEAREST, and on a wide panel what each column is
+    if (gfx_touches(cv, hy, hy + 7)) {
+        micro_text(cv, TX, hy, "NEAREST", C_QUIET, 230, 1);
+        if (wide) {
+            const char *du = unit_name(u->cfg.dist_unit);
+            if (NEAR_TYPE) micro_text(cv, NEAR_TYPE_X, hy, "TYPE", C_QUIET, 230, 1);
+            micro_text(cv, NEAR_ALT_R - micro_width("HEIGHT", 1), hy, "HEIGHT", C_QUIET, 230, 1);
+            micro_text(cv, NEAR_DIST_R - micro_width(du, 1), hy, du, C_QUIET, 230, 1);
+        }
+        gfx_hline(cv, TX, TX2, hy + 7, C_QUIET, 110);
+    }
+    const int name_w = !wide ? 44 : (NEAR_TYPE ? NEAR_TYPE_X : NEAR_ALT_R - 34) - 6 - (TX + 10);
+    const int ny = (NEAR_H - 14) / 2;                  // a wide row: the name in it, the small letters on its line
     for (int k = 0; k < NEAR_N && k < u->n_order; k++) {
         const plane_t *p = &u->snap.p[u->order[k]];
         int y = NEAR_Y0 + k * NEAR_H;
-        if (!gfx_touches(cv, y, y + NEAR_H)) continue;
+        if (!gfx_touches(cv, y - 1, y + NEAR_H - 2)) continue;
         int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_ROW + k;
         if (pressed) gfx_fill(cv, TX - 2, y - 1, TX2 - TX + 4, NEAR_H - 1, C_PRIM, 60);
-        gfx_disc(cv, TX + 2.5f, y + 6.0f, 2.2f, alt_colour(u, p), 255);
-        font_text_clip(cv, &FONT_SMALL, TX + 8, y + 1, plane_name(p), C_FOCUS, 245, 44);
         fmt_dist(u, p->dist, d, sizeof d);
         char *sp = strchr(d, ' ');
-        if (sp) *sp = 0;                                // just the number, the unit is in the title
-        micro_text(cv, TX2 - micro_width(d, 1), y + 3, d, C_DIM, 230, 1);
+        if (sp) *sp = 0;                                // just the number: the unit is in the title, and over the column
+        if (!wide) {
+            gfx_disc(cv, TX + 2.5f, y + 6.0f, 2.2f, alt_colour(u, p), 255);
+            font_text_clip(cv, &FONT_SMALL, TX + 8, y + 1, plane_name(p), C_FOCUS, 245, name_w);
+            micro_text(cv, TX2 - micro_width(d, 1), y + 3, d, C_DIM, 230, 1);
+            continue;
+        }
+        gfx_disc(cv, TX + 3.0f, y + NEAR_H / 2.0f - 0.5f, 2.8f, alt_colour(u, p), 255);
+        font_text_clip(cv, &FONT_MEDIUM, TX + 10, y + ny, plane_name(p), C_FOCUS, 250, name_w);
+        if (NEAR_TYPE && p->type[0]) font_text_clip(cv, &FONT_SMALL, NEAR_TYPE_X, y + ny + 3, p->type, C_DIM, 235, 30);
+        fmt_alt(u, p, buf, sizeof buf, 1);
+        font_text(cv, &FONT_SMALL, NEAR_ALT_R - font_width(&FONT_SMALL, buf), y + ny + 3, buf, C_DIM, 240);
+        font_text(cv, &FONT_SMALL, NEAR_DIST_R - font_width(&FONT_SMALL, d), y + ny + 3, d, C_DIM, 240);
     }
-    if (!u->n_order) micro_text(cv, TX, NEAR_Y0 + 4, u->snap.status == SKY_OK ? "SKY IS EMPTY" : "WAITING", C_DIM, 230, 1);
+    if (!u->n_order && gfx_touches(cv, NEAR_Y0 + 4, NEAR_Y0 + 14)) {
+        const char *s = u->snap.status == SKY_OK ? "SKY IS EMPTY" : "WAITING";
+        if (wide) font_text(cv, &FONT_SMALL, TX, NEAR_Y0 + 4, s, C_DIM, 240);
+        else micro_text(cv, TX, NEAR_Y0 + 4, s, C_DIM, 230, 1);
+    }
     buttons(u, cv, "HUE", "LIST", "SET", -1);
 }
 
-/* the picked plane's rows. the 3.5" panel is nearly twice as wide: it takes the bigger fonts */
-#define PANEL_BIG (GFX_H >= 320)
-#define PROW_H    (PANEL_BIG ? 19 : 13)
-#define PROW_KEY  (PANEL_BIG ? 36 : 20)
+/* the picked plane's rows: on a wide panel the bigger letters */
+#define PROW_H    (PANEL_WIDE ? WIDE_PROW : 13)
+#define PROW_KEY  (PANEL_WIDE ? 36 : 20)
 
 // a row: what it is, quiet, and its value. most wanted first: what finds no room stays out
 static int panel_row(canvas_t *cv, int y, const char *key, const char *value, uint32_t c)
 {
     if (y + PROW_H > BTN_Y) return y;
     if (gfx_touches(cv, y, y + PROW_H)) {
-        if (PANEL_BIG) font_text(cv, &FONT_SMALL, TX, y + 3, key, C_DIM, 235);
+        if (PANEL_WIDE) font_text(cv, &FONT_SMALL, TX, y + 3, key, C_DIM, 235);
         else micro_text(cv, TX, y + 3, key, C_DIM, 235, 1);
-        font_text_clip(cv, PANEL_BIG ? &FONT_MEDIUM : &FONT_SMALL, TX + PROW_KEY,
+        font_text_clip(cv, PANEL_WIDE ? &FONT_MEDIUM : &FONT_SMALL, TX + PROW_KEY,
                        y, value, c, 250, TX2 - TX - PROW_KEY);
     }
     return y + PROW_H;
@@ -1555,27 +1640,34 @@ static int panel_row(canvas_t *cv, int y, const char *key, const char *value, ui
 static void panel_plane(ui_t *u, canvas_t *cv, const plane_t *p)
 {
     char buf[32], b2[16];
-    const int metres = u->cfg.alt_unit == ALT_M;
+    const int metres = u->cfg.alt_unit == ALT_M, wide = PANEL_WIDE, route = p->orig[0] || p->dest[0];
+    const int dots = title_end(u) < TX2;               // the radar's three dots are in the panel's corner
     uint32_t col = alt_colour(u, p);
-    panel_title(cv, "TRACKING", kind_name(p->kind));
-    font_text_clip(cv, &FONT_MEDIUM, TX, 19, p->flight[0] ? p->flight : "NO CALLSIGN", C_FOCUS, 255, PW - 10);   // the large font is digits only
-    snprintf(buf, sizeof buf, "%s %s", p->type[0] ? p->type : "----", p->reg);
-    font_text_clip(cv, PANEL_BIG ? &FONT_MEDIUM : &FONT_SMALL, TX, PANEL_BIG ? 36 : 34, buf, C_DIM, 235, PW - 10);
-    int y = PANEL_BIG ? 52 : 46;
-    if (p->orig[0] || p->dest[0]) {
-        snprintf(buf, sizeof buf, "%s > %s", p->orig[0] ? p->orig : "?", p->dest[0] ? p->dest : "?");
-        micro_text(cv, TX, y + 1, buf, C_PRIM, 240, 2);
-        y += 14;
+    if (!wide && dots) panel_title(u, cv, kind_name(p->kind), NULL);   // the 2.8": what kind it is, the same on every plane
+    else panel_title(u, cv, "TRACKING", kind_name(p->kind));
+    int y = (wide ? 52 : 46) + (route ? 14 : 0);       // the height's caption, under the callsign, the type and the route
+    const int vy = y + (wide ? 12 : 9);                // the height's top
+    if (gfx_touches(cv, 19, vy + 26)) {                // all above the rows, in the strips it is in
+        // the large font is digits only. on the 2.8" the callsign goes under the dots
+        font_text_clip(cv, &FONT_MEDIUM, TX, !wide && dots ? 21 : 19, p->flight[0] ? p->flight : "NO CALLSIGN", C_FOCUS, 255, PW - 10);
+        snprintf(buf, sizeof buf, "%s %s", p->type[0] ? p->type : "----", p->reg);
+        font_text_clip(cv, wide ? &FONT_MEDIUM : &FONT_SMALL, TX, wide ? 36 : 34, buf, C_DIM, 235, PW - 10);
+        if (route) {
+            snprintf(buf, sizeof buf, "%s > %s", p->orig[0] ? p->orig : "?", p->dest[0] ? p->dest : "?");
+            micro_text(cv, TX, y - 13, buf, C_PRIM, 240, 2);
+        }
+        // the height, big. on a wide panel its caption in letters you can read too
+        const char *cap = metres ? "ALTITUDE, M" : "ALTITUDE, FT";
+        if (wide) font_text(cv, &FONT_SMALL, TX, y + 1, cap, C_QUIET, 240);
+        else micro_text(cv, TX, y + 2, cap, C_QUIET, 230, 1);
+        if (p->ground || !p->has_alt) {
+            micro_text(cv, TX, vy + 3, p->ground ? "ON GROUND" : "NO DATA", col, 245, 2);
+        } else {
+            snprintf(buf, sizeof buf, "%d", metres ? (int)lroundf(p->alt * 0.3048f) : (int)p->alt);
+            font_text(cv, &FONT_LARGE, TX - 1, vy, buf, col, 255);
+        }
     }
-    // the height, big
-    micro_text(cv, TX, y + 2, metres ? "ALTITUDE, M" : "ALTITUDE, FT", C_QUIET, 230, 1);
-    if (p->ground || !p->has_alt) {
-        micro_text(cv, TX, y + 12, p->ground ? "ON GROUND" : "NO DATA", col, 245, 2);
-    } else {
-        snprintf(buf, sizeof buf, "%d", metres ? (int)lroundf(p->alt * 0.3048f) : (int)p->alt);
-        font_text(cv, &FONT_LARGE, TX - 1, y + 9, buf, col, 255);
-    }
-    y += 38;
+    y += wide ? 42 : 38;
     // and what is known of it, most wanted first
     if (p->squawk == 7500 || p->squawk == 7600 || p->squawk == 7700) {
         static const char *const W[3] = { "HIJACK", "RADIO LOST", "EMERGENCY" };
@@ -1729,21 +1821,24 @@ static void round_note(ui_t *u, canvas_t *cv)
 #endif
 
 /* the site has a newer version: a small note, a tap on it opens ABOUT. over the radar it is the
- * panel's title, over the square map a card under the town's, on the round glass one under its
- * box. while a plane is picked or the round menu is up, they have the place */
+ * panel's title, over the square map and the radar without its panel a card under the town's, on
+ * the round glass one under its box. while a plane is picked or the round menu is up, they have
+ * the place */
 int update_note_box(const ui_t *u, note_box_t *b)
 {
     if (!ui_update(u) || u->view != VIEW_MAIN) return 0;
     char t[24];
-    update_text(u, t, sizeof t);
+    update_text(u, t, sizeof t, 0);
     const int w = micro_width(t, 1) + 12;
 #if RADAR_ROUND
     if (u->sel || menu_up(u) || demo_shown(u)) return 0;
     *b = (note_box_t){ SCX - w / 2, SCY + 79, w, 13 };
 #else
-    if (!square_look(u)) {
+    if (!square_look(u) && panel_shown(u)) {
         if (u->sel) return 0;
-        *b = (note_box_t){ TX - 3, 3, TX2 - TX + 6, 14 };
+        *b = (note_box_t){ TX - 3, 3, title_end(u) - TX + 6, 14 };
+    } else if (!square_look(u)) {                      // under the town's name and the clock, if it is on
+        *b = (note_box_t){ 2, u->opt.clock ? CLOCK_Y + 9 : 27, w, 13 };
     } else {
         *b = (note_box_t){ 2, 28, w, 13 };
     }
@@ -1756,7 +1851,8 @@ void update_note(ui_t *u, canvas_t *cv)
     note_box_t b;
     if (!update_note_box(u, &b) || !gfx_touches(cv, b.y, b.y + b.h)) return;
     char t[24];
-    update_text(u, t, sizeof t);
+    update_text(u, t, sizeof t, 0);
+    if (micro_width(t, 1) > b.w - 6) update_text(u, t, sizeof t, 1);   // the 2.8"'s panel title, next to the dots
     const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_NEWS;
     const int tx = b.x + (b.w - micro_width(t, 1)) / 2, ty = b.y + (b.h - MICRO_H) / 2 + 1;   // in the middle
     if (u->cfg.look == LOOK_CLASSIC) {                 // on the light map: paper, dark ink
@@ -1818,9 +1914,15 @@ void main_draw(ui_t *u, canvas_t *cv)
 #else
     demo_card(u, cv);
     corners(u, cv);
-    chamfer_box(cv, PX, 2, PW, GFX_H - 4, C_PANEL, 120, C_QUIET, 200);
-    if (p) panel_plane(u, cv, p);
-    else panel_overview(u, cv);
+    if (panel_shown(u)) {
+        chamfer_box(cv, PX, 2, PW, GFX_H - 4, C_PANEL, 120, C_QUIET, 200);
+        if (p) panel_plane(u, cv, p);
+        else panel_overview(u, cv);
+    }
+    update_note(u, cv);                                // a newer version: the panel's title, or a card under the town's name
+#if RADAR_HAS_TOUCH
+    if (gfx_touches(cv, LOOK_Y, LOOK_Y + LOOK_H)) panel_dots(u, cv, RDOTS_X, LOOK_Y, RDOTS_W);
+#endif
 #endif
     ui_lap(u, cv, 4);
 }
@@ -1830,22 +1932,23 @@ void main_draw(ui_t *u, canvas_t *cv)
 void boot_banner(ui_t *u, canvas_t *cv)
 {
     uint32_t t = u->now - u->boot;
+    const int cx = panel_shown(u) ? SCX : GFX_W / 2;   // beside the panel (the radar's, or the map's slid in), or the screen's middle
     if (t < 1800u) {
         float f = (float)t / 1800.0f;
-        gfx_ring(cv, SCX, SCY, 8.0f + SR * f, 2.0f, C_FOCUS, (int)(230 * (1.0f - f)));
+        gfx_ring(cv, (float)cx, SCY, 8.0f + SR * f, 2.0f, C_FOCUS, (int)(230 * (1.0f - f)));
         int w = micro_width(RADAR_NAME, 2);
-        gfx_fill(cv, SCX - w / 2 - 4, SCY + 14, w + 8, 18, C_BG0, (int)(200 * (1.0f - f * f)));
-        micro_text(cv, SCX - w / 2, SCY + 18, RADAR_NAME, C_FOCUS, (int)(255 * (1.0f - f * f)), 2);
+        gfx_fill(cv, cx - w / 2 - 4, SCY + 14, w + 8, 18, C_BG0, (int)(200 * (1.0f - f * f)));
+        micro_text(cv, cx - w / 2, SCY + 18, RADAR_NAME, C_FOCUS, (int)(255 * (1.0f - f * f)), 2);
     }
     if (!ui_screen_name || u->now >= UI_SCREEN_PICK_MS || u->view != VIEW_MAIN) return;
-    const int bw = 156, bh = 32, bx = SCX - bw / 2, by = SCY + 40;
+    const int bw = 156, bh = 32, bx = cx - bw / 2, by = SCY + 40;
     if (!gfx_touches(cv, by, by + bh)) return;
     chamfer_box(cv, bx, by, bw, bh, C_BG0, 220, C_FOCUS, 230);
     const char *t1 = "SCREEN WRONG? PRESS BOOT";
-    micro_text(cv, SCX - micro_width(t1, 1) / 2, by + 7, t1, C_FOCUS, 250, 1);
+    micro_text(cv, cx - micro_width(t1, 1) / 2, by + 7, t1, C_FOCUS, 250, 1);
     char t2[40];
     snprintf(t2, sizeof t2, "NOW %s", ui_screen_name);
-    micro_text(cv, SCX - micro_width(t2, 1) / 2, by + 16, t2, C_DIM, 235, 1);
+    micro_text(cv, cx - micro_width(t2, 1) / 2, by + 16, t2, C_DIM, 235, 1);
     int left = (int)((float)(bw - 16) * (float)(UI_SCREEN_PICK_MS - u->now) / (float)UI_SCREEN_PICK_MS);
     gfx_fill(cv, bx + 8, by + bh - 5, left, 1, C_FOCUS, 200);
 }
@@ -1862,8 +1965,17 @@ int main_hit(const ui_t *u, int x, int y)
     if (update_note_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12)) return HIT_NEWS;
     return HIT_SCOPE;
 #else
-    note_box_t nb;                                     // a finger is wide: the note answers round it too
-    if (update_note_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12)) return HIT_NEWS;
+    const int lx = look_x(u), ly = LOOK_Y + LOOK_H + 12;
+    const int sx = x - view_cx(u), sy = y - SCY;
+    const int on_scope = !square_look(u) && sx * sx + sy * sy <= (SR + 6) * (SR + 6);
+#if RADAR_HAS_TOUCH
+    /* the radar's three dots, in the screen's corner: before the note, whose margin reaches them. over the
+     * panel only the dots themselves: under them the panel is its own (a tap there picks the next plane) */
+    if (!square_look(u) && y < (panel_shown(u) ? LOOK_Y + LOOK_H + 2 : ly) && x >= RDOTS_X - 4) return HIT_DOTS;
+#endif
+    note_box_t nb;                                     // a finger is wide: the note answers round it too, off the scope
+    if (update_note_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12) &&
+        (!on_scope || in_box(x, y, nb.x, nb.y, nb.w, nb.h))) return HIT_NEWS;
     // the buttons over the map answer further out than they are drawn: a finger is wide, a
     // resistive panel is a few pixels off
 #if UI_WIFI_PAGE
@@ -1872,21 +1984,17 @@ int main_hit(const ui_t *u, int x, int y)
         if (in_box(x, y, d.bx - 8, d.by - 8, d.bw + 16, d.bh + 16)) return HIT_WIFI;
     }
 #endif
-    const int lx = look_x(u), ly = LOOK_Y + LOOK_H + 12;
     if (square_look(u)) {
         if (y < ly && x >= lx + LOOK_W + 2 && x < view_right(u)) return HIT_DOTS;
         if (y < ly && x >= lx - 10 && x < lx + LOOK_W + 2) return HIT_LOOK;
         if (!panel_shown(u) || x < PX - 2) return HIT_SCOPE;   // the square map: all of it but the panel
-    } else if (y < ly && x >= lx - 12 && x < PX - 2) {
+    } else if (y < ly && x >= lx - 12 && x < (panel_shown(u) ? PX - 2 : RDOTS_X - 4)) {
         return HIT_LOOK;
     }
 #if RADAR_HAS_TOUCH
-    if (!square_look(u) && in_box(x, y, GEAR_X - 8, GEAR_Y - 8, GEAR_W + 16, GEAR_W + 16)) return HIT_GEAR;
+    if (!square_look(u) && in_box(x, y, GEAR_X(u) - 8, GEAR_Y - 8, GEAR_W + 16, GEAR_W + 16)) return HIT_GEAR;
 #endif
-    if (x < PX - 2) {
-        int dx = x - SCX, dy = y - SCY;
-        return dx * dx + dy * dy <= (SR + 6) * (SR + 6) ? HIT_SCOPE : HIT_NONE;
-    }
+    if (x < PX - 2 || !panel_shown(u)) return on_scope ? HIT_SCOPE : HIT_NONE;   // the scope: beside the panel, or anywhere without it
     if (y >= BTN_Y - 2) {
         int b = (x - btn_x(0)) / (BTN_W + 3);
         return b >= 0 && b < 3 ? HIT_BTN + b : HIT_NONE;

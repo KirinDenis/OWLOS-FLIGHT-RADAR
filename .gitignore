@@ -4,6 +4,11 @@ firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/managed_components/
 firmware/dependencies.lock
+/build/
+/sdkconfig
+/sdkconfig.old
+/managed_components/
+/dependencies.lock
 tools/preview/build/
 tools/FontBake/bin/
 tools/FontBake/obj/

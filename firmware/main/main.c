@@ -830,6 +830,8 @@ static const char *board_name(void)
     return "esp4827s043";
 #elif RADAR_DISPLAY == DISPLAY_CROW70_800x480
     return "crow70";
+#elif RADAR_DISPLAY == DISPLAY_CROW50_800x480
+    return "crow50";
 #else
     return "other";
 #endif

@@ -42,6 +42,7 @@ jobs:
           - { disp: tab5, num: 12, target: esp32p4 }
           - { disp: esp4827s043, num: 13, target: esp32s3 }
           - { disp: crow70, num: 14, target: esp32s3 }
+          - { disp: crow50, num: 15, target: esp32s3 }
     steps:
       - uses: actions/checkout@v4
 

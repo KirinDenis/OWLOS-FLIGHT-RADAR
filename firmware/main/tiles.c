@@ -127,7 +127,7 @@ static int w_end(writer_t *w, const tile_id_t *t)
 
 int tiles_fetch(const tile_id_t *t, int n)
 {
-    if (!s_part || !net_up()) return 0;
+    if (!s_part || !net_up() || !net_time_wait()) return 0;
     static char url[96], buf[1024];
     esp_http_client_handle_t h = NULL;
     int got = 0, fresh = 0;

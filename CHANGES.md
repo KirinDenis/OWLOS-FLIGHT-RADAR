@@ -7,9 +7,12 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 ## 0.13
 
 - The ESP-IDF extension can build the folder you opened. It was looking for `CMakeLists.txt` in the
-  repo root and the file was only in `firmware/`. Opening the repo builds the CrowPanel Advance 5.0
-  for an ESP32-S3. `project()` stays in that root file, so the chip's toolchain is the one the build
-  uses. ESP-IDF 6 names the panel's pixels as RGB565 instead of `bits_per_pixel`.
+  repo root and the file was only in `firmware/`. `project()` stays in that root file, so the chip's
+  toolchain is the one the build uses. ESP-IDF 6 names the panel's pixels as RGB565 instead of
+  `bits_per_pixel`.
+- Fixed: a watched plane's lookup was refused (`Failed to verify certificate`, HTTP 0). The
+  board asked for the time only while the clock was drawn, so a certificate dated this year was
+  "not yet valid". The time is asked as soon as the WiFi is up.
 - Fixed: the 5" on the bench is the plain CrowPanel (DIS07050H), the one the P2000 firmware
   already runs, not the Advance. Its backlight is GPIO 2 held high. Its picture pins and its
   touch (I2C on GPIO 19 and 20, a PCA9557 at 0x18) are that firmware's. Opening the folder builds

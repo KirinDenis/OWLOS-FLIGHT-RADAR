@@ -235,11 +235,34 @@ uint32_t net_utc(void)
     return t > 1700000000 ? (uint32_t)t : 0;          // not set yet, it counts from 1970
 }
 
+int net_time_wait(void)
+{
+    if (net_utc()) return 1;
+    net_time_start();
+    esp_netif_sntp_sync_wait(pdMS_TO_TICKS(4000));
+    if (net_utc()) return 1;
+    /* ADSB.FI's certificate is dated this year. with the clock still at 1970 it is "not yet
+     * valid", and the handshake stops before any answer: HTTP 0 */
+    static int said;
+    if (!said) {
+        said = 1;
+        ESP_LOGW(TAG, "the time is not in yet, so a certificate is refused");
+    }
+    return 0;
+}
+
+/* https while the clock is unset fails the same way every time. wait once, then skip */
+static int https_ready(const char *url)
+{
+    if (strncmp(url, "https://", 8) != 0) return 1;
+    return net_time_wait();
+}
+
 int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, int *status)
 {
     static char buf[1024];                            // one piece; the fetch task is the only caller
     *status = 0;
-    if (!s_up) return -1;
+    if (!s_up || !https_ready(url)) return -1;
     esp_http_client_config_t c = {
         .url = url,
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -277,7 +300,7 @@ int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, in
 int net_post_json(const char *url, const char *body, int *status)
 {
     *status = 0;
-    if (!s_up) return -1;
+    if (!s_up || !https_ready(url)) return -1;
     esp_http_client_config_t c = {
         .url = url,
         .method = HTTP_METHOD_POST,

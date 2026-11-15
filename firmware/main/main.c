@@ -628,7 +628,7 @@ static void fetch_task(void *arg)
         }
         uint32_t every = FREE_EVERY_MS;
         const int up = net_up();
-        if (up && s_opt.clock) net_time_start();
+        if (up) net_time_start();                          // the certificates need it, the drawn clock or not
         int trying = 0;
         if (configured && !up) {
             uint32_t now = now_ms();

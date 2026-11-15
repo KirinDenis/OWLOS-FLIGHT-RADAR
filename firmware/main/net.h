@@ -12,8 +12,10 @@ int  net_up(void);                           // 1 = connected, has an address
 int  net_why(void);                          // WHY_*: the network it is trying is not up because
 void net_ssid(char *buf, int cap);           // the network it is on, or is trying
 void net_ip(char *buf, int cap);
-/* the time, for the radar's clock. nothing asks a time server until the clock is turned on */
-void     net_time_start(void);               // again does nothing: it keeps itself right from then on
+/* the time. a certificate is checked against it, so it is asked as soon as the WiFi is up,
+ * whether or not the clock is drawn. again does nothing: it keeps itself right from then on */
+void     net_time_start(void);
+int      net_time_wait(void);                // 1 once the time is known, after a short wait
 uint32_t net_utc(void);                      // seconds since 1970, 0: not known yet
 /* the screen's WiFi page: look round for networks. request starts it, poll (each frame) gets
  * it going when the driver lets it, get copies the list and says SCAN_* */

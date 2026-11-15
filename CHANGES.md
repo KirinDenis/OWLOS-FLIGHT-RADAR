@@ -13,6 +13,10 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 - Fixed: a watched plane's lookup was refused (`Failed to verify certificate`, HTTP 0). The
   board asked for the time only while the clock was drawn, so a certificate dated this year was
   "not yet valid". The time is asked as soon as the WiFi is up.
+- Fixed: ADSB.FI's certificate is GTS Root R4 signed by an old GlobalSign root, which the common
+  bundle does not have. The same GTS root is already trusted. ESP-IDF 6 checks that
+  (`No matching trusted root certificate found` until `sdkconfig` is deleted and the folder
+  built again).
 - Fixed: the 5" on the bench is the plain CrowPanel (DIS07050H), the one the P2000 firmware
   already runs, not the Advance. Its backlight is GPIO 2 held high. Its picture pins and its
   touch (I2C on GPIO 19 and 20, a PCA9557 at 0x18) are that firmware's. Opening the folder builds

@@ -302,7 +302,9 @@ and a PC preview.
 - Opening this folder in the ESP-IDF extension (Cursor or VS Code) builds the plain Elecrow
   CrowPanel 5.0 (DIS07050H) for an ESP32-S3. Set the target to esp32s3, then build. The sources
   are still in `firmware/`. If a configure already failed, or this folder was last built for a
-  different screen, delete `build` and `sdkconfig` in this folder first. The Advance 5.0 is
+  different screen, delete `build` and `sdkconfig` in this folder first. The ADSB.FI certificate
+  check needs that too: an existing `sdkconfig` does not pick up the new line, and the log stays
+  `No matching trusted root certificate found`. The Advance 5.0 is
   `firmware/BUILD.BAT crowadv50`.
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
   `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),

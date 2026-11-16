@@ -32,6 +32,7 @@ typedef struct {
     void       *ctx;
     uint8_t     rows[2][ROW_MAX];             /* this row and the one above: filters need it */
     int         cur, filled, rowlen, y;
+    int         depth;                        /* bits a sample: 8, or 1, 2, 4 for grey and palette */
 } st_t;
 
 static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3]; }
@@ -104,6 +105,21 @@ static int unfilter(uint8_t *c, const uint8_t *p, int n, int bpp, int f)
     return 1;
 }
 
+/* 1, 2 or 4 bits a pixel, grey or palette: OSM's tiles of open sea and plain land come so, a few
+ * colours in a few hundred bytes. a byte each, put after the packed row in the same buffer (ROW_MAX
+ * has the room), so row() sees an 8 bit picture; grey stretched to 0..255. read as 8 bits only, every
+ * such tile was refused, and the map kept a hole there for good */
+static const uint8_t *widen(const st_t *s, uint8_t *c)
+{
+    const int d = s->depth, mask = (1 << d) - 1, grey = s->info.type == 0 ? 255 / mask : 1;
+    uint8_t *w = c + s->rowlen;
+    for (int x = 0; x < s->info.w; x++) {
+        const int bit = x * d;
+        w[x] = (uint8_t)(((c[1 + bit / 8] >> (8 - d - bit % 8)) & mask) * grey);
+    }
+    return w;
+}
+
 static void put(st_t *s, int b)
 {
     s->win[(s->out / WIN_PIECE) % WIN_PIECES][s->out % WIN_PIECE] = (uint8_t)b;
@@ -113,7 +129,7 @@ static void put(st_t *s, int b)
     c[s->filled++] = (uint8_t)b;
     if (s->filled < s->rowlen) return;
     if (!unfilter(c + 1, s->rows[s->cur ^ 1] + 1, s->rowlen - 1, s->info.bpp, c[0])) { s->bad = 1; return; }
-    s->row(s->ctx, &s->info, s->y++, c + 1);
+    s->row(s->ctx, &s->info, s->y++, s->depth < 8 ? widen(s, c) : c + 1);
     s->cur ^= 1;
     s->filled = 0;
 }
@@ -304,10 +320,12 @@ int png_decode(png_read_fn rd, void *rctx, png_head_fn head, png_row_fn row, voi
             in->w = (int)be32(h);
             in->h = (int)be32(h + 4);
             in->type = h[9];
-            if (h[8] != 8 || in->type > 6 || !BPP[in->type] || h[12] != 0) goto done;   // 8 bits, not interlaced
+            s->depth = h[8];
+            const int small = (in->type == 0 || in->type == 3) && (s->depth == 1 || s->depth == 2 || s->depth == 4);
+            if ((s->depth != 8 && !small) || in->type > 6 || !BPP[in->type] || h[12] != 0) goto done;   // not interlaced
             if (in->w < 1 || in->w > PNG_MAX_W || in->h < 1) goto done;
-            in->bpp = BPP[in->type];
-            s->rowlen = 1 + in->w * in->bpp;
+            in->bpp = BPP[in->type];                   // the filters' step: a byte for grey and palette, packed or not
+            s->rowlen = 1 + (small ? (in->w * s->depth + 7) / 8 : in->w * in->bpp);
             if (!skip(s, 13 + 4)) goto done;
         } else if (!strcmp(type, "PLTE")) {
             if (len > 768 || len % 3 || !need(s, (int)len)) goto done;

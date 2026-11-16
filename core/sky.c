@@ -217,6 +217,8 @@ static void merge(sky_t *s, const plane_t *in, uint32_t now)
     if (p->icao == in->icao) {                         // known: the old position goes to the trail
         float dx = x - p->x, dy = y - p->y;
         if (dx * dx + dy * dy > 900.0f) p->tn = 0;    // jumped 30 km: lost and found again, the old trail would cross the map
+        else if (fabsf(p->x) > 327.0f || fabsf(p->y) > 327.0f) p->tn = 0;   // past what 10 m units hold in 16 bits: a point there
+                                                       // wrapped to the other side and its line crossed the scope (NM, MI: 250 is 463 km)
         else if (dx * dx + dy * dy > 0.04f) {         // moved more than 200 m
             if (p->tn == TRAIL_N) { memmove(p->tx, p->tx + 1, sizeof p->tx[0] * (TRAIL_N - 1)); memmove(p->ty, p->ty + 1, sizeof p->ty[0] * (TRAIL_N - 1)); p->tn--; }
             p->tx[p->tn] = (int16_t)lroundf(p->x * 100.0f);

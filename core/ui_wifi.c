@@ -349,7 +349,7 @@ int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max)
     if (max < 8 || a->view != VIEW_KEYS || b->view != VIEW_KEYS) return -1;
     if (a->kb_mode != b->kb_mode || a->kb_page != b->kb_page || a->theme != b->theme ||
         memcmp(&a->cfg, &b->cfg, sizeof a->cfg) ||
-        (int32_t)(a->toast_until - a->now) > 0 || (int32_t)(b->toast_until - b->now) > 0)
+        ui_until(a->toast_until, a->now) || ui_until(b->toast_until, b->now))
         return -1;
     int n = 0;
     int ca, cb;

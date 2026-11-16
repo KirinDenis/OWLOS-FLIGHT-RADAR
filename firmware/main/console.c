@@ -1,4 +1,6 @@
 #include "console.h"
+#include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "driver/uart.h"
@@ -126,10 +128,15 @@ int json_str(const char *json, const char *key, char *out, int cap)
     while (*p && *p != '"') {
         char ch = *p++;
         if (ch == '\\' && *p == 'u') {                 // č: a letter written as its number, back to UTF-8
-            unsigned cp = (unsigned)strtoul((char[5]){ p[1], p[2], p[3], p[4], 0 }, NULL, 16);
-            int k = 0;
-            while (k < 5 && p[k]) k++;
+            /* up to four hex digits and no further: a text cut short after \u (Nominatim's answer is cut
+             * at 2 KB) was read past its end, and a short one like \u12" took the closing quote with it */
+            int k = 1;
+            while (k < 5 && isxdigit((unsigned char)p[k])) k++;
+            char hex[5] = { 0 };
+            memcpy(hex, p + 1, (size_t)(k - 1));
             p += k;
+            if (k == 1) continue;                      // \u and no number: left out
+            unsigned cp = (unsigned)strtoul(hex, NULL, 16);
             char u8[3];
             int len = cp < 0x80 ? 1 : cp < 0x800 ? 2 : 3;
             if (len == 1) u8[0] = (char)cp;
@@ -154,5 +161,5 @@ int json_num(const char *json, const char *key, double *out)
     const char *p = field(json, key);
     if (!p || (*p != '-' && (*p < '0' || *p > '9'))) return 0;
     *out = strtod(p, NULL);
-    return 1;
+    return isfinite(*out);                             // not -nan or -inf: a NaN home passed every range check and was kept
 }

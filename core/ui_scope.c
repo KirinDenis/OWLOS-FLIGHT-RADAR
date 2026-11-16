@@ -567,15 +567,18 @@ static int can_conflict(const plane_t *p, const spot_t *sp)
  * nothing here changes faster than a second */
 static void conflicts(ui_t *u)
 {
-    static uint32_t at;
+    static uint32_t at, seen;
     static float px[SKY_MAX], py[SKY_MAX], vx[SKY_MAX], vy[SKY_MAX];
     const sky_t *s = &u->snap;
     if (!u->opt.conflict || u->cfg.look != LOOK_RADAR) {
         for (int i = 0; i < s->n; i++) u->spot[i].alert = 0;
         return;
     }
-    if (u->now - at < 1000u) return;
+    /* an answer puts the planes in another order: the pairs are numbers in it, so a new answer is
+     * looked at at once. kept for up to a second, a red line joined two other planes meanwhile */
+    if (u->now - at < 1000u && s->updated == seen) return;
     at = u->now;
+    seen = s->updated;
     for (int i = 0; i < s->n; i++) {
         const plane_t *p = &s->p[i];
         float km_s = p->gs * 1.852f / 3600.0f;
@@ -1771,7 +1774,7 @@ static void panel_plane(ui_t *u, canvas_t *cv, const plane_t *p)
 /* --- the round glass: no corners, no panel. what the panel says comes in a card under home:
  * the picked plane, the HUE LIST SET row after a tap on nothing, or a note of what is up --- */
 
-static int menu_up(const ui_t *u) { return !u->sel && (int32_t)(u->menu_until - u->now) > 0; }
+static int menu_up(const ui_t *u) { return !u->sel && ui_until(u->menu_until, u->now); }
 
 static void round_card(ui_t *u, canvas_t *cv, const plane_t *p)
 {
@@ -2033,7 +2036,7 @@ void ui_top_info(const ui_t *u, ui_top_t *t)
         HOLE(d.x, d.y, d.w, d.h);
     }
 #endif
-    if (t->any && (int32_t)(u->toast_until - u->now) > 0) {
+    if (t->any && ui_until(u->toast_until, u->now)) {
         const int w = font_width(&FONT_MEDIUM, u->toast) + 20;
         HOLE((GFX_W - w) / 2, GFX_H / 2 - 16, w, 26);
     }

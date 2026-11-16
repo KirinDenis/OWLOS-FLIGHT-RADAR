@@ -8,6 +8,8 @@
 
 int  tiles_init(void);                       /* finds the partition and what it keeps: 0 = none */
 int  tiles_have(const tile_id_t *t);
+/* a kept tile that would not read: forgotten for good, so the next tiles_fetch asks for it again */
+void tiles_drop(const tile_id_t *t);
 /* downloads those of these not kept yet, over one connection. how many are kept now */
 int  tiles_fetch(const tile_id_t *t, int n);
 

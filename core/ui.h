@@ -187,6 +187,10 @@ typedef struct {
                               compass, planes, panel, the rest */
 } ui_t;
 
+/* a deadline in the 32-bit milliseconds still ahead. 0 is none: ui_frame lets a passed one go at once,
+ * or 24.8 days on the clock would wrap round to it and read it as ahead again, a toast back for good */
+static inline int ui_until(uint32_t until, uint32_t now) { return until && (int32_t)(until - now) > 0; }
+
 int  ui_init(ui_t *u, uint32_t now);
 void ui_set_cfg(ui_t *u, const fr_cfg_t *c);
 // copy the sky and the net state into u->snap / u->net before this

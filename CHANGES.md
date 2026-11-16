@@ -16,6 +16,18 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 - WiFi: a network served by several access points is joined at the strongest one. The board looks on every
   channel first, so joining takes a moment longer. (chipguyhere)
 - The USB console finds a command even when a restart left stray bytes in front of it. (chipguyhere)
+- Fixed: the map kept holes over the sea and plain land, on every board. OpenStreetMap sends those tiles
+  with few colours, 1, 2 or 4 bits a pixel, and the board read only 8. A tile it cannot read is now also
+  dropped and asked for again, and the log says so.
+- Fixed: after a new range the map went from the screen until all its new tiles came, and with the memory
+  short on the 3.5" they could stay away. The map shown now stays until the new one has tiles to show.
+- Fixed: on the 3.5" the second core took and gave back 38 KB at every page and broke the memory into
+  pieces. It now stays through the pages of the radar look. A rare restart when no memory was left for
+  the screen's strips is gone too.
+- Fixed: a tile server that does not answer, or a tile cut short, no longer holds the planes back for
+  minutes: the other tiles wait for the next round.
+- Fixed: after 24.8 days without a toast the last one came back on the screen for good (on the round
+  board the HUE LIST SET row too). A plane farther than 327 km no longer draws its trail across the scope.
 
 ## 0.13
 

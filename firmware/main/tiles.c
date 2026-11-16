@@ -71,6 +71,17 @@ int tiles_init(void)
 
 int tiles_have(const tile_id_t *t) { return find(t) >= 0; }
 
+void tiles_drop(const tile_id_t *t)
+{
+    int i = find(t);
+    if (i < 0) return;
+    /* its header's magic cleared in the flash (a write turns bits from 1 to 0 without an erase): the
+     * scan at power on passes it by, so it is not kept again after a restart either */
+    const uint32_t zero = 0;
+    esp_partition_write(s_part, s_kept[i].off, &zero, sizeof zero);
+    forget(i);
+}
+
 int tiles_open(const tile_id_t *t, tile_src_t *s)
 {
     int i = find(t);
@@ -131,11 +142,19 @@ int tiles_fetch(const tile_id_t *t, int n)
     if (!s_part || !net_up()) return 0;
     static char url[96], buf[1024];
     esp_http_client_handle_t h = NULL;
-    int got = 0, fresh = 0;
+    int got = 0, fresh = 0, stop = 0;
     for (int k = 0; k < n; k++) {
         if (tiles_have(&t[k])) { got++; continue; }
-        if (!map_url(&t[k], url, sizeof url)) continue;
+        if (stop || !map_url(&t[k], url, sizeof url)) continue;   // after a stop the rest are counted, not asked for
+        int status = 0, whole = 0;
         for (int attempt = 0; attempt < 2; attempt++) {    // the server may have closed the kept connection
+            if (h && esp_http_client_set_url(h, url) != ESP_OK) {
+                /* the new address not taken (no memory for it): the client would ask for the last tile
+                 * again, and that one would be kept under this tile's name for good. a new client */
+                esp_http_client_close(h);
+                esp_http_client_cleanup(h);
+                h = NULL;
+            }
             if (!h) {
                 esp_http_client_config_t c = {
                     .url = url,
@@ -149,10 +168,9 @@ int tiles_fetch(const tile_id_t *t, int n)
                 h = esp_http_client_init(&c);
                 if (!h) return got;
                 esp_http_client_set_header(h, "Accept", "image/png");
-            } else {
-                esp_http_client_set_url(h, url);
             }
-            int status = 0, whole = 0;
+            whole = 0;
+            status = 0;
             writer_t w;
             if (esp_http_client_open(h, 0) == ESP_OK && esp_http_client_fetch_headers(h) >= 0) {
                 status = esp_http_client_get_status_code(h);
@@ -177,6 +195,13 @@ int tiles_fetch(const tile_id_t *t, int n)
                 h = NULL;
             }
             if (status) break;                              // no answer at all: once more, on the new one
+        }
+        if (!status || (status == 200 && !whole) || status == 403 || status == 429) {
+            /* no answer twice, a tile cut short, or the server says no: the rest wait for the next round.
+             * asked one by one, a server that said nothing cost 18 s a tile and held the planes back for
+             * minutes, and on the 3.5" each tile cut short (TLS short of memory) cost two handshakes more */
+            ESP_LOGW(TAG, "a tile did not come (HTTP %d): the others wait for the next round", status);
+            stop = 1;
         }
     }
     if (h) {

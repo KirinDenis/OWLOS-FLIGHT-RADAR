@@ -474,6 +474,8 @@ void ui_frame(ui_t *u, uint32_t now)
 {
     fling_step(u, now);
     u->now = now;
+    if (!ui_until(u->toast_until, now)) u->toast_until = 0;    // passed: let go, see ui_until
+    if (!ui_until(u->menu_until, now)) u->menu_until = 0;
     u->beam = wrap360((float)(now % BEAM_TURN_MS) * (360.0f / BEAM_TURN_MS));
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
     grid_columns(scope_glass_cx(u));                        // the background's grid through the scope's middle
@@ -688,7 +690,7 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
             int i = scope_pick(u, x, y);
 #if RADAR_ROUND
             // round glass, no panel: a tap on nothing brings the HUE LIST SET row, another one hides it
-            if (i < 0 && !u->sel) { u->menu_until = (int32_t)(u->menu_until - u->now) > 0 ? 0 : u->now + ROUND_MENU_MS; return; }
+            if (i < 0 && !u->sel) { u->menu_until = ui_until(u->menu_until, u->now) ? 0 : u->now + ROUND_MENU_MS; return; }
             u->menu_until = 0;
 #endif
             select_plane(u, i);
@@ -943,7 +945,7 @@ void ui_strip(ui_t *u, canvas_t *cv)
     case VIEW_ABOUT: about_draw(u, cv); break;
     default:         main_draw(u, cv); boot_banner(u, cv); break;
     }
-    if ((int32_t)(u->toast_until - u->now) > 0) {
+    if (ui_until(u->toast_until, u->now)) {
         int w = font_width(&FONT_MEDIUM, u->toast) + 20;
         int ty = u->view == VIEW_CAL ? GFX_H / 2 + 52 : GFX_H / 2 - 16;
         chamfer_box(cv, (GFX_W - w) / 2, ty, w, 26, C_BG0, 225, C_FOCUS, 230);

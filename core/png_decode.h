@@ -3,7 +3,8 @@
  * eight pieces of 4 KB. the ESP32 has an inflater in ROM (miniz's tinfl), but it wants the 32 KB
  * in one piece, and after the WiFi starts the heap has nothing that big. so this one is our own,
  * after Mark Adler's puff: plain, a bit at a time.
- * 8 bit palette, grey, grey+alpha, RGB, RGBA; not interlaced (map tiles never are) */
+ * 8 bit palette, grey, grey+alpha, RGB, RGBA, and 1, 2, 4 bit palette and grey (OSM's tiles of sea
+ * and plain land), handed to row() as 8 bits; not interlaced (map tiles never are) */
 #pragma once
 #include <stddef.h>
 #include <stdint.h>

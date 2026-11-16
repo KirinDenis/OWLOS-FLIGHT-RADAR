@@ -128,14 +128,18 @@ void store_save_cal(const touch_cal_t *cal) { save_blob("cal", cal, sizeof *cal)
 
 int store_load_screen(void)
 {
-    nvs_handle_t h;
-    uint8_t v = 0;
-    if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
-        if (nvs_open("radarscan", NVS_READONLY, &h) != ESP_OK) return -1;   // the radar may know the screen too
+    /* ours, else the WiFi radar's: it may know the screen too. asked by the key: our namespace is
+     * there from the first start on (store_save_ran), so asking only when it was not never got there */
+    static const char *const FROM[] = { NS, "radarscan" };
+    for (int i = 0; i < 2; i++) {
+        nvs_handle_t h;
+        uint8_t v = 0;
+        if (nvs_open(FROM[i], NVS_READONLY, &h) != ESP_OK) continue;
+        esp_err_t e = nvs_get_u8(h, "screen", &v);
+        nvs_close(h);
+        if (e == ESP_OK) return v;
     }
-    esp_err_t e = nvs_get_u8(h, "screen", &v);
-    nvs_close(h);
-    return e == ESP_OK ? v : -1;
+    return -1;
 }
 
 void store_save_screen(int profile)

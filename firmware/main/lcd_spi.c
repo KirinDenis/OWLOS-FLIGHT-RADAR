@@ -390,7 +390,13 @@ int disp_rows(int rows)
         s_buf[k] = NULL;
     }
     int ok = alloc_bufs(rows);
-    if (!ok && !alloc_bufs(DISP_STRIP)) ESP_LOGE(TAG, "no DMA memory for the strips");
+    if (!ok && !alloc_bufs(DISP_STRIP)) {
+        /* none at all: the fetch task took the memory meanwhile. s_rows said the old size, and the
+         * next disp_rows(DISP_STRIP) took that for done and the next strip went to NULL. now
+         * disp_strip2 asks again */
+        s_rows = 0;
+        ESP_LOGE(TAG, "no DMA memory for the strips");
+    }
     xSemaphoreGive(s_done);
     return ok;
 }
@@ -467,6 +473,7 @@ void disp_strip(const canvas_t *cv) { disp_strip2(cv, 0); }
  * next disp_strip2 sends. that buffer's last transfer was waited for before the one after it */
 void disp_pack_under(const canvas_t *under)
 {
+    if (!s_buf[s_k]) return;                           // no strips just now (disp_rows): nothing to pack into
     gfx_pack565(under, s_buf[s_k] + GFX_W * DISP_STRIP);
 }
 #endif
@@ -476,6 +483,9 @@ void disp_pack_under(const canvas_t *under)
  * keep the sender waiting */
 void disp_strip2(const canvas_t *cv, int under_rows)
 {
+    /* the strips' memory lost (disp_rows, or none at the start): asked for again here, single strips,
+     * the second core is not drawing then. none yet: this strip is not shown, the next one asks again */
+    if (!s_buf[0] && !alloc_bufs(DISP_STRIP)) return;
     uint16_t *buf = s_buf[s_k];
     s_k ^= 1;
     gfx_pack565(cv, buf);   // this buffer went out two strips ago and we waited for that, so its free

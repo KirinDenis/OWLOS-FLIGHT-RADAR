@@ -193,8 +193,11 @@ static void *iram_first(size_t bytes)
 {
 #if CONFIG_IDF_TARGET_ESP32
     return heap_caps_malloc(bytes, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
-#elif DISP_LCD_RGB || DISP_LCD_DSI || DISP_WAVE7 || DISP_JC8012 || CONFIG_IDF_TARGET_ESP32C5
-    return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);  // the 5" and the Tab5: 190 KB, no such room in the RAM. the C5: 38 KB the strips want
+#elif CONFIG_SPIRAM
+    /* every board with PSRAM: the 5" and the Tab5 have no room for its 190 KB in the RAM, the C5's
+     * strips and AES want the RAM, and the S3 2.8" boards gave it to malloc, so their RAM held it too.
+     * no PSRAM found after all: NULL, and map.c takes malloc's */
+    return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
 #else
     (void)bytes;
     return NULL;                                       // the C3's RAM is one: malloc does it
@@ -206,6 +209,8 @@ static CORE_BIG map_plan_t s_plan;
 static int        s_map_read;          // tiles that went into s_map
 static uint32_t   s_map_done;          // and which of the plan's, a bit each
 static uint32_t   s_map_try;           // when it last asked for missing ones
+static float      s_fail_kpx;          // a new picture that could not be made: its scale, and when, so it is
+static uint32_t   s_fail_at;           // asked for again 15 s on and not in every round
 _Static_assert(MAP_TILES_MAX <= 32, "a bit a tile in s_map_done");
 
 static void map_service(const fr_cfg_t *c)
@@ -216,11 +221,24 @@ static void map_service(const fr_cfg_t *c)
     ui_ground_size(c, &w, &h, &disc);                       // the look sets its size: the whole screen or the disc
     int same = s_map.ready && s_map.lat == c->lat && s_map.lon == c->lon && s_map.kpx == kpx && s_map.w == w && s_map.h == h;
     if (same && (s_map_read == s_plan.ntiles || now_ms() - s_map_try < 15000u)) return;
+    /* a new picture that could not be made last time (none of its tiles, or no memory for it): asked
+     * for again 15 s on. each try costs TLS handshakes, and on the 3.5" every 5 s of them cut the
+     * memory into pieces the tiles then could not use */
+    if (!same && s_fail_at && s_fail_kpx == kpx && now_ms() - s_fail_at < 15000u) return;
     if (!same) map_plan(&s_plan, c->lat, c->lon, kpx, w, h, disc);   // a retry asks for the same tiles again
     s_map_try = now_ms();
     int kept = tiles_fetch(s_plan.tiles, s_plan.ntiles);      // the missing ones, when the WiFi is up
     uint32_t low_fetch = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
     if (same && kept <= s_map_read) return;                   // nothing new to show
+    /* a new range or turn with none of its tiles here yet: the map shown stays, the scope scales it by
+     * its own kpx, and the plan goes back to it, so s_map_done is still its. wiped first, the map went
+     * from the screen and stayed away while the new tiles could not come */
+    if (!same && !kept && s_map.ready && s_map.w == w && s_map.h == h && s_map.lat == c->lat && s_map.lon == c->lon) {
+        map_plan(&s_plan, s_map.lat, s_map.lon, s_map.kpx, s_map.w, s_map.h, s_map.disc);
+        s_fail_kpx = kpx;
+        s_fail_at = now_ms() | 1u;
+        return;
+    }
     int64_t t0 = esp_timer_get_time();
     /* a retry for the same plan reads only the tiles still missing, into the texels as they are.
      * it used to wipe them and read every tile again: with the memory short just then, a map that
@@ -228,24 +246,32 @@ static void map_service(const fr_cfg_t *c)
     if (!same) {
         if (!map_alloc(&s_map, w, h, disc)) {
             ESP_LOGE(TAG, "map: no memory for %d x %d texels", w, h);
+            s_fail_kpx = kpx;
+            s_fail_at = now_ms() | 1u;
             return;
         }
         map_begin(&s_map);
         s_map_done = 0;
     }
-    int read = 0, oom = 0;
+    s_fail_at = 0;
+    int read = 0, oom = 0, bad = 0;
     for (int k = 0; k < s_plan.ntiles; k++) {
         tile_src_t src;
         if (!(s_map_done & 1u << k) && tiles_open(&s_plan.tiles[k], &src)) {
             int r = map_tile(&s_map, &s_plan, k, tiles_read, &src);
             if (r == PNG_OK) s_map_done |= 1u << k;
             oom |= r == PNG_NO_MEMORY;
+            if (r == PNG_BAD) {                                // kept but not readable: it was asked for again
+                tiles_drop(&s_plan.tiles[k]);                  // never, and the map kept its hole for good
+                bad++;
+            }
         }
         read += (s_map_done >> k) & 1;
     }
     map_end(&s_map, &s_plan);
     if (oom) ESP_LOGW(TAG, "map: no memory to read a tile in, heap %u, largest %u",
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    if (bad) ESP_LOGW(TAG, "map: %d kept tiles not readable, dropped, asked for again", bad);
     s_map_read = read;
     ESP_LOGI(TAG, "map: zoom %d, %d of %d tiles, made in %d ms, heap %u, at least %u after the tiles came, %u after reading them",
              s_plan.z, read, s_plan.ntiles, (int)((esp_timer_get_time() - t0) / 1000), (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
@@ -607,7 +633,16 @@ static volatile uint32_t s_pick;                       // OWLOS PICK from the pa
 static volatile int      s_pick_new;
 static uint32_t          s_sel_told;                   // the picked plane the page knows of
 
-static int page_there(void) { return (int32_t)(s_sky_until - now_ms()) > 0; }
+/* 0: no page. a passed time is let go here (only if no SKY ON renewed it meanwhile): left as it was,
+ * 24.8 days later the 32-bit milliseconds would wrap round to it and read it as ahead again, and
+ * every answer would go out over the console for good */
+static int page_there(void)
+{
+    uint32_t until = s_sky_until;
+    if (until && (int32_t)(until - now_ms()) > 0) return 1;
+    if (until) __atomic_compare_exchange_n(&s_sky_until, &until, 0u, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    return 0;
+}
 
 static void sky_out(void)
 {
@@ -1009,11 +1044,11 @@ static void on_line(const char *line)
     if (!strcmp(line, "OWLOS SKY ON")) {               // the page's radar, see sky_out
         s_align_told = -1;
         int was = page_there();
-        s_sky_until = now_ms() + SKY_OUT_MS;
+        s_sky_until = (now_ms() + SKY_OUT_MS) | 1u;    // never 0: that is no page
         if (!was) xTaskNotifyGive(s_fetch);            // the first answer now, not in five seconds
         return;
     }
-    if (!strcmp(line, "OWLOS SKY OFF")) { s_sky_until = now_ms(); return; }
+    if (!strcmp(line, "OWLOS SKY OFF")) { s_sky_until = 0; return; }
     if (!strncmp(line, "OWLOS PICK ", 11)) {           // a plane tapped on the page, 0: let go
         s_pick = (uint32_t)strtoul(line + 11, NULL, 16);
         s_pick_new = 1;
@@ -1132,6 +1167,8 @@ static void on_line(const char *line)
         s_opt = opt;
         s_opt_new = 1;
     }
+    nets_t nets = { 0 };                               // the list as it is now, taken under the lock: the screen's
+    if (wifi) nets = s_nets;                           // WiFi page may change it meanwhile on the other task
     unlock();
     if (lit) store_save_light(&light);
     if (opted) store_save_opt(&opt);
@@ -1139,7 +1176,10 @@ static void on_line(const char *line)
         store_save_watch(watch);
         ESP_LOGI(TAG, "watch list from the site: %s", watch[0] ? watch : "none");
     }
-    if (wifi) net_reconnect(&s_nets);
+    if (wifi) {
+        net_reconnect(&nets);
+        memset(&nets, 0, sizeof nets);                 // the passwords off the stack
+    }
     ESP_LOGI(TAG, "settings from the site: network \"%s\", home %.4f %.4f, %s%s", sec.ssid, (double)c.lat, (double)c.lon,
              c.source == SRC_FR24 ? "FR24" : "free networks", sec.key[0] ? ", FR24 key stored" : "");
     printf("OWLOS OK\n");
@@ -1159,13 +1199,16 @@ static void wifi_from_screen(void)
     unlock();
     memset(s_ui.wifi_pass, 0, sizeof s_ui.wifi_pass);
     store_save_secrets(&sec);
+    nets_t nets;
     lock();
     s_sec = sec;
     s_sky.n = 0;
     s_sky.status = SKY_CONNECTING;
     s_wifi_try = now_ms();
+    nets = s_nets;                                     // under the lock: the site may change the list meanwhile
     unlock();
-    net_reconnect(&s_nets);
+    net_reconnect(&nets);
+    memset(&nets, 0, sizeof nets);                     // the passwords off the stack
     memset(sec.pass, 0, sizeof sec.pass);
     ESP_LOGI(TAG, "WiFi from the screen: network \"%s\"", sec.ssid);
     xTaskNotifyGive(s_fetch);
@@ -1666,7 +1709,7 @@ static int touch_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max)
     if (max < 4) return -1;
     for (int i = 0; i < 2; i++)
         if (!s_tr[i] && !(s_tr[i] = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM))) return -1;
-    if (((int32_t)(a->toast_until - a->now) > 0) != ((int32_t)(b->toast_until - b->now) > 0)) return -1;
+    if (ui_until(a->toast_until, a->now) != ui_until(b->toast_until, b->now)) return -1;
     memcpy(s_tr[0], a, sizeof(ui_t));
     memcpy(s_tr[1], b, sizeof(ui_t));
     strip_touch(s_tr[0]);
@@ -2558,11 +2601,21 @@ static void ui_task(void *arg)
         int naps = 0;
         n->scan = (uint8_t)net_scan_get(n->aps, &naps);   // what the WiFi page shows
         n->n_aps = (uint8_t)naps;
+        lock();                                        // the list may change on the console's task
         for (int k = 0; k < naps; k++) n->aps[k].kept = nets_find(&s_nets, n->aps[k].ssid) != NULL;
+        unlock();
 
 #if DISP_HELPER
+#if CONFIG_SPIRAM
         helper_set(s_ui.view == VIEW_MAIN && s_ui.cfg.look == LOOK_RADAR);
-        const int step = s_helper ? 2 * DISP_STRIP : DISP_STRIP;
+#else
+        /* no PSRAM (the 3.5"): the second core is kept through the pages of the radar look and idles
+         * there. taken at the radar and given back at every page, its 38 KB cut the heap into pieces
+         * the map's tiles then could not use */
+        helper_set(s_ui.cfg.look == LOOK_RADAR);
+#endif
+        const int pair = s_helper && s_ui.view == VIEW_MAIN;   // the second core draws the radar's strips only
+        const int step = pair ? 2 * DISP_STRIP : DISP_STRIP;
 #elif !RADAR_OVERLAY
         const int step = DISP_STRIP;
 #endif
@@ -2574,7 +2627,7 @@ static void ui_task(void *arg)
         for (int sy0 = 0; sy0 < GFX_PH; sy0 += step) {
             canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0, 0 };
 #if DISP_HELPER
-            const int y1 = sy0 + DISP_STRIP, two = s_helper && y1 < GFX_PH;
+            const int y1 = sy0 + DISP_STRIP, two = pair && y1 < GFX_PH;
             if (two) {                                 // the strip under it, on the other core meanwhile
                 s_help_cv.y0 = y1;
                 s_help_cv.h = y1 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - y1;

@@ -175,8 +175,8 @@ void chamfer_box(canvas_t *cv, int x, int y, int w, int h, uint32_t fill, int fi
 {
     if (!gfx_touches(cv, y - 1, y + h)) return;
     const int k = 5, x1 = x + w - 1, y1 = y + h - 1;
-#if GFX_SCALED && GFX_SCALE_NUM != 3
-    /* scales other than 3/2 (the Waveshare 7B's 15/8, the Tab5's 9/4; fork): the straight sides as
+#if GFX_SCALED && GFX_SCALE_NUM != 3 && RADAR_OVERLAY
+    /* scales other than 3/2 (the Waveshare 7B's 15/8, the JC8012's 5/2; chipguyhere): the straight sides as
      * whole pixels and the cut corners as smooth lines between pixel middles only line up at 3/2.
      * elsewhere the corners stepped. every side the same way instead, through the pixels' middles */
     {
@@ -428,7 +428,7 @@ void ui_set_cfg(ui_t *u, const fr_cfg_t *c)
     ui_set_theme(u, c->theme);
 }
 
-/* (fork addition) the page's list scroll and how far it goes, NULL: this page has no list that scrolls.
+/* (chipguyhere) the page's list scroll and how far it goes, NULL: this page has no list that scrolls.
  * the numbers are the drag's in ui_touch (they were there inline) */
 static int *list_scroll_of(ui_t *u, int *maxs)
 {
@@ -442,7 +442,7 @@ static int *list_scroll_of(ui_t *u, int *maxs)
     return list ? &u->list_scroll : wifi ? &u->wifi_scroll : &u->setup_scroll;
 }
 
-/* (fork addition) momentum. the speed decays by e every FLING_TAU ms, so the list comes to rest
+/* (chipguyhere) momentum. the speed decays by e every FLING_TAU ms, so the list comes to rest
  * FLING_TAU * the speed further on (a flick of 1.5 px/ms: ~490 px, ~1.5 lists). it stops at either end */
 #define FLING_TAU   325.0f
 #define FLING_MIN   0.25f          /* px/ms at the lift: slower is a placed list, not a flick */
@@ -745,7 +745,7 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
 }
 
 #if RADAR_OVERLAY
-/* (fork addition) see ui.h. the numbers are ui_touch's own (just below) and the pages' gfx_sub bounds */
+/* (chipguyhere) see ui.h. the numbers are ui_touch's own (just below) and the pages' gfx_sub bounds */
 #define SCROLL_LIST_HEAD (RADAR_ROUND ? 0 : 14)        /* ui_pages.c LIST_HEAD */
 int ui_scroll_info(const ui_t *u, ui_scroll_t *s)
 {
@@ -789,7 +789,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
         u->t_since = now;
         u->t_moved = u->t_long = u->t_ns = u->t_reps = u->t_rpt = u->t_turn = 0;
         u->t_panel = 0;
-        u->t_caught = u->fling;                        // (fork addition) a finger on a coasting list stops it, nothing more
+        u->t_caught = u->fling;                        // (chipguyhere) a finger on a coasting list stops it, nothing more
         u->fling = 0;
         u->t_hit = u->t_caught ? HIT_NONE : hit_at(u, x, y);
         u->t_scroll0 = u->view == VIEW_LIST ? u->list_scroll : u->view == VIEW_WIFI ? u->wifi_scroll : u->setup_scroll;
@@ -838,7 +838,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
             if (s > maxs) s = maxs;
             if (s < 0) s = 0;
             *sp = s;
-            /* (fork addition) the finger's speed, for the momentum at the lift: from the samples that moved,
+            /* (chipguyhere) the finger's speed, for the momentum at the lift: from the samples that moved,
              * smoothed over the last few. the scroll goes the other way to the finger */
             if (y != u->fl_y) {
                 const int32_t dt = (int32_t)(now - u->fl_at);
@@ -876,7 +876,10 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
             cmd->cfg = cmd->refetch = 1;
         } else if (u->t_moved && u->view == VIEW_MAIN && abs(dx) > 70 && abs(dx) > 2 * abs(dy)) {
             u->view = dx < 0 ? VIEW_LIST : VIEW_SETUP;  // a swipe on the panel
-        } else if (u->t_moved) {                       // (fork addition) a list let go while it moved: it coasts on
+#if RADAR_OVERLAY
+        /* the boards with the moving layer only, for now: on the others a list stops where the
+         * finger lets go, as it always has. a resistive panel's last readings may wander */
+        } else if (u->t_moved) {                       // (chipguyhere) a list let go while it moved: it coasts on
             int maxs, *sp = list_scroll_of(u, &maxs);
             if (sp && now - u->fl_at <= FLING_FRESH && fabsf(u->fl_v) >= FLING_MIN) {
                 u->fl_v = clampf(u->fl_v, -FLING_MAX, FLING_MAX);
@@ -884,6 +887,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
                 u->fl_at = now;
                 u->fling = 1;
             }
+#endif
         }
         u->t_caught = 0;
         u->t_turn = 0;

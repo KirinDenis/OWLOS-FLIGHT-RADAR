@@ -323,7 +323,7 @@ void keys_act(ui_t *u, int hit, ui_cmd_t *cmd)
 }
 
 #if RADAR_OVERLAY
-/* (fork addition) the rectangles of the page that can differ between two states of the ui, so a firmware
+/* (chipguyhere) the rectangles of the page that can differ between two states of the ui, so a firmware
  * that sends the page in pieces (the JC8012: turned into the frame by the CPU) draws and sends only those,
  * whichever way its panel scans. in layout pixels, x1 / y1 not included. returns how many it put in r[]
  * (max at least 8), 0: nothing the page shows changed, -1: all of it (any page but the keyboard, or a change

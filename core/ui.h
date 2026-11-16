@@ -147,7 +147,7 @@ typedef struct {
     uint8_t  t_panel;      /* 1 + whether the panel was shown when that began: the scope stays put under the finger, 0 none */
     float    t_a0, t_r0, t_up0, t_range0;
     int16_t  t_sx[16], t_sy[16];
-    /* (fork addition) momentum: a list let go while it moves goes on by itself, slowing (ui_frame steps it) */
+    /* (chipguyhere) momentum: a list let go while it moves goes on by itself, slowing (ui_frame steps it) */
     uint8_t  fling;        /* 1 while the list coasts */
     uint8_t  t_caught;     /* this press stopped a coasting list: it is not a tap, a long press or a repeat */
     int16_t  fl_y;         /* while dragging: the finger's last y that moved */
@@ -193,18 +193,18 @@ void ui_set_cfg(ui_t *u, const fr_cfg_t *c);
 void ui_frame(ui_t *u, uint32_t now);
 void ui_strip(ui_t *u, canvas_t *cv);
 #if RADAR_OVERLAY
-/* (fork addition) which rectangles of the page can differ between the states a and b (layout pixels,
+/* (chipguyhere) which rectangles of the page can differ between the states a and b (layout pixels,
  * x1 / y1 not included; ui_wifi.c): how many were put in r[] (max at least 8), 0 none, -1 all of it */
 typedef struct { int16_t x0, y0, x1, y1; } ui_rect_t;
 int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max);
-/* (fork addition) a page that scrolls (the plane list, the setup, the networks): its viewport (layout rows
+/* (chipguyhere) a page that scrolls (the plane list, the setup, the networks): its viewport (layout rows
  * y0 .. y1 - 1, what gfx_sub clips its rows to), where it is scrolled to, how far it goes, and columns inside
  * the viewport that do not scroll with it (the setup's scroll bar, bx0 .. bx1 - 1; none if equal). 0: this
  * page does not scroll, or it all fits. ui_scrolled: the same page drawn scrolled to s (a copy of the ui) */
 typedef struct { int y0, y1, scroll, max, bx0, bx1; } ui_scroll_t;
 int  ui_scroll_info(const ui_t *u, ui_scroll_t *s);
 void ui_scrolled(ui_t *u, int s);
-/* (fork addition) what the page shows pressed under the finger (a button, a row), 0 nothing: the scope
+/* (chipguyhere) what the page shows pressed under the finger (a button, a row), 0 nothing: the scope
  * under a finger is not a press (it turns or zooms) */
 int  ui_pressed(const ui_t *u);
 #endif

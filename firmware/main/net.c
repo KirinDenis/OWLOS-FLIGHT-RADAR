@@ -86,7 +86,7 @@ static int apply(int at)
     memcpy(wc.sta.ssid, n->ssid, strnlen(n->ssid, sizeof wc.sta.ssid));
     memcpy(wc.sta.password, n->pass, strnlen(n->pass, sizeof wc.sta.password));
     wc.sta.threshold.authmode = n->pass[0] ? WIFI_AUTH_WEP : WIFI_AUTH_OPEN;
-    /* a network served by several access points (fork addition, every board): look on every channel and
+    /* a network served by several access points (chipguyhere, every board): look on every channel and
      * join the strongest. ESP-IDF's default takes the first it hears, the lowest channel, which here was
      * one far off (-85 dBm) with another 3 m away (-47 dBm) */
     wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
@@ -204,7 +204,7 @@ void net_start(const nets_t *l)
     apply(0);
     ESP_ERROR_CHECK(esp_wifi_start());
 #if RADAR_OVERLAY
-    /* the Waveshare 7/7B (fork addition): no modem sleep. their antenna sits behind a 7" panel and its
+    /* the Waveshare 7/7B (chipguyhere): no modem sleep. their antenna sits behind a 7" panel and its
      * backlight, the signal is weak (-77 to -85 dBm seen), and a radio that sleeps between beacons there
      * missed DNS answers and lost the network. the boards run from a wall supply */
     esp_wifi_set_ps(WIFI_PS_NONE);
@@ -246,7 +246,8 @@ uint32_t net_utc(void)
     return t > 1700000000 ? (uint32_t)t : 0;          // not set yet, it counts from 1970
 }
 
-/* (fork addition, 2026-11-14) one connection kept open between requests: the planes are asked every 5 s,
+#if RADAR_OVERLAY
+/* (chipguyhere, 2026-11-14) one connection kept open between requests: the planes are asked every 5 s,
  * and a TLS handshake each time (seen at 6.5 s on the JC8012) kept the first core and the PSRAM busy. only
  * esp_http_client_perform reuses a connection (the open/read calls never write a second request line), so
  * the body comes through its ON_DATA event. a request to another host closes it (esp_http_client_set_url);
@@ -318,6 +319,48 @@ int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, in
     }
     return -1;
 }
+#else
+/* the other boards: a connection for each request, as before. one kept open would hold TLS's
+ * memory between requests, and the boards without PSRAM have none to spare for it */
+int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, int *status)
+{
+    static char buf[1024];                            // one piece; the fetch task is the only caller
+    *status = 0;
+    if (!s_up) return -1;
+    esp_http_client_config_t c = {
+        .url = url,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = 9000,
+        .user_agent = NET_USER_AGENT,
+        .buffer_size = 2048,
+        .buffer_size_tx = 1024,
+    };
+    esp_http_client_handle_t h = esp_http_client_init(&c);
+    if (!h) return -1;
+    esp_http_client_set_header(h, "Accept", "application/json");
+    if (bearer && bearer[0]) {
+        static char auth[640];
+        snprintf(auth, sizeof auth, "Bearer %s", bearer);
+        esp_http_client_set_header(h, "Authorization", auth);
+        esp_http_client_set_header(h, "Accept-Version", "v1");
+    }
+    int len = -1;
+    if (esp_http_client_open(h, 0) == ESP_OK) {
+        esp_http_client_fetch_headers(h);
+        *status = esp_http_client_get_status_code(h);
+        len = 0;
+        while (*status == 200) {
+            int r = esp_http_client_read(h, buf, sizeof buf);
+            if (r <= 0) break;
+            sink(ctx, buf, r);
+            len += r;
+        }
+    }
+    esp_http_client_close(h);
+    esp_http_client_cleanup(h);
+    return len;
+}
+#endif
 
 int net_post_json(const char *url, const char *body, int *status)
 {

@@ -21,7 +21,7 @@ elseif(RADAR_DISPLAY EQUAL 10 OR RADAR_DISPLAY EQUAL 11 OR RADAR_DISPLAY EQUAL 1
     if(RADAR_DISPLAY EQUAL 15 OR RADAR_DISPLAY EQUAL 16)
         list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.wave7")
     endif()
-elseif(RADAR_DISPLAY EQUAL 17)   # the Guition JC8012P4A1C (fork addition): after sdkconfig.defaults.esp32p4, the Tab5's
+elseif(RADAR_DISPLAY EQUAL 17)   # the Guition JC8012P4A1C (chipguyhere): after sdkconfig.defaults.esp32p4, the Tab5's
     set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.jc8012")
 endif()
 

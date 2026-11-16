@@ -5,14 +5,14 @@
 #pragma once
 #include <stdint.h>
 
-#include "config.h"   // first: RADAR_OVERLAY below picks where CORE_BIG puts things (fork: it came after, and did nothing)
+#include "config.h"   // first: RADAR_OVERLAY below picks where CORE_BIG puts things (chipguyhere: it came after, and did nothing)
 
 /* hot loops go to IRAM on ESP32: a frame runs all this code ten times over
  * and every flash cache miss costs microseconds */
 #ifdef ESP_PLATFORM
 #include "esp_attr.h"
 #if RADAR_OVERLAY
-/* the Waveshare 7/7B (fork addition): the drawing code and its tables stay out of the internal RAM.
+/* the Waveshare 7/7B (chipguyhere): the drawing code and its tables stay out of the internal RAM.
  * what it draws there (the background, the planes' layer) is not on the panel's clock, and the RAM
  * is wanted. the code that is (the fill, ovl.c) has IRAM_ATTR of its own */
 #define CORE_HOT
@@ -21,7 +21,7 @@
 #define CORE_HOT  IRAM_ATTR
 #define CORE_DATA DRAM_ATTR
 #endif
-/* big state no interrupt touches (fork addition): in the PSRAM on the Waveshare 7/7B, whose internal
+/* big state no interrupt touches (chipguyhere): in the PSRAM on the Waveshare 7/7B, whose internal
  * RAM the 1024-wide bounce buffers and strips leave short (sdkconfig.defaults.wave7 lets the PSRAM
  * take .bss). in the RAM as before everywhere else */
 #if RADAR_OVERLAY

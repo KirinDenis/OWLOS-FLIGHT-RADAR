@@ -314,8 +314,8 @@
 #define PIN_BUTTON   (-1)       // BOOT is the panel's clock, see above
 
 #elif RADAR_DISPLAY == DISPLAY_WAVE7_800x480 || RADAR_DISPLAY == DISPLAY_WAVE7B_1024x600
-/* Waveshare ESP32-S3-Touch-LCD-7 (800x480, ESP32-S3-WROOM-1 N8R8) and -7B (1024x600, N16R8). fork
- * addition: driven by chipguyhere's 7/7B library, vendored in components/chipguy_lcd7_7b, which owns
+/* Waveshare ESP32-S3-Touch-LCD-7 (800x480, ESP32-S3-WROOM-1 N8R8) and -7B (1024x600, N16R8). added by
+ * chipguyhere, driven by chipguyhere's 7/7B library, vendored in components/chipguy_lcd7_7b, which owns
  * the panel, its pins and timing, and the board's I2C expander (panel reset and supply, backlight,
  * the GT911's reset). lcd_wave7.c. the panel is fed from the PSRAM through two bounce buffers by
  * the library's fill task, and the moving layer (ovl.c) is put over each chunk as it lands.
@@ -373,8 +373,8 @@
 
 #elif RADAR_DISPLAY == DISPLAY_JC8012_1280x800
 /* Guition JC8012P4A1C, 10.1": ESP32-P4 (16 MB flash, 32 MB PSRAM), an 800x1280 JD9365 panel standing on
- * 2-lane MIPI-DSI, a GSL3680 touch, Wi-Fi through an ESP32-C6 on SDIO (sdkconfig.defaults.jc8012). fork
- * addition: driven by chipguyhere's JC8012P4A1C library, vendored in components/chipguy_jc8012, which
+ * 2-lane MIPI-DSI, a GSL3680 touch, Wi-Fi through an ESP32-C6 on SDIO (sdkconfig.defaults.jc8012). added by
+ * chipguyhere, driven by chipguyhere's JC8012P4A1C library, vendored in components/chipguy_jc8012, which
  * owns the panel, the backlight, the touch and the I2C bus (GPIO 7 / 8). lcd_jc8012.c. the background
  * is turned into the standing frame as it is drawn (the PPA); the panel's rows are the picture's
  * columns, and those the moving layer touches are fed through two bounce buffers by the library's

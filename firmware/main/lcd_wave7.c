@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 /*
- * the Waveshare ESP32-S3-Touch-LCD-7 and -7B (fork addition). chipguyhere's library feeds the panel
+ * the Waveshare ESP32-S3-Touch-LCD-7 and -7B (chipguyhere). chipguyhere's library feeds the panel
  * from a frame in the PSRAM (lcd_wave7_panel.cpp); here that frame is the background: everything
  * but what moves, drawn strip by strip as time allows into the frame that does not show, and shown
  * from the next panel frame on once it is whole. what moves goes over it as the panel is fed (ovl.c).
@@ -96,7 +96,7 @@ void disp_strip(const canvas_t *cv)
     }
     static CORE_BIG uint16_t line[GFX_PW];                      // turned over: last row first, each back to front
     for (int r = 0; r < cv->h; r++) {
-        const canvas_t one = { cv->px + r * GFX_PW, cv->y0 + r, 1, 0 };
+        const canvas_t one = { cv->px + r * GFX_PW, cv->y0 + r, 1, 0, 0 };
         gfx_pack565(&one, line);
         uint16_t *to = fb + (GFX_PH - 1 - one.y0) * GFX_PW;
         for (int x = 0; x < GFX_PW; x++) to[GFX_PW - 1 - x] = line[x];

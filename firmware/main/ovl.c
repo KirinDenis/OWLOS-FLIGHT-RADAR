@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
-/* the moving layer, see ovl.h. fork addition */
+/* the moving layer, see ovl.h. by chipguyhere */
 #include "board.h"
 #if RADAR_OVERLAY
 
@@ -20,7 +20,7 @@
 
 static const char *TAG = "ovl";
 
-/* the fill's lines (fork addition, the JC8012P4A1C): on the S3 boards the panel is fed a row of the
+/* the fill's lines (chipguyhere, the JC8012P4A1C): on the S3 boards the panel is fed a row of the
  * picture at a time; where the panel stands and the picture lies (config.h RADAR_OVERLAY_COLS) it is
  * fed a column at a time. everything below that says "row" of what the fill does means a line: a
  * column of the picture there, its pixels top to bottom. OVL_REV: along a line, the panel runs the
@@ -34,7 +34,7 @@ static const char *TAG = "ovl";
 #define OVL_LEN   GFX_PW
 #define OVL_REV   0
 #endif
-/* 128-bit SIMD for the long runs (fork addition): the S3's PIE, or the P4's (Xesppie), which differs */
+/* 128-bit SIMD for the long runs (chipguyhere): the S3's PIE, or the P4's (Xesppie), which differs */
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
 #define OVL_PIE 1
 #else
@@ -60,7 +60,7 @@ static const char *TAG = "ovl";
 #define OVL_SWEEP_EVERY 2
 #endif
 
-/* the busiest rows (fork addition): where putting the layer on would take the fill too long, the row is
+/* the busiest rows (chipguyhere): where putting the layer on would take the fill too long, the row is
  * made whole when the layer is made (the background's row with the layer on it) and kept here; the
  * fill then only copies it in and adds the sweep */
 #ifndef OVL_BUSY_ROWS
@@ -129,7 +129,7 @@ static volatile uint8_t  s_pre_what[2][PRE_CHUNKS];     // what is in it: PRE_SW
 #endif
 static TaskHandle_t s_planner;
 static volatile uint32_t s_pre_for[2];                  // the frame those are for
-/* (fork addition, 2026-11-14) the chunks the fill will compose itself and that are heavy: over PRE_CYCLES but
+/* (chipguyhere, 2026-11-14) the chunks the fill will compose itself and that are heavy: over PRE_CYCLES but
  * not composed beforehand (the runners-up, or picked and not done in time). PSRAM work (the moving layer's
  * build, the background's turns) keeps off them: ovl_chunk_hot */
 static volatile uint8_t  s_hot[2][PRE_CHUNKS];
@@ -155,20 +155,20 @@ static const DRAM_ATTR uint8_t BAYER[4][4] = {      // gfx_pack565's
     { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 }
 };
 
-/* --- runs of the layer as two 16-bit arrays (fork addition): the colour, premultiplied 565, and how
+/* --- runs of the layer as two 16-bit arrays (chipguyhere): the colour, premultiplied 565, and how
  * much of what is under it shows, 0..32. both start at the same offset within 16 bytes as the panel
  * row's pixel they go to, so the S3's 128-bit SIMD (PIE) can take them 8 pixels at a time. a run
  * word: x | n << 16 (11 bits) | pad << 27 (16-bit entries before the colours) | PLANAR. shorter runs
  * stay one 32-bit word a pixel */
 #define PLANAR   0x40000000u
 #define PIE_MIN  16                                    // pixels a run needs to be stored for PIE
-#define PIE_MIN_COLS 8                                 // (fork addition) by columns: runs are padded to whole blocks
+#define PIE_MIN_COLS 8                                 // (chipguyhere) by columns: runs are padded to whole blocks
                                                        // (pad2_*), so a short run costs a block or two of PIE
 
 static inline unsigned planar_q(unsigned n) { return (16u - ((2u * n) & 15u)) & 15u; }   // bytes between the arrays
 static inline unsigned planar_words(unsigned p, unsigned n) { return (2u * p + 4u * n + planar_q(n) + 3u) >> 2; }
 #if RADAR_OVERLAY_COLS
-/* (fork addition, 2026-11-14) by columns, a long run is kept in whole 8-pixel blocks on the bounce buffer's
+/* (chipguyhere, 2026-11-14) by columns, a long run is kept in whole 8-pixel blocks on the bounce buffer's
  * 16-byte grid: both arrays start on a 16-byte boundary (gap: the 16-bit entries skipped after the run word to
  * get there, worked out from where the words are: the fill's copy keeps their place within 128 bytes), the
  * run's pixels from head = its first pixel's place in memory & 7, and every other entry the identity (colour 0,
@@ -239,7 +239,7 @@ __attribute__((noinline)) static IRAM_ATTR void pie_blend(uint16_t *d, const uin
                  : [d] "+r"(d), [u] "+r"(u), [c] "+r"(c), [n] "+r"(n8), [k] "+r"(k) :: "memory");
 }
 #elif OVL_PIE
-/* the P4's (fork addition, the JC8012P4A1C): the S3 kernel's steps in the P4's own instructions (esp.*),
+/* the P4's (chipguyhere, the JC8012P4A1C): the S3 kernel's steps in the P4's own instructions (esp.*),
  * with the field held to its top by a vmin instead of two saturating adds. per field: masked out, moved
  * down (vmul.u16 by 1, the shift from SAR), scaled by what shows through (vmul.u16, SAR 5), the layer's
  * added, held to the top, moved up (vmul.u16 by 2^shift, SAR 0) and or'ed in. checked against pix at
@@ -279,11 +279,11 @@ __attribute__((noinline)) static IRAM_ATTR void pie_blend(uint16_t *d, const uin
                      :: "memory");
     }
 }
-/* (fork addition, 2026-11-14) a solid run: n alike, one colour and one see-through amount for all of it. the
+/* (chipguyhere, 2026-11-14) a solid run: n alike, one colour and one see-through amount for all of it. the
  * blend's steps as pie_blend, with the colour and the amount loaded from 8-wide copies with no step, so only
  * the background moves. translucent solid runs (glows, rings, panels) were ~20 cycles a pixel in C */
 #define HAVE_PIE_SOLID 1
-/* (fork addition, 2026-11-14) the kernel again, SAR at 5 throughout: each field is scaled where it lies.
+/* (chipguyhere, 2026-11-14) the kernel again, SAR at 5 throughout: each field is scaled where it lies.
  * blue (b*u)>>5 and green ((g<<5)*u)>>5 = g*u, masked to 0xFFE0, fit 16 bits as they are; red ((r<<11)*u)>>5
  * = (r*u)<<6 (at most 63,488), masked to 0xF800 it is ((r*u)>>5)<<11, what pix's spread word gives. blue and
  * green are held to their tops by vmin; red, at the top of the word, by a compare (the sum wrapped: below
@@ -369,11 +369,11 @@ static int s_pie;                                      // the PIE path agreed wi
 #ifndef HAVE_PIE_SOLID
 #define HAVE_PIE_SOLID 0
 #endif
-static int s_pie_solid;                                // (fork addition) and pie_solid did too
+static int s_pie_solid;                                // (chipguyhere) and pie_solid did too
 #ifndef HAVE_PIE2
 #define HAVE_PIE2 0
 #endif
-static int s_pie2;                                     // (fork addition) the SAR-once kernels agreed with C: used instead
+static int s_pie2;                                     // (chipguyhere) the SAR-once kernels agreed with C: used instead
 /* the blend and the solid run, by whichever kernel passed */
 static IRAM_ATTR inline void blend_n8(uint16_t *d, const uint16_t *c, const uint16_t *u, int n8)
 {
@@ -601,13 +601,13 @@ static void close_run(layer_t *L, uint32_t at, int x0, uint32_t n)
 }
 
 /* the planner's waits for the fill's runway: any build (the hook is NULL but on the JC8012) */
-static int (*s_plan_quiet)(void);                      // (fork addition) lcd_jc8012.c runway_clear
+static int (*s_plan_quiet)(void);                      // (chipguyhere) lcd_jc8012.c runway_clear
 #define PLAN_WAIT_US 4000                              // the planner's waits for the runway, at most, a frame
 void ovl_planner_quiet(int (*quiet)(void)) { s_plan_quiet = quiet; }
 volatile uint32_t g_plan_wait_us;                      // TEMP: the planner's waits, for the 10 s log
 
 #if RADAR_OVERLAY_COLS
-/* by columns (fork addition, the JC8012P4A1C). the ui task still draws the layer in bands of the
+/* by columns (chipguyhere, the JC8012P4A1C). the ui task still draws the layer in bands of the
  * picture's rows; each band is read down its columns, and every column with anything in it leaves a
  * record in s_stage: its x and how many words follow, then its runs as the fill wants them (the S3
  * builds' run words, with y where they have x). once the layer is whole, ovl_build_end sorts the
@@ -1045,7 +1045,7 @@ static BEAM_ATTR void beam_frame(beam_t *M, const ovl_beam_t *b, float ang)
     M->ang = ang;
     const float step = 90.0f / LEVELS;
 #if RADAR_OVERLAY_COLS
-    /* the same without libm (fork addition, the JC8012P4A1C): this runs in the fill as each panel frame
+    /* the same without libm (chipguyhere, the JC8012P4A1C): this runs in the fill as each panel frame
      * starts, from flash through a cache the PSRAM keeps busy, and ~130 tanf and fmodf calls took
      * ~1.7 ms of a chunk's ~235 us (measured): the frame's first chunk was late every frame, and the next
      * ones after it. the edges' tangents from one sine and cosine, turned a step at a time; the wrap by
@@ -1360,7 +1360,7 @@ static IRAM_ATTR void frame_latch(uint32_t frame)
     if (s_planner) xTaskNotifyGive(s_planner);
 }
 
-/* (fork addition) a panel frame begun, for a fill that does not ask ovl_want / ovl_src (lcd_jc8012.c's
+/* (chipguyhere) a panel frame begun, for a fill that does not ask ovl_want / ovl_src (lcd_jc8012.c's
  * scrolling pages): the ui task and the planner are woken by it */
 IRAM_ATTR void ovl_frame(uint32_t frame) { frame_latch(frame); }
 
@@ -1537,7 +1537,7 @@ static IRAM_ATTR void words_apply(const uint32_t *w0, int nw, uint16_t *px, int 
                 for (int i = 0; i < n; i++, p += st) *p = c;
             }
 #if HAVE_PIE_SOLID
-            /* (fork addition) translucent and long enough: PIE, 8 at a time from the run's lowest address (one
+            /* (chipguyhere) translucent and long enough: PIE, 8 at a time from the run's lowest address (one
              * colour, so which way the row runs does not matter), the unaligned ends in C. pix(c, under) is the
              * loop below exactly: c is o0 in 565, and its saturation is sat's */
             else if (s_pie_solid && n >= 16 && (OVL_PLANNER_PIE || xTaskGetCurrentTaskHandle() != s_planner)) {
@@ -1657,7 +1657,7 @@ static IRAM_ATTR void row_apply(const row_t *R, uint16_t *row, uint16_t *px, int
 
 
 // the fill, first for each chunk: does anything go over its rows this frame
-/* --- the busiest chunks of the next frame, composed beforehand on core 0 (fork addition) ---
+/* --- the busiest chunks of the next frame, composed beforehand on core 0 (chipguyhere) ---
  * core 0, as the frame on the panel starts, plans the next one (its layer, where its beam will be) and
  * works out what each chunk of it would cost the fill. the chunks over PRE_CYCLES, at most PRE_MAX of them
  * and in the order the panel will scan them, it composes whole: the background's rows, the sweep, the
@@ -1849,7 +1849,7 @@ void ovl_plan_next(uint32_t period_us)
 #else
         const uint8_t what = PRE_SWEEP | (cl >= PRE_LAYER_CYCLES ? PRE_LAYER : 0);
 #endif
-        /* (fork addition) its PSRAM burst kept off the fill's hot runs and their run-ups, as long as the chunk
+        /* (chipguyhere) its PSRAM burst kept off the fill's hot runs and their run-ups, as long as the chunk
          * can still be ready: it takes ~s_pre_us to compose */
         static uint32_t s_pre_us = 400;
         /* asleep a tick at a time, at most PLAN_WAIT_US a frame: it is above the fetch task, the log and the idle

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 /*
  * the Waveshare ESP32-S3-Touch-LCD-7 / -7B through chipguyhere's library (components/chipguy_lcd7_7b),
- * as a few C calls for lcd_wave7.c. fork addition
+ * as a few C calls for lcd_wave7.c. by chipguyhere
  */
 #include "board.h"
 #if DISP_WAVE7

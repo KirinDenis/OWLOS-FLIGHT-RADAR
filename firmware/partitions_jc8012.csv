@@ -1,5 +1,5 @@
 # Name,   Type, SubType,  Offset,   Size
-# the Guition JC8012P4A1C (16 MB flash), fork addition: the 16 MB boards' layout (partitions_16mb.csv)
+# the Guition JC8012P4A1C (16 MB flash), chipguyhere: the 16 MB boards' layout (partitions_16mb.csv)
 # and a core dump on flash, as the Waveshare 7/7B have, so a crash can be read afterwards
 # (idf.py coredump-info) even when nobody was watching the serial port
 nvs,      data, nvs,      0x9000,   0x6000

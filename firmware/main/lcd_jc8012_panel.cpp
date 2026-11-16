@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 /*
  * the Guition JC8012P4A1C through chipguyhere's library (components/chipguy_jc8012), as a few C calls
- * for lcd_jc8012.c and touch.c. fork addition
+ * for lcd_jc8012.c and touch.c. by chipguyhere
  */
 #include "board.h"
 #if DISP_JC8012

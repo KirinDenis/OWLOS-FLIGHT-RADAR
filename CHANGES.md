@@ -4,6 +4,19 @@ What changed in each version of OWLOS Flight Radar, the newest first. The first 
 version: the firmware is built with it, the site publishes it, and a board compares its own with it.
 The site keeps the firmware of each version: a new number here keeps the one before it as it was.
 
+## 0.14
+
+- Three new boards, by Michael Caldwell-Waller (chipguyhere), from the fork
+  chipguyhere/OWLOS-FLIGHT-RADAR-7-7B: the Waveshare ESP32-S3-Touch-LCD-7 and -7B, and the 10.1" Guition
+  JC8012P4A1C on an ESP32-P4. On them the sweep turns at the panel's own frame rate: the planes, the sweep
+  and the compass ring are laid over the picture while the panel is fed (the README's The moving layer).
+  Experimental on the site.
+- The JC8012P4A1C's touch needs its controller's firmware, installed once with chipguyhere's installer.
+  Erasing the board from the site takes it away too.
+- WiFi: a network served by several access points is joined at the strongest one. The board looks on every
+  channel first, so joining takes a moment longer. (chipguyhere)
+- The USB console finds a command even when a restart left stray bytes in front of it. (chipguyhere)
+
 ## 0.13
 
 - The radar can do without its panel: the three dots in the top right corner take it away and the scope

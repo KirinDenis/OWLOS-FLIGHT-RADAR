@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
-/* (fork addition, 2026-11-14) the log through a buffer in the PSRAM: ESP_LOGx no longer waits for the
+/* (chipguyhere, 2026-11-14) the log through a buffer in the PSRAM: ESP_LOGx no longer waits for the
  * UART. at 115200 baud the screen task's 10 s statistics (~3 KB) held it ~0.3-0.5 s every 10 s, a stutter
  * on the glass. each line is formatted straight into a ring buffer (no copy on the caller's stack: some
  * tasks have 3 KB), a task of the lowest priority writes it out. a full buffer drops lines and counts

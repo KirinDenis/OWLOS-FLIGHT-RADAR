@@ -348,8 +348,10 @@ and a PC preview.
 
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
   `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
-  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`. Each
-  screen has its own build folder and sdkconfig.
+  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
+  `wave7`, `wave7b`, `jc8012`. Each screen has its own build folder and sdkconfig.
+- `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012` and
+  `crow70` (chipguyhere's).
 - `.github/workflows/pages.yml` builds them all in Espressif's ESP-IDF image and publishes the site
   with them on GitHub Pages, on every push to main.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site

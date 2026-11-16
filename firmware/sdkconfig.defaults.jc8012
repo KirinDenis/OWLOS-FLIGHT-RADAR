@@ -1,4 +1,4 @@
-# the Guition JC8012P4A1C (RADAR_DISPLAY 17, fork addition), read after sdkconfig.defaults.esp32p4 (the
+# the Guition JC8012P4A1C (RADAR_DISPLAY 17, chipguyhere), read after sdkconfig.defaults.esp32p4 (the
 # Tab5's: the P4's PSRAM, clock and flash settings hold here too, and are not repeated)
 # the console on UART0: the board's CH340 (its USB_UART port) is the one to upload and watch on
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 /*
- * the moving layer (fork addition): the planes, the compass ring and the sweep, put over the frame
+ * the moving layer (chipguyhere): the planes, the compass ring and the sweep, put over the frame
  * in memory as the panel is fed, every panel frame. nothing in here knows the board: any S3 board
  * whose RGB panel is fed through bounce buffers by a fill that can call ovl_chunk after a chunk's
  * rows have landed can use it (lcd_wave7.c does, through chipguyhere's 7/7B library).
@@ -64,10 +64,10 @@ void ovl_chunk_local(int py, int n, const uint32_t *local, const uint32_t *at);
 const uint16_t *ovl_src(int y, int rows, uint32_t frame, void *ctx);
 // core 0, as each panel frame starts: plan the next one and compose its busiest chunks beforehand
 void ovl_plan_next(uint32_t period_us);
-/* (fork addition) chunk c of panel frame `frame` is heavy and the fill composes it itself (the planner's
+/* (chipguyhere) chunk c of panel frame `frame` is heavy and the fill composes it itself (the planner's
  * runners-up): PSRAM work keeps off it. 0 if not, or not planned yet */
 int  ovl_chunk_hot(uint32_t frame, int c);
-/* (fork addition) the planner waits for quiet() before each chunk it composes, while it has time */
+/* (chipguyhere) the planner waits for quiet() before each chunk it composes, while it has time */
 void ovl_planner_quiet(int (*quiet)(void));
 // how the composed chunks get out of the cache to the PSRAM, where the DMA reads them
 void ovl_writeback(void (*wb)(const void *addr, size_t len));
@@ -84,4 +84,4 @@ typedef struct {
     uint32_t pre_made, pre_used;              // chunks composed beforehand on core 0, and copied from there by the fill                // rows lost, by where the beam pointed (0: 12 o'clock, 3: 3 o'clock, ...)
 } ovl_stats_t;
 void ovl_stats(ovl_stats_t *s, int reset);
-void ovl_frame(uint32_t frame);                    /* (fork addition) a panel frame begun: wakes the ui task (ovl.c) */
+void ovl_frame(uint32_t frame);                    /* (chipguyhere) a panel frame begun: wakes the ui task (ovl.c) */

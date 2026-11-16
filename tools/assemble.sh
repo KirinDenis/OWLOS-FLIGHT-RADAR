@@ -8,7 +8,7 @@ OUT=_public
 VER=$(tr -d '\r' < CHANGES.md | sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' | head -n 1)
 rm -rf "$OUT"
 mkdir -p "$OUT/fw" "$OUT/radar" "$OUT/shots"
-for d in ili9341 st7796 ili9486 gc9a01 es3c28p nmcydc5 crowadv28 crowadv50 jc8048w550 esp4827s043 crow70; do
+for d in ili9341 st7796 ili9486 gc9a01 es3c28p nmcydc5 crowadv28 crowadv50 jc8048w550 esp4827s043 crow70 wave7 wave7b jc8012; do
   B=firmware/build_$d
   [ "$d" = ili9341 ] && B=firmware/build
   [ -f "$B/owlos-flight-radar.bin" ] || continue

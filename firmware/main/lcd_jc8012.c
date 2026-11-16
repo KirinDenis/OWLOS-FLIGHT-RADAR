@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 /*
- * the Guition JC8012P4A1C (fork addition). chipguyhere's library (lcd_jc8012_panel.cpp) feeds the
+ * the Guition JC8012P4A1C (chipguyhere). chipguyhere's library (lcd_jc8012_panel.cpp) feeds the
  * standing 800x1280 panel from one of two frames in the PSRAM; the picture lies, 1280x800.
  *
  * the background (everything but what moves) is drawn strip by strip as time allows, and each strip
@@ -11,7 +11,7 @@
  * what moves (ovl.c, by columns) goes over it as the panel is fed: the whole panel is the library's
  * raster band, in chunks of 16 rows (16 columns of the picture). a chunk the moving layer touches this
  * frame is copied out of the frame into a bounce buffer and the layer put on it; a chunk it does not
- * touch is read by the panel's DMA straight from the frame (a fork addition to the library's driver),
+ * touch is read by the panel's DMA straight from the frame (a change made for this firmware to the library's driver),
  * so most of the screen costs the fill nothing.
  */
 #include "display.h"
@@ -75,7 +75,7 @@ volatile uint32_t g_ovlRowsSkipped;
 static int                 s_ok, s_flip, s_band, s_layer;
 static uint16_t           *s_fb[2];
 static int                 s_draw = 1;                 // the frame the background is drawn into
-static volatile int        s_twin;                     // (fork addition) the two frames alike: see disp_twin_copy
+static volatile int        s_twin;                     // (chipguyhere) the two frames alike: see disp_twin_copy
 static volatile int        s_shown;                    // the frame the panel shows, as of the chunk being filled
 static volatile int        s_want = -1;                // a whole background: shown from the next panel frame on
 static volatile uint32_t   s_shown_at;                 // the library's frame count when it went up
@@ -153,8 +153,8 @@ static volatile uint32_t  s_cut_at;                    // the chunk being made, 
  * the fill's next chunks are on chunks read straight from the frame, waiting a tick at a time while they
  * are on chunks being filled. a frame with no such place (the flat map, the layer all over) and it goes on */
 static volatile uint32_t s_layer_wait_us;
-static volatile int s_sc_on;                           // (fork addition) a page being scrolled (below): no layer to pace
-/* (fork addition, 2026-11-14) the fill's runway is clear: no hot chunk (ovl_chunk_hot) among the next RUNWAY
+static volatile int s_sc_on;                           // (chipguyhere) a page being scrolled (below): no layer to pace
+/* (chipguyhere, 2026-11-14) the fill's runway is clear: no hot chunk (ovl_chunk_hot) among the next RUNWAY
  * chunks the panel reads. the fill composes chunk c while the panel reads c - 3 .. c - 1 and gets ahead in
  * the cheap stretch before a hot run (the user's point): PSRAM work there spends the slack the hot run needs.
  * so the horizon is the fill's lead and a run-up, not only what the panel is on */
@@ -172,7 +172,7 @@ static void layer_pace_for(int64_t cap_us)
      * (it waited 25 ms a time, ~4.7 s in 10, and the ui task followed the finger twice a second) */
     if (!s_band || !s_layer || s_sc_on || cap_us <= 0) return;
     const int64_t t0 = esp_timer_get_time();
-    /* (fork addition, 2026-11-14) quiet: none of the next chunks the panel reads is one the fill composes
+    /* (chipguyhere, 2026-11-14) quiet: none of the next chunks the panel reads is one the fill composes
      * itself heavily (ovl_chunk_hot, the planner's runners-up). before: all of them read straight from the
      * frame, which a busy sky never had, and every wait ran to its cap (a build waited up to 3.4 s). a hot
      * run lasts a few chunks of ~235 us: polled closely at first, then a tick at a time */
@@ -186,10 +186,10 @@ static void layer_pace_for(int64_t cap_us)
     s_layer_wait_us += (uint32_t)(esp_timer_get_time() - t0);
 }
 static void layer_pace(void) { layer_pace_for(25000); }   // the background's turns (cpu_turn), as before
-/* (fork addition, 2026-11-14) chunks the fill finished late or gave up, counted for good: the moving layer's
+/* (chipguyhere, 2026-11-14) chunks the fill finished late or gave up, counted for good: the moving layer's
  * builds are paced only for a while after one (layer_pace_ovl) */
 static volatile uint32_t s_late_mono;
-static void layer_pace_ovl(void);                     // (fork addition) below: the same, timed for the ui's pass
+static void layer_pace_ovl(void);                     // (chipguyhere) below: the same, timed for the ui's pass
 
 /* for ovl.c's planner: the background's panel row py as the next panel frame will show it, and its
  * chunks out of the cache for the fill's GDMA */
@@ -303,7 +303,7 @@ static IRAM_ATTR int dma_wait(void *dst, size_t n, volatile int *done)
     return 1;
 }
 
-/* (fork addition) a page that scrolls, while a finger drags it: nothing is drawn. the list's whole height is
+/* (chipguyhere) a page that scrolls, while a finger drags it: nothing is drawn. the list's whole height is
  * in the PSRAM (main.c draws it beforehand), turned and in 565 like the frame, each panel row's part of it in
  * one piece. every chunk is then gathered by the AXI GDMA straight into its bounce buffer, each of its 16
  * panel rows in three pieces: the frame's fixed start, the list from where it is scrolled to, the frame's
@@ -465,7 +465,7 @@ static IRAM_ATTR void prefetch_next(int c, uint32_t frame)
     s_pre_c = -1;
     int n = c + 1, fb = s_shown;
     uint32_t f = frame;
-    {                                                  // (fork addition) a scrolling page: gathered
+    {                                                  // (chipguyhere) a scrolling page: gathered
         const int nn = n < CHUNKS ? n : 0;
         const uint32_t ff = n < CHUNKS ? frame : frame + 1;
         int S;
@@ -585,7 +585,7 @@ static IRAM_ATTR void fill_(uint16_t *dst, int y, int rows, uint32_t frame, void
         g_ovlRowsSkipped = jc_late() * CHUNK;
     }
     const size_t bytes = (size_t)rows * PANEL_W * sizeof(uint16_t);
-    {                                                  // (fork addition) a scrolling page: the chunk gathered
+    {                                                  // (chipguyhere) a scrolling page: the chunk gathered
         int S;
         if (c == 0 && s_sc_off_flip && s_want < 0 && s_shown_at == jc_frames()) {   // the page at rest is up from this frame
             s_sc_on = 0;
@@ -720,7 +720,7 @@ static IRAM_ATTR void fill_(uint16_t *dst, int y, int rows, uint32_t frame, void
 #define JC_GATHER_TEST 0                               // 1: the scrolling pages' GDMA gather checked and timed at start (2026-11-14: right at any pixel; 151 us a chunk, 159 a plain copy)
 #endif
 #if JC_GATHER_TEST
-/* (fork addition, temporary) can the AXI GDMA gather a chunk the way a scrolling page needs: each of its 16
+/* (chipguyhere, temporary) can the AXI GDMA gather a chunk the way a scrolling page needs: each of its 16
  * panel rows a fixed start and end from the frame and a span of the list between, the list's source and
  * its place in the row at any pixel? checked against the CPU, and timed against a plain chunk copy */
 static void gather_test(const char *when)
@@ -872,11 +872,11 @@ void disp_bg_begin(void) { s_draw = s_shown ? 0 : 1; }   // the one that does no
 
 static volatile uint32_t s_ppa_max_us, s_ppa_wait_ms;
 static void layer_pace(void);
-/* (fork addition) the moving layer's making waiting for the panel, as the ui task's pass timing counts it
+/* (chipguyhere) the moving layer's making waiting for the panel, as the ui task's pass timing counts it
  * (main.c): ovl.c's builds only, not the background's turns */
 static volatile uint32_t s_pace_ui_us;
 volatile int64_t g_nopace_until;                       // TEMP: OWLOS NOPACE on the console, the layer's builds unpaced till then (us)
-/* (fork addition, 2026-11-14) the moving layer's builds, paced only when the fill has been late lately. measured
+/* (chipguyhere, 2026-11-14) the moving layer's builds, paced only when the fill has been late lately. measured
  * with 48 planes: paced at every step (25 ms each, ~140 steps a build), a build waited up to 3.4 s, the radar
  * ran at 1 fps, and chunks were late as often as unpaced (20-208 against 85 in 10 s). now each wait lasts only
  * while a hot chunk (ovl_chunk_hot) is coming, at most PACE_BUDGET_US a build */
@@ -895,7 +895,7 @@ void disp_pace_new_build(void)
     s_builds++;
     if (s_pace_left_us) s_paced_builds++;
 }
-/* (fork addition) the build's last step (the records sorted into columns, all PSRAM) gets a budget of its own:
+/* (chipguyhere) the build's last step (the records sorted into columns, all PSRAM) gets a budget of its own:
  * the bands always spent theirs, so it ran unpaced, and it was busy at 30-88 % of the late chunks against 11 %
  * of all (TEMP busy, 2026-11-14) */
 #define PACE_END_US 15000
@@ -933,13 +933,13 @@ static void ppa_task(void *arg)
 #define JC_CPU_TURN 1                                  // TEMP A/B: 1 the CPU turns the strips, paced; 0 the PPA
 #endif
 static volatile uint32_t s_cpu_turn_us;
-/* (fork addition) main.c's background frame may be given up (a page or a press wants the core): asked every
+/* (chipguyhere) main.c's background frame may be given up (a page or a press wants the core): asked every
  * 16 columns, the strip left part turned */
 static int (*s_turn_stop)(void);
 void disp_bg_stop_fn(int (*fn)(void)) { s_turn_stop = fn; }
 static void cpu_turn(const canvas_t *cv)
 {
-    s_twin = 0;                                        // (fork addition) one frame only
+    s_twin = 0;                                        // (chipguyhere) one frame only
     static const uint8_t bayer[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
     const int h = cv->h;
     uint16_t *fb = s_fb[s_draw];
@@ -968,7 +968,7 @@ static void cpu_turn(const canvas_t *cv)
     }
 }
 
-/* (fork addition) a page's bands (main.c page_draw): turned by the CPU into the frame, no pacing (a page has
+/* (chipguyhere) a page's bands (main.c page_draw): turned by the CPU into the frame, no pacing (a page has
  * no moving layer) and no cache sync per column (esp_cache_msync 1,280 times made a 16-row band ~10 ms);
  * disp_page_flush syncs the frame once, after all the bands a change made. tried and dropped: the cache's
  * registers driven directly (cache_ll_*), past esp_cache_msync's lock: stale lines on the glass, and the SDIO
@@ -976,7 +976,7 @@ static void cpu_turn(const canvas_t *cv)
 void disp_page_begin(void) { s_draw = s_shown; }       // into the frame showing
 void disp_page_turn(const canvas_t *cv)
 {
-    s_twin = 0;                                        // (fork addition) one frame only
+    s_twin = 0;                                        // (chipguyhere) one frame only
     if (!s_ok) return;
     static const uint8_t bayer[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
     const int h = cv->h;
@@ -998,14 +998,14 @@ void disp_page_turn(const canvas_t *cv)
         }
     }
 }
-/* (fork addition) columns x0 .. x1 - 1 of a strip only (a rectangle the ui says changed, main.c), into the
+/* (chipguyhere) columns x0 .. x1 - 1 of a strip only (a rectangle the ui says changed, main.c), into the
  * frame showing, and only the panel rows they land on written back: x is the panel's row here */
 void disp_page_rect(const canvas_t *cv, int x0, int x1, int sync)   // sync 0: disp_page_flush after the last
 {
     if (!s_ok || x0 >= x1) return;
     static const uint8_t bayer[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
     const int h = cv->h;
-    uint16_t *fb = s_fb[s_draw];                       // (fork addition) the frame chosen: the hidden one now (main.c rects_to_glass)
+    uint16_t *fb = s_fb[s_draw];                       // (chipguyhere) the frame chosen: the hidden one now (main.c rects_to_glass)
     const int c0 = s_flip ? cv->y0 : PANEL_W - cv->y0 - h;
     for (int x = x0; x < x1; x++) {
         const int py = s_flip ? PANEL_H - 1 - x : x;
@@ -1028,7 +1028,7 @@ void disp_page_rect(const canvas_t *cv, int x0, int x1, int sync)   // sync 0: d
 }
 
 uint32_t disp_frames_now(void) { return jc_frames(); }   // TEMP
-/* (fork addition, 2026-11-14) the two frames hold the same picture (s_twin): a change can then be drawn into the
+/* (chipguyhere, 2026-11-14) the two frames hold the same picture (s_twin): a change can then be drawn into the
  * one that does not show and flipped in whole, then drawn into the other. drawn into the frame showing, a
  * button took 20-48 ms (a cache line fetched for each of the panel's 1,280 rows it crosses) and the glass
  * showed it half done, in whatever order the cache let the lines go. anything that draws into one frame alone
@@ -1057,7 +1057,7 @@ void disp_page_flush(void)
 void disp_strip(const canvas_t *cv)
 {
     if (!s_ok || !s_ppa_task) return;
-    s_twin = 0;                                        // (fork addition) one frame only
+    s_twin = 0;                                        // (chipguyhere) one frame only
     if (JC_CPU_TURN) { cpu_turn(cv); return; }
     const int h = cv->h;
     s_ppa_op = (ppa_srm_oper_config_t){
@@ -1238,7 +1238,7 @@ void disp_log(void)
     fr0 = fr;
 }
 
-/* (fork addition, 2026-11-14) the setting's sense is the glass's: "normal" has the camera at the top, as a
+/* (chipguyhere, 2026-11-14) the setting's sense is the glass's: "normal" has the camera at the top, as a
  * user holds it. that is the drawing's turned-over way (s_flip 1 here and in ovl.c); the setting's "flipped"
  * is the way this build first drew it, the camera at the bottom. jc_touch turns the touch to match */
 void disp_flip(int on)

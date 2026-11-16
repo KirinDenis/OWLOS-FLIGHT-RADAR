@@ -1,4 +1,4 @@
-# the Waveshare ESP32-S3-Touch-LCD-7 and -7B (fork addition), read after sdkconfig.defaults.s3rgb.
+# the Waveshare ESP32-S3-Touch-LCD-7 and -7B (chipguyhere), read after sdkconfig.defaults.s3rgb.
 # chipguyhere's 7/7B library (components/chipguy_lcd7_7b) was written on the Arduino core, whose
 # ESP-IDF has these on: the run-time counters it reads each core's idle share from
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

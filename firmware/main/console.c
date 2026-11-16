@@ -27,7 +27,7 @@ static void take(line_t *l, uint8_t ch)
     if (ch == '\r') return;
     if (ch == '\n') {
         l->line[l->n] = 0;
-        /* (fork addition) from "OWLOS " on: a reset (opening the port does one) leaves a few stray bytes in the
+        /* (chipguyhere) from "OWLOS " on: a reset (opening the port does one) leaves a few stray bytes in the
          * UART, and glued to the front of the first line they hid its command */
         const char *at = strstr(l->line, "OWLOS ");
         if (l->n && s_fn) {
@@ -84,7 +84,7 @@ void console_start(console_line_fn fn)
         return;
     }
 #if DISP_JC8012 || DISP_WAVE7
-    /* (fork addition) its stack in the PSRAM: no deadline, and with XIP from PSRAM nothing runs with the cache off */
+    /* (chipguyhere) its stack in the PSRAM: no deadline, and with XIP from PSRAM nothing runs with the cache off */
     if (xTaskCreateWithCaps(uart_task, "console", 4096, NULL, 3, NULL, MALLOC_CAP_SPIRAM) != pdPASS)
 #endif
     xTaskCreate(uart_task, "console", 4096, NULL, 3, NULL);

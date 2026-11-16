@@ -1,5 +1,5 @@
 #!/bin/sh
-# macOS / Linux counterpart of BUILD.BAT for the boards this fork adds (and any other, by number):
+# macOS / Linux counterpart of BUILD.BAT for the boards chipguyhere added (and any other, by number):
 #   ./build.sh wave7b                     build for the Waveshare ESP32-S3-Touch-LCD-7B
 #   ./build.sh wave7b /dev/cu.usbserial-X build, flash, open the serial monitor
 #   ./build.sh jc8012                     the Guition JC8012P4A1C (ESP32-P4)

@@ -17,9 +17,9 @@
 #define DISPLAY_TAB5_1280x720   12   // M5Stack Tab5 5": ESP32-P4, 720x1280 standing on MIPI-DSI, its touch, through Espressif's board package
 #define DISPLAY_4827S043_480x272 13  // ESP32-4827S043C 4.3": ESP32-S3, 480x272 on the RGB bus, GT911 touch
 #define DISPLAY_CROW70_800x480  14   // Elecrow CrowPanel 7.0" (the plain one, not the Advance): ESP32-S3, RGB bus, GT911 touch
-#define DISPLAY_WAVE7_800x480   15   // Waveshare ESP32-S3-Touch-LCD-7: RGB bus, GT911, chipguy's 7/7B driver (fork addition)
-#define DISPLAY_WAVE7B_1024x600 16   // Waveshare ESP32-S3-Touch-LCD-7B: 1024x600, the same driver (fork addition)
-#define DISPLAY_JC8012_1280x800 17   // Guition JC8012P4A1C 10.1": ESP32-P4, 800x1280 standing on MIPI-DSI, GSL3680, chipguy's driver (fork addition)
+#define DISPLAY_WAVE7_800x480   15   // Waveshare ESP32-S3-Touch-LCD-7: RGB bus, GT911, chipguy's 7/7B driver (chipguyhere)
+#define DISPLAY_WAVE7B_1024x600 16   // Waveshare ESP32-S3-Touch-LCD-7B: 1024x600, the same driver (chipguyhere)
+#define DISPLAY_JC8012_1280x800 17   // Guition JC8012P4A1C 10.1": ESP32-P4, 800x1280 standing on MIPI-DSI, GSL3680, chipguy's driver (chipguyhere)
 
 #ifndef RADAR_DISPLAY
 #define RADAR_DISPLAY DISPLAY_ILI9341_320x240
@@ -84,7 +84,7 @@
 #define GFX_SCALE_SHIFT 2
 #define RADAR_RGB_BUS 1
 #elif RADAR_DISPLAY == DISPLAY_JC8012_1280x800
-/* the Guition JC8012P4A1C (fork addition): the same layout 5/2 as big on a 1280x800 glass, lying on a
+/* the Guition JC8012P4A1C (chipguyhere): the same layout 5/2 as big on a 1280x800 glass, lying on a
  * panel that stands (800x1280: firmware/main/lcd_jc8012.c turns it). 512 x 5/2 is 1280 exactly. the
  * fonts are the 5" boards' 3/2 ones, as on the Tab5 and the 7B: the writing is 3/5 of its size */
 #define GFX_W 512
@@ -116,7 +116,7 @@
 #define RADAR_RGB_BUS 0
 #endif
 
-/* the moving layer (fork addition): the planes, the sweep and the compass ring are not drawn into
+/* the moving layer (chipguyhere): the planes, the sweep and the compass ring are not drawn into
  * the frame in memory but put over it as the panel is fed, every panel frame (firmware/main/
  * lcd_wave7.cpp). the frame in memory holds the rest and is drawn again only as time allows */
 #if RADAR_DISPLAY == DISPLAY_WAVE7_800x480 || RADAR_DISPLAY == DISPLAY_WAVE7B_1024x600 || RADAR_DISPLAY == DISPLAY_JC8012_1280x800

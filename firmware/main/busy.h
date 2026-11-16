@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Michael Caldwell-Waller (chipguyhere). MIT License, see LICENSE in the repository root. */
 #pragma once
-/* (fork addition, 2026-11-14) TEMP diagnostic: what else is going on while the fill makes a chunk. each task
+/* (chipguyhere, 2026-11-14) TEMP diagnostic: what else is going on while the fill makes a chunk. each task
  * doing work that may compete with the fill (the PSRAM, the core) sets its bit meanwhile; the fill samples the
  * bits at each chunk, and counts them over all chunks and over the late ones (lcd_jc8012.c, the 10 s log) */
 #include <stdint.h>

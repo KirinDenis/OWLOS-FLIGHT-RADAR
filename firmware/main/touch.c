@@ -372,7 +372,7 @@ int tp_read(int *rx, int *ry)
 }
 
 #elif TOUCH_JC8012
-/* the Guition JC8012P4A1C (fork addition): the GSL3680, brought up with the panel by chipguyhere's
+/* the Guition JC8012P4A1C (chipguyhere): the GSL3680, brought up with the panel by chipguyhere's
  * library (lcd_jc8012_panel.cpp), which filters its reports. it counts the standing glass's pixels;
  * jc_touch hands them over turned to the lying picture's, 1280 x 800, as the picture is turned before
  * a flip (main.c turns the alignment with it) */

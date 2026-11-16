@@ -17,6 +17,9 @@
 #include "font.h"
 #include "gfx.h"
 #include "led.h"
+#include "logbuf.h"
+#include "busy.h"
+volatile uint32_t g_busy;                              // TEMP (busy.h): here, as every build sets the bits
 #include "net.h"
 #include "map.h"
 #include "qr_site.h"
@@ -25,10 +28,14 @@
 #include "tiles.h"
 #include "touch.h"
 #include "ui.h"
+#if RADAR_OVERLAY
+#include "ovl.h"
+#endif
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_memory_utils.h"
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -44,14 +51,14 @@
 
 static const char *TAG = "flight";
 
-static sky_t             s_sky;        // written by the fetch task, under s_lock
+static CORE_BIG sky_t    s_sky;        // written by the fetch task, under s_lock
 static demo_t            s_demo;
 static fr_cfg_t          s_cfg;        // the settings in use: the screen changes them, the site too
 static secrets_t         s_sec;
 static nets_t            s_nets;       // the networks it remembers, the first is the one in s_sec
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t      s_fetch;
-static ui_t              s_ui;
+static CORE_BIG ui_t     s_ui;
 static volatile int      s_cfg_new;    // the site sent settings: the screen takes s_cfg
 static volatile int      s_skip_align; // the page said skip the touch alignment
 static volatile int      s_align_told = -1;   // what the page last heard of it, -1: tell it again
@@ -102,8 +109,37 @@ static const char *reset_name(esp_reset_reason_t r)
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static uint32_t now_us(void) { return (uint32_t)esp_timer_get_time(); }
-static void lock(void) { xSemaphoreTake(s_lock, portMAX_DELAY); }
-static void unlock(void) { xSemaphoreGive(s_lock); }
+/* (fork addition, 2026-11-14) what the ui task waits for, for the 10 s log: the lock (how long, and who held
+ * it), and what the fetch task was doing meanwhile (FP_*, set as it goes). to find out whether the lags that
+ * come every few seconds are the network's */
+enum { FP_IDLE, FP_HOME, FP_GEOCODE, FP_MAP, FP_HTTP, FP_MERGE, FP_WATCH, FP_UPDATE, FP_ALIVE, FP_OTHER, FP_N };
+static const char *const FP_NAME[FP_N] = { "idle", "home", "geocode", "map", "http", "merge", "watch", "update", "alive", "other" };
+static volatile uint8_t  s_fp = FP_OTHER;             // the fetch task's phase now
+static TaskHandle_t      s_ui_task;
+static const char *volatile s_lock_by;                // the task holding the lock, NULL none
+static volatile uint8_t  s_lock_fp;                   // the fetch task's phase when it was taken
+static uint32_t          s_lw_max_us, s_lw_sum_us, s_lw_n;   // the ui task's waits for it
+static const char       *s_lw_by = "";
+static uint8_t           s_lw_fp;
+
+static void lock(void)
+{
+    if (xTaskGetCurrentTaskHandle() != s_ui_task || !s_ui_task) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+    } else if (xSemaphoreTake(s_lock, 0) != pdTRUE) {  // held: how long, and by whom
+        const char *by = s_lock_by;
+        const uint8_t fp = s_lock_fp;
+        const int64_t t0 = esp_timer_get_time();
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        const uint32_t w = (uint32_t)(esp_timer_get_time() - t0);
+        s_lw_sum_us += w;
+        s_lw_n++;
+        if (w > s_lw_max_us) { s_lw_max_us = w; s_lw_by = by ? by : "?"; s_lw_fp = fp; }
+    }
+    s_lock_by = pcTaskGetName(NULL);
+    s_lock_fp = s_fp;
+}
+static void unlock(void) { s_lock_by = NULL; xSemaphoreGive(s_lock); }
 
 /* --- asking the server --- */
 
@@ -151,7 +187,7 @@ static void *iram_first(size_t bytes)
 {
 #if CONFIG_IDF_TARGET_ESP32
     return heap_caps_malloc(bytes, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
-#elif DISP_LCD_RGB || DISP_LCD_DSI || CONFIG_IDF_TARGET_ESP32C5
+#elif DISP_LCD_RGB || DISP_LCD_DSI || DISP_WAVE7 || DISP_JC8012 || CONFIG_IDF_TARGET_ESP32C5
     return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);  // the 5" and the Tab5: 190 KB, no such room in the RAM. the C5: 38 KB the strips want
 #else
     (void)bytes;
@@ -159,8 +195,8 @@ static void *iram_first(size_t bytes)
 #endif
 }
 
-static map_t      s_map;
-static map_plan_t s_plan;
+static CORE_BIG map_t      s_map;
+static CORE_BIG map_plan_t s_plan;
 static int        s_map_read;          // tiles that went into s_map
 static uint32_t   s_map_done;          // and which of the plan's, a bit each
 static uint32_t   s_map_try;           // when it last asked for missing ones
@@ -217,7 +253,7 @@ typedef struct { char *b; int n, cap; } text_t;
 
 /* Nominatim's question and answer, for geocode() and the home search: both run on the fetch task,
  * one at a time. the ESP32's RAM is short, one pair is kept */
-static char s_osm_url[420], s_osm[2048];
+static CORE_BIG char s_osm_url[420], s_osm[2048];
 
 static void to_text(void *ctx, const char *data, int len)
 {
@@ -600,17 +636,92 @@ static void sky_out(void)
     printf("OWLOS SKY END %d\n", total);
 }
 
+#if RADAR_OVERLAY
+/* --- a sky to test with (fork addition, Waveshare 7/7B builds): the same planes on every run, so builds
+ * can be compared. OWLOS SKYSAVE keeps the sky as it is now (NVS); OWLOS SKYPLAY 1 shows that one, still,
+ * from now on and after restarts, instead of asking the network; OWLOS SKYPLAY 0 goes back to it */
+#include "nvs.h"
+static CORE_BIG sky_t s_sky_saved;
+static volatile int   s_skyplay, s_skysave;
+
+static void skyplay_load(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("skyplay", NVS_READONLY, &h) != ESP_OK) return;
+    uint8_t on = 0;
+    size_t sz = sizeof s_sky_saved;
+    if (nvs_get_u8(h, "on", &on) == ESP_OK && on && nvs_get_blob(h, "sky", &s_sky_saved, &sz) == ESP_OK &&
+        sz == sizeof s_sky_saved) {
+        s_skyplay = 1;
+        ESP_LOGW(TAG, "test sky: %d planes, the same each run (OWLOS SKYPLAY 0 to go back to the network)", s_sky_saved.n);
+    }
+    nvs_close(h);
+}
+
+static void skyplay_store(int save, int on)
+{
+    nvs_handle_t h;
+    if (nvs_open("skyplay", NVS_READWRITE, &h) != ESP_OK) return;
+    if (save) {
+        lock();
+        s_sky_saved = s_sky;
+        unlock();
+        esp_err_t e = nvs_set_blob(h, "sky", &s_sky_saved, sizeof s_sky_saved);
+        ESP_LOGW(TAG, "test sky kept: %d planes, %s", s_sky_saved.n, esp_err_to_name(e));
+    }
+    if (on >= 0) {
+        nvs_set_u8(h, "on", (uint8_t)on);
+        s_skyplay = on;
+        ESP_LOGW(TAG, "test sky %s", on ? "shown from now on, after restarts too" : "off: the network again");
+    }
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// the kept sky put in place, its planes held still where they were
+static void skyplay_show(void)
+{
+    const uint32_t now = now_ms();
+    lock();
+    s_sky = s_sky_saved;
+    for (int i = 0; i < s_sky.n; i++) {
+        plane_t *p = &s_sky.p[i];
+        p->gs = 0.0f;                                  // still: nothing to move it on
+        p->seen = p->heard = now;
+        p->first = now - 600000u;                      // long seen: no ring opening round it
+    }
+    s_sky.updated = now;
+    s_sky.status = SKY_OK;
+    unlock();
+}
+#endif
+
 static void fetch_task(void *arg)
 {
     (void)arg;
-    static sky_reader_t rd;                            // the answer is read into this as it comes
+    static CORE_BIG sky_reader_t rd;                   // the answer is read into this as it comes
     static char url[200];
     int next = -1;                                     // free server to try, -1 = the one in the settings
     uint32_t down = 0;                                 // since when the WiFi is not there
+#if RADAR_OVERLAY
+    skyplay_load();
+#endif
     for (;;) {
+#if RADAR_OVERLAY
+        if (s_skysave) {                               // asked on the console: done here, where the sky is written
+            skyplay_store(s_skysave & 1, (s_skysave >> 1) - 1);
+            s_skysave = 0;
+        }
+        if (s_skyplay) {                               // the kept sky instead of the network's
+            skyplay_show();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+#endif
         fr_cfg_t c;
         int configured, fr24;
         static char key[sizeof s_sec.key];
+        s_fp = FP_HOME;
         home_find();                                   // first: the planes are asked round the new home
         lock();
         c = s_cfg;
@@ -619,12 +730,17 @@ static void fetch_task(void *arg)
         memcpy(key, s_sec.key, sizeof key);
         sky_hide_ground(&s_sky, !c.ground);            // the screen's or the site's setting, at once
         unlock();
+        s_fp = FP_GEOCODE;
         geocode();                                     // home's country before anything is asked round it
         const int refused = home_refused();
         if (refused) {
             s_map.ready = 0;                           // no map of it either, the one shown goes
         } else {
+            s_fp = FP_MAP;
+            busy_on(BUSY_MAP);
             map_service(&c);                          // first: a new look or range shows its map before the planes come
+            busy_off(BUSY_MAP);
+            s_fp = FP_OTHER;
         }
         uint32_t every = FREE_EVERY_MS;
         const int up = net_up();
@@ -698,7 +814,11 @@ static void fetch_task(void *arg)
             lock();
             sky_read_begin(&rd, &s_sky, fr24, now_ms());   // only the home is taken from the sky here
             unlock();
+            s_fp = FP_HTTP;
+            busy_on(BUSY_HTTP);
             int len = net_get(url, fr24 ? key : NULL, to_reader, &rd, &status);
+            busy_off(BUSY_HTTP);
+            s_fp = FP_MERGE;
             int ms = (int)((esp_timer_get_time() - t0) / 1000);
             uint32_t now = now_ms();
             int n = -2;
@@ -740,13 +860,18 @@ static void fetch_task(void *arg)
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT));
             if (fr24) every = FR24_EVERY_MS;
             if (status == 429) every *= 3;            // too many requests: slow down
+            s_fp = FP_WATCH;
             if (status != 429) watch_lookup(&rd, server);   // on the free networks, FR24 or not
+            s_fp = FP_UPDATE;
             update_check();
+            s_fp = FP_ALIVE;
             alive_report();
+            s_fp = FP_OTHER;
         }
         lock();                                        // the LED's no data: the WiFi set is not there, or no answer
         light_hold(&s_light, LIGHT_NODATA, configured && (demo || s_sky.status >= SKY_HTTP), now_ms());
         unlock();
+        s_fp = FP_IDLE;
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(every)); // a new setting cuts the wait short
     }
 }
@@ -830,6 +955,12 @@ static const char *board_name(void)
     return "esp4827s043";
 #elif RADAR_DISPLAY == DISPLAY_CROW70_800x480
     return "crow70";
+#elif RADAR_DISPLAY == DISPLAY_WAVE7_800x480
+    return "wave7";
+#elif RADAR_DISPLAY == DISPLAY_WAVE7B_1024x600
+    return "wave7b";
+#elif RADAR_DISPLAY == DISPLAY_JC8012_1280x800
+    return "jc8012";
 #else
     return "other";
 #endif
@@ -852,6 +983,23 @@ static void on_line(const char *line)
     if (!strncmp(line, "OWLOS HELLO", 11)) { say_ready(); return; }
     if (!strncmp(line, "OWLOS GET", 9)) { say_cfg(); return; }
     if (!strcmp(line, "OWLOS SKIP")) { s_skip_align = 1; return; }
+#if RADAR_OVERLAY
+    // the test sky (see skyplay_load): bit 0 keep the sky now, bits 1.. 1 off / 2 on, 0 leave
+#if DISP_JC8012
+#if DISP_JC8012
+    if (!strcmp(line, "OWLOS NOPACE")) {               // TEMP: the moving layer's builds not paced to the panel for 20 s
+        extern volatile int64_t g_nopace_until;
+        g_nopace_until = esp_timer_get_time() + 20000000;
+        ESP_LOGI(TAG, "TEMP pacing test: the layer's builds unpaced for 20 s, from now");
+        return;
+    }
+#endif
+    if (!strcmp(line, "OWLOS SCROLLTEST")) { extern volatile uint32_t g_scrolltest_at; g_scrolltest_at = now_ms() | 1; return; }
+#endif
+    if (!strcmp(line, "OWLOS SKYSAVE")) { s_skysave = 1; if (s_fetch) xTaskNotifyGive(s_fetch); return; }
+    if (!strcmp(line, "OWLOS SKYPLAY 1")) { s_skysave = 2 << 1; if (s_fetch) xTaskNotifyGive(s_fetch); return; }
+    if (!strcmp(line, "OWLOS SKYPLAY 0")) { s_skysave = 1 << 1; if (s_fetch) xTaskNotifyGive(s_fetch); return; }
+#endif
     if (!strcmp(line, "OWLOS SKY ON")) {               // the page's radar, see sky_out
         s_align_told = -1;
         int was = page_there();
@@ -1025,6 +1173,47 @@ static int       s_nts;
 static uint32_t  s_ts_last;
 static uint32_t  s_touch_us, s_send_us;   // reading the touch and handing strips over, for the 10 s log
 
+static void touch_sample(int force);
+#if DISP_JC8012
+/* (fork addition) OWLOS SCROLLTEST on the console: the setup opened and dragged by a pretend finger, slowly
+ * up, then quickly down, so the scrolling can be measured without anyone at the glass. the real touch is
+ * ignored meanwhile */
+volatile uint32_t g_scrolltest_at;
+static uint32_t   s_st_passes, s_st_gap_max, s_st_last, s_st_moves;
+static int        s_st_scroll_was = -1;
+static void scrolltest(uint32_t now)
+{
+    const uint32_t at = g_scrolltest_at;
+    if (!at) return;
+    const uint32_t t = now - at;
+    s_nts = 0;                                         // the glass is not listened to meanwhile
+    if (t < 100) {
+        if (s_ui.view != VIEW_SETUP) { s_ui.view = VIEW_SETUP; s_ui.setup_scroll = 0; ESP_LOGI(TAG, "scroll test: the setup"); }
+        s_st_passes = s_st_gap_max = s_st_moves = 0;
+        s_st_last = now;
+        return;
+    }
+    int down = 0, y = 0;
+    if (t >= 2500 && t < 3000) { down = 1; y = 260; }                                          // a finger resting,
+    else if (t >= 3000 && t < 3800) { down = 1; y = 260 - (int)((t - 3000) * 12 / 800); }      // creeping (under the slop),
+    else if (t >= 3800 && t < 5500) { down = 1; y = 248 - (int)((t - 3800) * 188 / 1700); }    // then up, slowly
+    else if (t >= 7000 && t < 8000) { down = 1; y = 60 + (int)((t - 7000) * 200 / 1000); }    // down, quickly: 1 s
+    if (down) {
+        s_st_passes++;
+        if (now - s_st_last > s_st_gap_max) s_st_gap_max = now - s_st_last;
+        const int sc = s_ui.setup_scroll;
+        if (sc != s_st_scroll_was) { s_st_moves++; s_st_scroll_was = sc; }
+    }
+    s_st_last = now;
+    s_ts[s_nts++] = (tsample_t){ (uint8_t)down, (int16_t)(GFX_W / 2), (int16_t)y, 0, 0, now };
+    if (t >= 9500) {
+        g_scrolltest_at = 0;
+        ESP_LOGI(TAG, "scroll test: done. %u ui passes with the finger down, %u of them with the list moved, the longest gap %u ms",
+                 (unsigned)s_st_passes, (unsigned)s_st_moves, (unsigned)s_st_gap_max);
+    }
+}
+#endif
+
 static void touch_sample(int force)
 {
     uint32_t now = now_ms();
@@ -1120,7 +1309,7 @@ static void pick_screen(int screen, uint32_t now, const char *by)
  * turns with it, so it needs no new crosses */
 static void screen_flip(int on)
 {
-#if DISP_LCD_SPI || DISP_LCD_RGB || DISP_LCD_DSI || DISP_ILI9486
+#if DISP_LCD_SPI || DISP_LCD_RGB || DISP_LCD_DSI || DISP_ILI9486 || DISP_WAVE7 || DISP_JC8012
     disp_flip(on);
 #endif
 #if RADAR_TOUCH_CAL
@@ -1132,9 +1321,947 @@ static void screen_flip(int on)
     (void)on;
 }
 
+#if RADAR_OVERLAY
+/* --- the boards with the moving layer (config.h RADAR_OVERLAY, fork addition) ---
+ * the first core: a pass of the ui loop is a panel frame. it makes the moving layer for the frame
+ * that starts next, and hands the background a copy of the ui's state when the background is ready
+ * for another frame.
+ * the second core: the panel's fill (the library's task, top priority), and under it the background,
+ * drawn strip by strip from that copy into the frame that does not show, flipped in when whole. it
+ * gets whatever time the fill leaves. a copy and not the ui's own state: the two cores draw at once */
+#include "freertos/idf_additions.h"
+#define TOP_ROWS 16                                    // the moving layer's band: 64 KB of RAM at 1024 wide. fewer bands, less of each plane done again a band
+static canvas_t     s_top;                             // kept at 0 between uses (ovl.c)
+static uint32_t    *s_bg_px;                           // the background's strip, DISP_STRIP rows
+static ui_t        *s_ui_bg;                           // the state the background is drawn from, in the PSRAM
+static TaskHandle_t s_bg_task;
+static volatile uint32_t s_bg_gen;                     // (fork addition) frames the background task has drawn
+static volatile int s_bg_busy;                         // from the copy till the frame is drawn
+static volatile uint32_t s_bg_frames, s_bg_us;
+static volatile int s_bg_view = -1;                    // the page the last whole background was drawn for
+static int          s_view_up = -1;                    // and the page of the one on the screen now
+static uint32_t     s_top_us;
+
+#if DISP_JC8012
+/* (fork addition) a background frame takes ~2 s here (the CPU's turn, paced to the panel), and a page, or a
+ * button on the radar pressed or let go, waited for the one under way to finish: SET took seconds. so the ui
+ * can give it up: s_bg_cancel = s_bg_kick, seen between strips and every 16 columns of a turn
+ * (disp_bg_stop_fn). a frame given up is not shown; the frame not showing holds a part of it */
+static volatile uint32_t s_bg_kick, s_bg_cancel;      // which frame was asked for; which is to be given up
+static uint32_t s_bg_cancels;                          // for the 10 s log
+static int  bg_cancelled(void) { return s_bg_cancel == s_bg_kick; }
+static void bg_cancel(void) { if (s_bg_busy && s_bg_task) { s_bg_cancel = s_bg_kick; s_bg_cancels++; } }
+void disp_bg_stop_fn(int (*fn)(void));                 // lcd_jc8012.c
+#endif
+
+static void bg_task(void *arg)
+{
+    (void)arg;
+    canvas_t cv = { s_bg_px, 0, DISP_STRIP, 0, UI_LAYER_BG };
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const int64_t t0 = esp_timer_get_time();
+        busy_on(BUSY_BG);
+        disp_bg_begin();
+        for (int y = 0; y < GFX_PH; y += DISP_STRIP) {
+#if DISP_JC8012
+            if (bg_cancelled()) break;
+#endif
+            cv.y0 = y;
+            cv.h = y + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - y;
+            ui_strip(s_ui_bg, &cv);
+            disp_strip(&cv);
+        }
+        busy_off(BUSY_BG);
+#if DISP_JC8012
+        if (bg_cancelled()) {                          // given up: not shown, and what the frame not showing holds is not known
+            s_bg_gen++;
+            s_bg_busy = 0;
+            vTaskDelay(1);
+            continue;
+        }
+#endif
+        disp_frame_end();                              // up from the next panel frame on
+        s_bg_gen++;                                    // the pages' band sums no longer say what the frames hold
+        s_bg_view = s_ui_bg->view;
+        s_bg_us += (uint32_t)(esp_timer_get_time() - t0);
+        s_bg_frames++;
+        s_bg_busy = 0;
+        vTaskDelay(1);                                 // the idle task of this core gets its turn: the watchdog looks for it
+    }
+}
+
+/* the screen comes up before the WiFi, from a short task on the second core: the bounce buffers
+ * and the strips want internal RAM in one piece, which the WiFi and the tasks leave in bits, and the
+ * library's fill task stays on the core it was started from */
+static SemaphoreHandle_t s_early_done;
+
+static void early_task(void *arg)
+{
+    (void)arg;
+    disp_flip(s_cfg.flip);
+    disp_init();
+    s_top = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_INTERNAL), 0, TOP_ROWS, 0, UI_LAYER_TOP };
+    if (!s_top.px)                                     // (fork addition) the JC8012: its RAM may have no 80 KB in one piece; slower, but there
+        s_top.px = heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+    s_bg_px = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint32_t), MALLOC_CAP_INTERNAL);
+    if (!s_bg_px)                                      // the JC8012 (fork addition): its fill's buffers leave no 40 KB in one piece;
+        s_bg_px = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint32_t), MALLOC_CAP_SPIRAM);   // the background has no deadline
+    s_ui_bg = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM);
+    xSemaphoreGive(s_early_done);
+    vTaskDelete(NULL);
+}
+
+static void screen_early(void)
+{
+    s_early_done = xSemaphoreCreateBinary();
+    xTaskCreatePinnedToCore(early_task, "screen", 6144, NULL, 5, NULL, portNUM_PROCESSORS > 1 ? 1 : 0);
+    xSemaphoreTake(s_early_done, portMAX_DELAY);
+    /* its stack in the PSRAM: the internal RAM has none to spare, and nothing here runs with the cache off */
+#if DISP_JC8012
+    disp_bg_stop_fn(bg_cancelled);
+#endif
+    if (s_bg_px && s_ui_bg &&
+        xTaskCreatePinnedToCoreWithCaps(bg_task, "background", 8192, NULL, 1, &s_bg_task, 1, MALLOC_CAP_SPIRAM) != pdPASS)
+        s_bg_task = NULL;
+    ESP_LOGI(TAG, "screen up before the WiFi: RAM %u free, %u in one piece, background %s, ui_t %u bytes, layer band in %s, strip in %s",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             s_bg_task ? "on the second core" : "NOT THERE", (unsigned)sizeof(ui_t),
+             esp_ptr_internal(s_top.px) ? "RAM" : "PSRAM", esp_ptr_internal(s_bg_px) ? "RAM" : "PSRAM");
+}
+
+/* the planes move a pixel or a few at a time: their layer is made again at most this often. the sweep
+ * is not in it, the fill turns that every panel frame. a pass between makes nothing and leaves the core
+ * to the touch, the network and the pages */
+#ifndef OVL_LAYER_MS
+#define OVL_LAYER_MS 100
+#endif
+static uint32_t s_layer_at;
+static uint32_t s_page_at, s_page_ms;                  // when the last page drawn here was done, and how long it took
+#if DISP_JC8012
+/* (fork addition) a page (settings, keyboard, lists) is drawn only when the ui's state has changed, and
+ * only the 16-row bands that came out different are sent, into the frame that is showing (nothing moves on
+ * a page, so no second frame to keep). a band costs a turn (~24 ms at 80 rows on the CPU, measured). the
+ * first pass of a page is drawn whole into the frame not showing and flipped in */
+void disp_page_begin(void);                            // lcd_jc8012.c: draw into the frame showing
+void disp_page_turn(const canvas_t *cv);               // a band into it
+void disp_page_flush(void);                            // the frame's cache synced, once after the bands
+uint32_t disp_frames_now(void);                       // TEMP: panel frames so far (lcd_jc8012.c)
+int  disp_twin(void);                                  // lcd_jc8012.c: the two frames hold the same picture
+void disp_twin_set(int on);
+void disp_twin_copy(void);                             // the hidden frame made the showing one
+void disp_page_rect(const canvas_t *cv, int x0, int x1, int sync);   // a strip's columns x0 .. x1 - 1 only
+/* changed bands kept in the PSRAM till all of a change is drawn, then turned one after another and the cache
+ * written back once: turned as each was drawn, a full-width stripe (a pressed button's row) took tens of ms,
+ * and the panel showed the button half new for a few frames */
+enum { STAGE_BANDS = 25 };
+static uint32_t *s_stage;
+static int16_t   s_stage_y[STAGE_BANDS], s_stage_h[STAGE_BANDS], s_stage_x0[STAGE_BANDS], s_stage_x1[STAGE_BANDS];
+static ui_t    *s_prev_ui;                             // the ui as the page showing was drawn from (ui_dirty_rects)
+static uint32_t s_rects;                               // rectangles sent, for the 10 s log
+static uint32_t s_touch_edge_at;                       // when a finger last went down or up (its sample's time)
+static uint32_t s_lat_n, s_lat_sum, s_lat_max, s_lat_wait; // from that to the page on the glass, for the 10 s log
+#define PAGE_BANDS ((GFX_PH + TOP_ROWS - 1) / TOP_ROWS)
+static uint32_t s_band_sum[PAGE_BANDS];                // each band as the frame showing has it
+static uint32_t s_band_gen = UINT32_MAX;
+static int      s_page_view = -1, s_page_down = -1;
+static uint32_t s_page_drawn;                          // when a page was last drawn
+static uint32_t s_page_sent, s_page_passes, s_page_skips, s_sig_off;   // for the 10 s log
+static ui_t    *s_sig[2];                              // the ui's state at the last draw and now, without the clock
+
+static uint32_t band_sum(const uint32_t *p, size_t n)
+{
+    uint32_t a = 0x9E3779B9u, b = 0;
+    for (size_t i = 0; i < n; i += 2) {
+        a = (a ^ p[i]) * 0x01000193u;
+        b = (b + p[i + 1]) ^ (b >> 7);
+    }
+    return a ^ (b * 0x85EBCA6Bu);
+}
+
+/* has anything a page shows changed since it was last drawn? the clock is cut to the cursor's blink */
+static int page_changed(void)
+{
+    for (int i = 0; i < 2; i++)
+        if (!s_sig[i] && !(s_sig[i] = heap_caps_calloc(1, sizeof(ui_t), MALLOC_CAP_SPIRAM))) return 1;
+    ui_t *n = s_sig[1];
+    memcpy(n, &s_ui, sizeof(ui_t));
+    n->now = (s_ui.now / 500u) & 1u;
+    n->beam = 0;
+    memset(n->prof, 0, sizeof n->prof);
+    memset(n->spot, 0, sizeof n->spot);                // where the radar draws the planes: made every pass, no page shows it
+    memset(n->order, 0, sizeof n->order);
+    n->n_order = 0;
+    const uint8_t *a = (const uint8_t *)s_sig[0], *b = (const uint8_t *)n;
+    for (size_t i = 0; i < sizeof(ui_t); i++)
+        if (a[i] != b[i]) {
+            s_sig_off = (uint32_t)i;                   // the first byte that changed, for the log: what keeps changing
+            s_sig[1] = s_sig[0];
+            s_sig[0] = n;
+            return 1;
+        }
+    return 0;
+}
+
+/* (fork addition) a page that scrolls (lcd_jc8012.c: disp_scroll_*). while it is at rest its list is drawn
+ * beforehand, its whole height, a viewport's height a pass, into a PSRAM buffer the fill gathers from; while
+ * a finger drags it the fill does the scrolling and nothing here is drawn; when the finger lifts the page is
+ * drawn at rest there and the gather stops with the panel frame that shows it */
+uint16_t *disp_scroll_prepare(int gy0, int gy1, int hc, int bx0, int bx1);
+void disp_scroll_put(const canvas_t *cv, int yc);
+void disp_scroll_done(void);
+void disp_scroll_to(int S);
+void disp_scroll_stop_at_flip(void);
+int  disp_scroll_on(void);
+void disp_scroll_stats(uint32_t *n, uint32_t *late);
+int  disp_copier_ok(void);
+static uint32_t    s_sc_starts, s_sc_unready;
+static ui_t       *s_sc_key[2], *s_sc_work;             // what the list was drawn from / is now; a copy to draw it from
+static int         s_sc_valid, s_sc_stale, s_sc_step = -1, s_sc_view = -1, s_sc_stopping;
+static ui_scroll_t s_sc_geo;
+static uint32_t    s_sc_renders, s_sc_render_us, s_sc_drags;
+
+// the ui without the clock and the finger: what a page shows apart from where a finger is and what it presses
+static void strip_touch(ui_t *k)
+{
+    k->now = 0; k->beam = 0;
+    memset(k->prof, 0, sizeof k->prof);
+    memset(k->spot, 0, sizeof k->spot);
+    k->t_down = k->t_x0 = k->t_y0 = k->t_x = k->t_y = k->t_moved = k->t_long = k->t_ns = 0;
+    k->t_hit = k->t_reps = k->t_rpt = k->t_scroll0 = k->t_turn = 0;
+    k->t_since = k->t_rep = 0;
+    k->t_panel = 0;
+    k->t_a0 = k->t_r0 = k->t_up0 = k->t_range0 = 0;
+    k->fling = k->t_caught = 0;                        // the momentum (ui.c): where the list is, not what it shows
+    k->fl_y = 0; k->fl_at = 0; k->fl_v = k->fl_pos = 0;
+    memset(k->t_sx, 0, sizeof k->t_sx);
+    memset(k->t_sy, 0, sizeof k->t_sy);
+}
+
+// the ui as the list looks: without the clock, the finger, the scroll, a toast
+static void sc_strip(ui_t *k)
+{
+    strip_touch(k);
+    k->list_scroll = k->wifi_scroll = k->setup_scroll = 0;
+    k->toast_until = 0;
+    memset(k->toast, 0, sizeof k->toast);
+    k->menu_until = 0;
+}
+
+static int sc_key_changed(void)
+{
+    for (int i = 0; i < 2; i++)
+        if (!s_sc_key[i] && !(s_sc_key[i] = heap_caps_calloc(1, sizeof(ui_t), MALLOC_CAP_SPIRAM))) return 1;
+    memcpy(s_sc_key[1], &s_ui, sizeof(ui_t));
+    sc_strip(s_sc_key[1]);
+    if (!memcmp(s_sc_key[0], s_sc_key[1], sizeof(ui_t))) return 0;
+    ui_t *t = s_sc_key[0]; s_sc_key[0] = s_sc_key[1]; s_sc_key[1] = t;
+    return 1;
+}
+
+// a viewport's height of the list; when it is whole, the fill may use it
+static void sc_render_step(void)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const ui_scroll_t *g = &s_sc_geo;
+    const int gy0 = GFX_Z(g->y0), gy1 = GFX_Z(g->y1), h = gy1 - gy0;
+    const int maxe = (g->max + 1) & ~1, hc = GFX_Z(maxe) + h;
+    const int step = (g->y1 - g->y0) & ~1;             // even: 5/2 of it is a whole number of glass rows
+    if (!s_sc_work && !(s_sc_work = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM))) { s_sc_step = -1; return; }
+    if (s_sc_step == 0) {
+        const int bx0 = g->bx1 > g->bx0 ? GFX_Z(g->bx0) - 1 : 0, bx1 = g->bx1 > g->bx0 ? GFX_Z(g->bx1) + 2 : 0;
+        if (!disp_scroll_prepare(gy0, gy1, hc, bx0, bx1)) { s_sc_step = -1; return; }
+    }
+    memcpy(s_sc_work, &s_ui, sizeof(ui_t));
+    const uint32_t now = s_sc_work->now;
+    sc_strip(s_sc_work);
+    s_sc_work->now = now;
+    ui_scrolled(s_sc_work, s_sc_step);
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    for (int y = gy0 / TOP_ROWS * TOP_ROWS; y < gy1; y += TOP_ROWS) {
+        sub.y0 = y;
+        sub.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
+        ui_strip(s_sc_work, &sub);
+        disp_scroll_put(&sub, GFX_Z(s_sc_step));
+        touch_sample(0);
+    }
+    memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));
+    s_sc_render_us += (uint32_t)(esp_timer_get_time() - t0);
+    if (GFX_Z(s_sc_step) + h >= hc) {
+        disp_scroll_done();
+        s_sc_valid = 1;
+        s_sc_step = -1;
+        s_sc_renders++;
+    } else {
+        s_sc_step += step;
+    }
+}
+
+static int  s_ring_in;                                 // the ring under the finger is in the list (sc_ring, below)
+static void sc_ring(int on);
+
+// 1: the page is being scrolled by the fill, not drawn here
+static int sc_tick(void)
+{
+    ui_scroll_t g;
+    const int can = ui_scroll_info(&s_ui, &g);
+    const int drag = (s_ui.t_down && s_ui.t_moved) || s_ui.fling;   // coasting after the lift: still the fill's
+    if (disp_scroll_on()) {
+        if (can && drag && s_ui.view == s_sc_view && !s_sc_stopping) {
+            disp_scroll_to(GFX_Z(g.scroll));
+            return 1;
+        }
+        if (!s_sc_stopping) {                          // let go: the page drawn at rest there, the gather stops with it
+            ESP_LOGI(TAG, "scrolling stops: %s", !can ? "the page no longer scrolls" : !drag ? (s_ui.t_down ? "the finger stopped counting as a drag" : "the finger lifted, or the list came to rest")
+                                              : "another page");
+            s_sc_stopping = 1;
+            disp_scroll_stop_at_flip();
+            s_page_view = -1;                          // drawn whole into the frame not showing, and flipped in
+        }
+        return 0;
+    }
+    s_sc_stopping = 0;
+    if (s_ring_in) sc_ring(0);                         // the gather is off: the list as it was, for the next drag
+    if (!can) { s_sc_valid = 0; s_sc_step = -1; s_ring_in = 0; return 0; }
+    /* another page, or the list another length: what is drawn is no use. only what it says changed (the
+     * setup shows the network's state, the plane list its planes): still usable for a drag, drawn again over
+     * itself between drags; the page is drawn at rest anyway when the finger lifts */
+    if (s_sc_view != s_ui.view || memcmp(&g.y0, &s_sc_geo.y0, sizeof(int) * 2) || g.max != s_sc_geo.max) {
+        s_sc_valid = 0;
+        s_sc_stale = 1;
+        s_sc_step = -1;
+        sc_key_changed();
+    } else if (sc_key_changed()) {
+        s_sc_stale = 1;
+        if (s_sc_step > 0) s_sc_step = 0;              // a drawing under way: from the top again
+    }
+    if (s_sc_valid && drag) {
+        if (s_sc_step >= 0) s_sc_step = -1;            // a drawing under way stops (the list is at worst partly new)
+        if (s_ui.t_down) sc_ring(1);                   // the ring under the finger, into the list (coasting: none)
+        disp_scroll_to(GFX_Z(g.scroll));
+        s_sc_drags++;
+        s_sc_starts++;
+        return 1;
+    }
+    if (drag) s_sc_unready++;                          // a drag, the list not drawn yet: the page is drawn as before
+    if ((!s_sc_valid || s_sc_stale) && !s_ui.t_down) { // at rest: a piece of the list a pass
+        if (s_sc_step < 0) { s_sc_step = 0; s_sc_geo = g; s_sc_view = s_ui.view; s_sc_stale = 0; }
+        sc_render_step();
+    }
+    return 0;
+}
+
+/* (fork addition) any page: when only the finger changed (where it is, what it presses), the rectangles that
+ * shows in: a stripe across the page where it came down (a pressed row, button or tab lights there) and the
+ * ring under it, before and after. -1: something else changed too (a value, a tab, a toast), all of it */
+static ui_t *s_tr[2];
+static int touch_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max)
+{
+    if (max < 4) return -1;
+    for (int i = 0; i < 2; i++)
+        if (!s_tr[i] && !(s_tr[i] = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM))) return -1;
+    if (((int32_t)(a->toast_until - a->now) > 0) != ((int32_t)(b->toast_until - b->now) > 0)) return -1;
+    memcpy(s_tr[0], a, sizeof(ui_t));
+    memcpy(s_tr[1], b, sizeof(ui_t));
+    strip_touch(s_tr[0]);
+    strip_touch(s_tr[1]);
+    if (memcmp(s_tr[0], s_tr[1], sizeof(ui_t))) return -1;
+    int n = 0;
+    const int pa = a->t_down && !a->t_moved, pb = b->t_down && !b->t_moved;
+    if (pa != pb || (pa && (a->t_hit != b->t_hit || a->t_y0 != b->t_y0))) {   // what is pressed: lit or not
+        if (pa) r[n++] = (ui_rect_t){ 0, (int16_t)(a->t_y0 - 24), (int16_t)GFX_W, (int16_t)(a->t_y0 + 24) };
+        if (pb) r[n++] = (ui_rect_t){ 0, (int16_t)(b->t_y0 - 24), (int16_t)GFX_W, (int16_t)(b->t_y0 + 24) };
+    }
+    if (a->t_down != b->t_down || (b->t_down && (a->t_x != b->t_x || a->t_y != b->t_y))) {   // the ring under the finger
+        if (a->t_down) r[n++] = (ui_rect_t){ (int16_t)(a->t_x - 12), (int16_t)(a->t_y - 12), (int16_t)(a->t_x + 13), (int16_t)(a->t_y + 13) };
+        if (b->t_down) r[n++] = (ui_rect_t){ (int16_t)(b->t_x - 12), (int16_t)(b->t_y - 12), (int16_t)(b->t_x + 13), (int16_t)(b->t_y + 13) };
+    }
+    return n;
+}
+
+/* (fork addition) the ring under the finger, while the fill scrolls the page: drawn into the list where the
+ * finger came down (what is under a dragging finger stays under it, so the ring goes with it), and taken
+ * out again before the list is used for anything else. on: 1 draw it, 0 the list as it was */
+static int s_ring_x, s_ring_y, s_ring_s;
+static void sc_ring(int on)
+{
+    if (!s_sc_valid || !s_sc_work || on == s_ring_in) return;
+    if (on) {                                          // where the finger is now, and the page's scroll then (even:
+        ui_scroll_t now_g;                             // the list was drawn at even scrolls, 5/2 of them whole rows)
+        s_ring_x = s_ui.t_x;
+        s_ring_y = s_ui.t_y;
+        s_ring_s = ui_scroll_info(&s_ui, &now_g) ? now_g.scroll & ~1 : 0;
+    }
+    const ui_scroll_t *g = &s_sc_geo;
+    const int gy0 = GFX_Z(g->y0), gy1 = GFX_Z(g->y1);
+    int a = GFX_Z(s_ring_y - 13), b = GFX_Z(s_ring_y + 14);
+    if (a < gy0) a = gy0;
+    if (b > gy1) b = gy1;
+    s_ring_in = on;
+    if (a >= b) return;
+    memcpy(s_sc_work, &s_ui, sizeof(ui_t));
+    const uint32_t now = s_sc_work->now;
+    sc_strip(s_sc_work);                               // the list as drawn beforehand
+    s_sc_work->now = now;
+    if (on) { s_sc_work->t_down = s_sc_work->t_moved = 1; s_sc_work->t_x = s_ring_x; s_sc_work->t_y = s_ring_y; }
+    ui_scrolled(s_sc_work, s_ring_s);
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    for (int y = a / TOP_ROWS * TOP_ROWS; y < b; y += TOP_ROWS) {
+        sub.y0 = y;
+        sub.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
+        ui_strip(s_sc_work, &sub);
+        const int r0 = y > a ? y : a, r1 = y + sub.h < b ? y + sub.h : b;
+        const canvas_t part = { sub.px + (size_t)(r0 - y) * GFX_PW, r0, r1 - r0, 0, UI_LAYER_BG };
+        disp_scroll_put(&part, GFX_Z(s_ring_s));
+    }
+    memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));
+    disp_scroll_done();
+}
+
+static int s_replay, s_replay_view;                    // (fork addition) staged bands flipped in, still to go into the other frame; their page
+static void stage_turn(int nst)
+{
+    for (int i = 0; i < nst; i++) {
+        const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG };
+        disp_page_rect(&st, s_stage_x0[i], s_stage_x1[i], 0);
+    }
+    if (nst) disp_page_flush();
+}
+/* the change last flipped in, into the frame that showed before it: the two alike again. on the radar the
+ * background draws that frame whole anyway: not needed there. 0 done or nothing to do */
+static int rects_replay(void)
+{
+    if (!s_replay) return 0;
+    if (!disp_bg_ready()) return 1;                    // the flip is not up yet
+    if (s_ui.view != VIEW_MAIN && s_ui.view == s_replay_view) {   // (another page: drawn whole anyway)
+        disp_bg_begin();
+        stage_turn(s_replay);
+        disp_twin_set(1);
+    }
+    s_replay = 0;
+    return 0;
+}
+
+/* the rectangles rc (layout pixels) of the ui as it is now, into the frame showing: each one's bands drawn and
+ * kept in the PSRAM, then all of them turned at once and the cache written back once. 0: more than the stage
+ * holds, nothing sent (the caller draws it whole) */
+static int rects_to_glass(const ui_rect_t *rc, int nrc)
+{
+    if (rects_replay()) return 0;                      // the last change is not in both frames yet
+    if (!s_stage) s_stage = heap_caps_malloc((size_t)STAGE_BANDS * GFX_PW * TOP_ROWS * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+    if (!s_stage) return 0;
+    int nst = 0;
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    for (int i = 0; i < nrc && nst >= 0; i++) {
+        int gx0 = GFX_Z(rc[i].x0) - 2, gx1 = GFX_Z(rc[i].x1) + 3, gy0 = GFX_Z(rc[i].y0) - 2, gy1 = GFX_Z(rc[i].y1) + 3;
+        if (gx0 < 0) gx0 = 0;
+        if (gy0 < 0) gy0 = 0;
+        if (gx1 > GFX_PW) gx1 = GFX_PW;
+        if (gy1 > GFX_PH) gy1 = GFX_PH;
+        for (int y = gy0; y < gy1; y += TOP_ROWS) {
+            if (nst >= STAGE_BANDS) { nst = -1; break; }   // more than fits: the whole page instead
+            sub.y0 = y;
+            sub.h = y + TOP_ROWS <= gy1 ? TOP_ROWS : gy1 - y;
+            ui_strip(&s_ui, &sub);
+            memcpy(s_stage + (size_t)nst * GFX_PW * TOP_ROWS, sub.px, (size_t)GFX_PW * sub.h * sizeof(uint32_t));
+            s_stage_y[nst] = (int16_t)sub.y0;
+            s_stage_h[nst] = (int16_t)sub.h;
+            s_stage_x0[nst] = (int16_t)gx0;
+            s_stage_x1[nst] = (int16_t)gx1;
+            nst++;
+            touch_sample(0);
+        }
+        s_rects++;
+    }
+    memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));
+    if (nst < 0) return 0;
+    /* (fork addition, 2026-11-14) into the frame that does not show, flipped in whole at a panel frame's start,
+     * and drawn into the other one after (rects_replay). into the frame showing it took 20-48 ms and the glass
+     * showed the button half done, in the cache's order */
+    const int64_t ts = esp_timer_get_time();
+    const uint32_t f0 = disp_frames_now();
+    const int copied = !disp_twin();
+    if (copied) disp_twin_copy();                      // the hidden frame as the glass shows it, first
+    const int64_t tc = esp_timer_get_time();
+    disp_bg_begin();
+    stage_turn(nst);
+    disp_twin_set(0);                                  // they differ till the replay
+    disp_frame_end();                                  // up from the next panel frame's start
+    s_replay = nst;
+    s_replay_view = s_ui.view;
+    const int64_t te = esp_timer_get_time();
+    s_send_us += (uint32_t)(te - ts);
+    ESP_LOGI(TAG, "TEMP rects to the hidden frame: %d bands, %s%u us drawn, %u panel frames meanwhile",
+             nst, copied ? "copied first, " : "", (unsigned)(te - tc), (unsigned)(disp_frames_now() - f0));
+    return 1;
+}
+
+static void page_draw(uint32_t now, int poked)
+{
+    int fresh = s_band_gen != s_bg_gen || s_page_view != s_ui.view;   // what the frame holds is not known
+    s_page_passes++;
+    if (!page_changed() && !fresh && !poked && now - s_page_drawn < 1000u) {
+        s_page_skips++;
+        s_page_at = now;                               // the next look in 30 ms
+        return;
+    }
+    s_bg_busy = 1;                                     // the background task keeps off meanwhile
+    s_page_down = s_ui.t_down;
+    const int64_t t0 = esp_timer_get_time();
+    if (!s_prev_ui) s_prev_ui = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM);
+    /* the ui says which rectangles changed (the keyboard does): only their rows are drawn, only their
+     * columns turned into the frame showing, only the panel rows they cover written back */
+    ui_rect_t rc[8];
+    int nrc = !fresh && s_prev_ui ? ui_dirty_rects(s_prev_ui, &s_ui, rc, 8) : -1;
+    if (nrc < 0 && !fresh && s_prev_ui) nrc = touch_rects(s_prev_ui, &s_ui, rc, 8);   // any page: the finger alone
+    if (nrc >= 0 && rects_to_glass(rc, nrc)) {
+        memcpy(s_prev_ui, &s_ui, sizeof(ui_t));
+        memset(s_band_sum, 0, sizeof s_band_sum);      // the bands' sums no longer say what the frame holds
+        goto done;
+    }
+    /* more than the ui can place: the whole page into the frame not showing, flipped in at a panel frame's
+     * start. written into the frame showing (as before), a pressed button showed half old, half new */
+    fresh = 1;
+    s_replay = 0;                                      // (fork addition) drawn whole: no change to replay
+    if (fresh) disp_bg_begin();
+    else disp_page_begin();
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };   // the moving layer's band: internal RAM, idle on a page
+    /* the changed bands are kept in the PSRAM till all are drawn, then turned one after another: turned as
+     * each was drawn, a key reached the glass in pieces over the ~100 ms of drawing */
+    if (!s_stage) s_stage = heap_caps_malloc((size_t)STAGE_BANDS * GFX_PW * TOP_ROWS * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
+    int sent = 0, staged = 0;
+    for (int y = 0, k = 0; y < GFX_PH; y += TOP_ROWS, k++) {
+        sub.y0 = y;
+        sub.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
+        ui_strip(&s_ui, &sub);
+        touch_sample(0);                               // the touch read as it should be (every 15 ms): a lift needs four
+                                                       // empty reads (the library's debounce), once a pass made it ~0.5 s
+        const uint32_t sum = band_sum(sub.px, (size_t)GFX_PW * sub.h);
+        if (!fresh && s_band_sum[k] == sum) continue;  // the frame has it already
+        s_band_sum[k] = sum;
+        sent++;
+        if (!fresh && s_stage && staged < STAGE_BANDS) {   // the frame showing: kept for the end
+            memcpy(s_stage + (size_t)staged * GFX_PW * TOP_ROWS, sub.px, (size_t)GFX_PW * sub.h * sizeof(uint32_t));
+            s_stage_y[staged] = (int16_t)sub.y0;
+            s_stage_h[staged] = (int16_t)sub.h;
+            staged++;
+            continue;
+        }
+        const int64_t ts = esp_timer_get_time();       // the frame not showing (a page's first pass): at once
+        disp_page_turn(&sub);
+        s_send_us += (uint32_t)(esp_timer_get_time() - ts);
+    }
+    {
+        const int64_t ts = esp_timer_get_time();
+        for (int i = 0; i < staged; i++) {
+            const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG };
+            disp_page_turn(&st);
+        }
+        s_send_us += (uint32_t)(esp_timer_get_time() - ts);
+    }
+    if (sent) {
+        const int64_t ts = esp_timer_get_time();
+        disp_page_flush();
+        s_send_us += (uint32_t)(esp_timer_get_time() - ts);
+    }
+    memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));   // the moving layer's band again: from nothing
+    if (fresh) {
+        disp_frame_end();                              // up from the next panel frame on
+        s_band_gen = s_bg_gen;
+        s_page_view = s_ui.view;
+    }
+    if (s_prev_ui) memcpy(s_prev_ui, &s_ui, sizeof(ui_t));
+    s_page_sent += (uint32_t)sent;
+done:
+    if (poked && s_touch_edge_at) {                    // a finger down or up: how long till it shows
+        s_lat_wait += (uint32_t)(t0 / 1000) - s_touch_edge_at;   // of it, before the drawing began
+        const uint32_t lat = (uint32_t)(esp_timer_get_time() / 1000) - s_touch_edge_at;
+        s_lat_n++;
+        s_lat_sum += lat;
+        if (lat > s_lat_max) s_lat_max = lat;
+    }
+    s_bg_view = s_ui.view;
+    s_bg_us += (uint32_t)(esp_timer_get_time() - t0);
+    s_bg_frames++;
+    s_bg_busy = 0;
+    s_page_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    s_page_at = s_page_drawn = (uint32_t)(esp_timer_get_time() / 1000);
+}
+#endif
+
+#if DISP_JC8012
+/* (fork addition, 2026-11-14) where a ui pass's time goes, for the 10 s log: each mark adds the time since the
+ * last one to its section. the average a pass, and the slowest pass section by section. wall time: the fill
+ * (top priority, this core) preempting the pass is in whichever section it hit */
+enum { PS_INPUT, PS_PRESS, PS_LIST, PS_UIFRAME, PS_BGCOPY, PS_LDRAW, PS_LPACK, PS_PACE, PS_LEND, PS_PAGE, PS_REST, PS_WAIT, PS_N };
+static const char *const PS_NAME[PS_N] = { "input", "press", "list", "ui_frame", "bg copy", "layer draw", "layer pack",
+                                           "panel wait", "layer end", "page", "rest", "wait" };
+static uint32_t s_ps[PS_N], s_ps_sum[PS_N], s_ps_worst[PS_N], s_ps_worst_total, s_ps_n, s_ps_view = 0;
+static int64_t  s_ps_at;
+uint32_t disp_pace_us(void);                           // lcd_jc8012.c
+static void ps_mark(int k)
+{
+    const int64_t t = esp_timer_get_time();
+    if (s_ps_at) s_ps[k] += (uint32_t)(t - s_ps_at);
+    s_ps_at = t;
+}
+static void ps_pass_end(void)
+{
+    uint32_t total = 0;
+    for (int k = 0; k < PS_N; k++) { total += s_ps[k]; s_ps_sum[k] += s_ps[k]; }
+    if (total > s_ps_worst_total) { s_ps_worst_total = total; memcpy(s_ps_worst, s_ps, sizeof s_ps); s_ps_view = (uint32_t)s_ui.view; }
+    memset(s_ps, 0, sizeof s_ps);
+    s_ps_n++;
+}
+static void ps_log(void)
+{
+    char a[400], w[400];
+    int na = 0, nw = 0;
+    const uint32_t n = s_ps_n ? s_ps_n : 1;
+    for (int k = 0; k < PS_N; k++) {
+        na += snprintf(a + na, sizeof a - (size_t)na, " %s %u.%u", PS_NAME[k], (unsigned)(s_ps_sum[k] / n / 1000u), (unsigned)(s_ps_sum[k] / n / 100u % 10u));
+        if (s_ps_worst[k] >= 1000u) nw += snprintf(w + nw, sizeof w - (size_t)nw, " %s %u", PS_NAME[k], (unsigned)(s_ps_worst[k] / 1000u));
+    }
+    a[na] = w[nw] = 0;
+    ESP_LOGI(TAG, "pass ms, average of %u:%s", (unsigned)s_ps_n, a);
+    ESP_LOGI(TAG, "pass ms, the slowest (%u, view %u):%s", (unsigned)(s_ps_worst_total / 1000u), (unsigned)s_ps_view, w);
+    memset(s_ps_sum, 0, sizeof s_ps_sum);
+    memset(s_ps_worst, 0, sizeof s_ps_worst);
+    s_ps_worst_total = s_ps_n = 0;
+}
+#define PS_MARK(k) ps_mark(k)
+#else
+#define PS_MARK(k) ((void)0)
+#endif
+
+#if DISP_JC8012
+/* (fork addition) a button on the radar (SET, LIST, the colours, a row) pressed or let go: drawn at once, a
+ * stripe across where the finger came down, into the frame showing (as the pages' rectangles), the moving
+ * layer goes on over it. the background under way shows the button as it was, so it is given up first,
+ * and the next one starts from the pressed state. before, the press waited for the frame under way and then
+ * a whole frame of its own: ~2-4 s */
+static int s_mp_shown, s_mp_y;                         // the button the glass shows pressed (ui_pressed), where
+static uint32_t s_mp_draws;                            // for the 10 s log
+static void main_press(void)
+{
+    const int want = ui_pressed(&s_ui);
+    static int s_mp_down;
+    if (s_mp_down && !s_ui.t_down && s_ui.view == VIEW_MAIN) bg_cancel();   // a lift (a plane picked, a turn done): the
+    s_mp_down = s_ui.t_down;                                                 // frame under way shows the old state
+    if (s_ui.view != VIEW_MAIN || s_view_up != VIEW_MAIN) { s_mp_shown = want; s_mp_y = s_ui.t_y0; return; }
+    if (want == s_mp_shown && (!want || s_ui.t_y0 == s_mp_y)) return;
+    if (s_bg_busy) { bg_cancel(); return; }            // given up between its strips: the next pass draws it
+    if (!disp_bg_ready()) return;                      // a frame on its way up: after it
+    ui_rect_t rc[2];
+    int n = 0;
+    if (s_mp_shown) rc[n++] = (ui_rect_t){ 0, (int16_t)(s_mp_y - 24), (int16_t)GFX_W, (int16_t)(s_mp_y + 24) };
+    if (want && (!s_mp_shown || s_ui.t_y0 != s_mp_y))
+        rc[n++] = (ui_rect_t){ 0, (int16_t)(s_ui.t_y0 - 24), (int16_t)GFX_W, (int16_t)(s_ui.t_y0 + 24) };
+    if (n) rects_to_glass(rc, n);                      // too big for the stage: the background brings it
+    s_mp_shown = want;
+    s_mp_y = s_ui.t_y0;
+    s_mp_draws++;
+}
+#endif
+
+/* where things are in the middle of the time a layer will show (frame_layered's lead): the build's time, as
+ * measured, and the gap between builds */
+static uint32_t s_lay_build_ms = 20, s_gap_ms = OVL_LAYER_MS;
+static int64_t  s_prev_build;
+
+#if DISP_JC8012
+/* (fork addition, 2026-11-14) the moving layer built in a task of its own, beside the ui task on its core and
+ * below it: with 48 planes a build took ~650 ms, and inline it held the ui (touch, buttons, pages) that long.
+ * the ui hands it a copy of its state when it is free (as the background task gets one); it draws into a band
+ * of its own in the PSRAM (s_top stays the ui's: pages, pressed buttons). a page coming up gives the build
+ * under way up (between bands), as nothing of it would show */
+void disp_pace_new_build(void);                        // lcd_jc8012.c
+void disp_pace_end_phase(void);
+static TaskHandle_t s_builder;
+static ui_t        *s_ui_top;                          // the builder's copy of the ui
+static canvas_t     s_top_b;                           // its band, kept at 0 between uses (ovl.c)
+static volatile int s_build_busy, s_build_view_up, s_build_turning;
+static volatile uint32_t s_build_gen, s_build_cancel;
+enum { BS_DRAW, BS_PACK, BS_WAIT, BS_END, BS_N };
+static uint32_t s_bs_n, s_bs_cancels, s_bs_sum[BS_N], s_bs_worst[BS_N], s_bs_worst_total;   // for the 10 s log
+
+static void builder_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const uint32_t my = s_build_gen;
+        const int64_t start = esp_timer_get_time();
+        uint32_t bs[BS_N] = { 0 };
+        ui_top_t ti;
+        ui_top_info(s_ui_top, &ti);
+        if (s_build_view_up != VIEW_MAIN) ti.any = ti.beam = 0;   // (see frame_layered)
+        ovl_beam_t b = { ti.beam, ti.cx, ti.cy, ti.r, ti.prim, ti.focus, ti.turn_ms, ti.holes };
+        for (int k = 0; k < ti.holes; k++) {
+            b.hx0[k] = (int16_t)ti.hx0[k]; b.hy0[k] = (int16_t)ti.hy0[k];
+            b.hx1[k] = (int16_t)ti.hx1[k]; b.hy1[k] = (int16_t)ti.hy1[k];
+        }
+        disp_pace_new_build();                         // paced only if the fill was late lately
+        const uint32_t pace0 = disp_pace_us();
+        ovl_build_begin(&b);
+        int cancelled = 0;
+        int64_t t = esp_timer_get_time(), t2;
+        for (int y = ti.any ? ti.y0 / TOP_ROWS * TOP_ROWS : GFX_PH; y < ti.y1; y += TOP_ROWS) {
+            if (s_build_cancel == my) { cancelled = 1; break; }
+            s_top_b.y0 = y;
+            s_top_b.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
+            busy_on(BUSY_DRAW);
+            ui_top_strip(s_ui_top, &s_top_b);
+            busy_off(BUSY_DRAW);
+            t2 = esp_timer_get_time(); bs[BS_DRAW] += (uint32_t)(t2 - t); t = t2;
+            busy_on(BUSY_PACK);
+            ovl_build_band(&s_top_b, ti.x0, ti.x1);
+            busy_off(BUSY_PACK);
+            t2 = esp_timer_get_time(); bs[BS_PACK] += (uint32_t)(t2 - t); t = t2;
+        }
+        const uint32_t pace1 = disp_pace_us();
+        busy_on(BUSY_END);
+        disp_pace_end_phase();
+        if (!cancelled) ovl_build_end(&b);             // given up: the slot is simply taken again next time
+        busy_off(BUSY_END);
+        t2 = esp_timer_get_time();
+        bs[BS_END] += (uint32_t)(t2 - t);
+        {   /* the panel waits inside the bands and the end, moved to their own */
+            const uint32_t in_bands = pace1 - pace0, in_end = disp_pace_us() - pace1;
+            bs[BS_WAIT] = in_bands + in_end;
+            bs[BS_PACK] -= in_bands < bs[BS_PACK] ? in_bands : bs[BS_PACK];
+            bs[BS_END] -= in_end < bs[BS_END] ? in_end : bs[BS_END];
+        }
+        const uint32_t total = (uint32_t)(t2 - start);
+        if (cancelled) {
+            s_bs_cancels++;
+        } else {
+            s_top_us += total;
+            s_layer_at = (uint32_t)(t2 / 1000);        // from its end: the next is due OVL_LAYER_MS later
+            if (!s_build_turning) s_lay_build_ms = (s_lay_build_ms * 3u + total / 1000u) / 4u;
+            else s_prev_build = 0;                     // the gap after a turn is not a planes' gap
+            s_bs_n++;
+            for (int k = 0; k < BS_N; k++) s_bs_sum[k] += bs[k];
+            if (total > s_bs_worst_total) { s_bs_worst_total = total; memcpy(s_bs_worst, bs, sizeof bs); }
+        }
+        s_build_busy = 0;
+    }
+}
+
+static void builder_start(void)
+{
+    static int tried;
+    if (tried) return;
+    tried = 1;
+    s_ui_top = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM);
+    s_top_b = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_SPIRAM), 0, TOP_ROWS, 0, UI_LAYER_TOP };
+    if (!s_ui_top || !s_top_b.px ||
+        xTaskCreatePinnedToCoreWithCaps(builder_task, "layer", 8192, NULL, 3, &s_builder, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
+        s_builder = NULL;
+        ESP_LOGW(TAG, "no task for the moving layer: it is built in the ui task");
+    }
+}
+
+static void builder_log(void)
+{
+    const uint32_t n = s_bs_n ? s_bs_n : 1;
+    ESP_LOGI(TAG, "layer builds: %u, %u given up; ms a build: draw %u, pack %u, panel wait %u, end %u; the slowest %u "
+             "(draw %u, pack %u, panel wait %u, end %u)", (unsigned)s_bs_n, (unsigned)s_bs_cancels,
+             (unsigned)(s_bs_sum[BS_DRAW] / n / 1000u), (unsigned)(s_bs_sum[BS_PACK] / n / 1000u),
+             (unsigned)(s_bs_sum[BS_WAIT] / n / 1000u), (unsigned)(s_bs_sum[BS_END] / n / 1000u),
+             (unsigned)(s_bs_worst_total / 1000u), (unsigned)(s_bs_worst[BS_DRAW] / 1000u), (unsigned)(s_bs_worst[BS_PACK] / 1000u),
+             (unsigned)(s_bs_worst[BS_WAIT] / 1000u), (unsigned)(s_bs_worst[BS_END] / 1000u));
+    s_bs_n = s_bs_cancels = s_bs_worst_total = 0;
+    memset(s_bs_sum, 0, sizeof s_bs_sum);
+    memset(s_bs_worst, 0, sizeof s_bs_worst);
+}
+#endif
+
+static void frame_layered(uint32_t now)
+{
+    const uint32_t period = disp_frame_us();
+    const int64_t start = esp_timer_get_time();
+    if (!s_bg_busy && disp_bg_ready()) s_view_up = s_bg_view;   // the last background drawn is the one up
+    const int direct = s_ui.view != VIEW_MAIN;         // a page with nothing moving on it: drawn here, see below
+#if DISP_JC8012
+    PS_MARK(PS_INPUT);                                 // the loop's top: touch, commands, the sky copied
+    builder_start();
+    if (direct) bg_cancel();                           // the radar's background under way is no use to a page
+    if (direct && s_build_busy && s_build_view_up == VIEW_MAIN) s_build_cancel = s_build_gen;   // nor the radar's layer
+    main_press();                                      // before bg_go: a background is given up, or starts pressed
+    if (!s_bg_busy) rects_replay();                    // the last change into the other frame too, once it is up
+    PS_MARK(PS_PRESS);
+#endif
+    const int bg_go = s_bg_task && !direct && !s_bg_busy && disp_bg_ready();
+    /* a finger turning the compass: the layer is the ring alone (ui_top_info), made every pass so the
+     * ring follows the finger at the panel's pace. the planes and the map catch up when it lets go */
+    const int turning = !direct && s_ui.t_down && s_ui.t_turn == 1 && s_ui.t_moved;
+    const int build = direct || turning || now - s_layer_at >= OVL_LAYER_MS;
+    /* a page drawn here leaves the core free after it for half as long as it took, and at least 50 ms:
+     * drawn back to back, the menus kept the core so busy its idle task never ran, and the watchdog
+     * restarted the board */
+    uint32_t rest = s_page_ms / 2 > 50u ? s_page_ms / 2 : 50u;
+#if DISP_JC8012
+    rest = 30u;                                        // (fork addition) a look at the ui's state; drawn only if it changed
+#else
+    static int s_page_down = -1;
+#endif
+    /* (fork addition) a finger down or up is drawn at once, not after the rest: a key wants its answer.
+     * at most twice a press, so the idle task still gets its turn */
+    const int poked = s_ui.t_down != s_page_down;
+#if DISP_JC8012
+    const int scrolling = direct && sc_tick();         // (fork addition) the fill scrolls it: nothing drawn here
+    const int draw_here = direct && !scrolling && !s_bg_busy && disp_bg_ready() && (poked || now - s_page_at >= rest);
+    PS_MARK(PS_LIST);                                  // sc_tick: a list drawn beforehand, a piece a pass
+#else
+    const int draw_here = direct && !s_bg_busy && disp_bg_ready() && (poked || now - s_page_at >= rest);
+#endif
+    if (!build && !bg_go && !draw_here) {
+        touch_sample(0);
+        return;
+    }
+    /* where things are in the middle of the time this layer will show: it is up after this build and a
+     * panel frame, and stays till the next one, so ahead by a frame, the build's time and half the time
+     * between layers, all as measured. a fixed guess left the planes' glow 20-30 degrees behind the beam
+     * once the layer came only every ~350 ms */
+#if DISP_JC8012
+    const int kick = build && (!s_builder || !s_build_busy);   // the builder busy: the next pass asks again
+#else
+    const int kick = build;
+#endif
+    if (kick && !direct && !turning) {                // the ring alone is quick: not counted
+        const int64_t t = esp_timer_get_time();
+        if (s_prev_build) s_gap_ms = (s_gap_ms * 3u + (uint32_t)((t - s_prev_build) / 1000)) / 4u;
+        s_prev_build = t;
+    }
+    const uint32_t lead = kick && !direct ? s_lay_build_ms + s_gap_ms / 2u : 0u;
+    ui_frame(&s_ui, now + period / 1000u + lead);
+    PS_MARK(PS_UIFRAME);
+    if (bg_go) {                                       // the background is free for another frame: this state
+        memcpy(s_ui_bg, &s_ui, sizeof(ui_t));
+#if DISP_JC8012
+        s_bg_kick++;                                   // before busy: a cancel names this frame
+#endif
+        s_bg_busy = 1;
+        xTaskNotifyGive(s_bg_task);
+    }
+    PS_MARK(PS_BGCOPY);
+    if (!kick) goto drawn;
+#if DISP_JC8012
+    if (s_builder) {                                   // this state to the builder, which makes the layer meanwhile
+        memcpy(s_ui_top, &s_ui, sizeof(ui_t));
+        s_build_view_up = s_view_up;
+        s_build_turning = turning;
+        s_build_gen++;
+        s_build_busy = 1;
+        xTaskNotifyGive(s_builder);
+        goto drawn;
+    }
+#endif
+    ui_top_t ti;
+    ui_top_info(&s_ui, &ti);
+    /* the moving layer only over the radar page that is up: leaving a menu, the sweep waited for the
+     * radar's background to replace the menu's, instead of turning over the menu meanwhile */
+    if (s_view_up != VIEW_MAIN) ti.any = ti.beam = 0;
+    ovl_beam_t b = { ti.beam, ti.cx, ti.cy, ti.r, ti.prim, ti.focus, ti.turn_ms, ti.holes };
+    for (int k = 0; k < ti.holes; k++) {
+        b.hx0[k] = (int16_t)ti.hx0[k]; b.hy0[k] = (int16_t)ti.hy0[k];
+        b.hx1[k] = (int16_t)ti.hx1[k]; b.hy1[k] = (int16_t)ti.hy1[k];
+    }
+#if DISP_JC8012
+    { void disp_pace_new_build(void); disp_pace_new_build(); }   // paced this build only if the fill was late lately
+    const uint32_t pace0 = disp_pace_us();
+#endif
+    ovl_build_begin(&b);                               // an empty layer where nothing moves: the rows say so
+    for (int y = ti.any ? ti.y0 / TOP_ROWS * TOP_ROWS : GFX_PH; y < ti.y1; y += TOP_ROWS) {
+        s_top.y0 = y;
+        s_top.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
+        ui_top_strip(&s_ui, &s_top);
+        PS_MARK(PS_LDRAW);
+        ovl_build_band(&s_top, ti.x0, ti.x1);
+#if DISP_JC8012
+        touch_sample(0);                               // (fork addition) a heavy sky's layer outlasts a frame: a lift needs 4 empty reads
+#endif
+        PS_MARK(PS_LPACK);
+    }
+#if DISP_JC8012
+    const uint32_t pace1 = disp_pace_us();
+#endif
+    ovl_build_end(&b);
+    PS_MARK(PS_LEND);
+#if DISP_JC8012
+    {   /* the panel waits inside the bands and the end: moved from where they were counted to their own */
+        const uint32_t in_bands = pace1 - pace0, in_end = disp_pace_us() - pace1;
+        s_ps[PS_PACE] += in_bands + in_end;
+        s_ps[PS_LPACK] -= in_bands < s_ps[PS_LPACK] ? in_bands : s_ps[PS_LPACK];
+        s_ps[PS_LEND] -= in_end < s_ps[PS_LEND] ? in_end : s_ps[PS_LEND];
+    }
+#endif
+    s_top_us += (uint32_t)(esp_timer_get_time() - start);
+    s_layer_at = (uint32_t)(esp_timer_get_time() / 1000);   // from its end: the core has that long to itself before the next
+    if (!turning) s_lay_build_ms = (s_lay_build_ms * 3u + (uint32_t)((esp_timer_get_time() - start) / 1000)) / 4u;
+    else s_prev_build = 0;                             // the gap after a turn is not a planes' gap
+drawn:
+    touch_sample(0);
+    /* the settings, the keyboard, the lists: nothing moves there, this core has the time the moving
+     * layer would take, and a key wants its answer now. so the page is drawn here, from the ui's own
+     * state, not handed to the second core's background task (which takes ~1 s a frame under the fill) */
+#if DISP_JC8012
+    /* (fork addition) the gate is draw_here: before, any pass on a page drew it, the rest never applied */
+    PS_MARK(PS_REST);
+    if (draw_here) { busy_on(BUSY_PAGE); page_draw(now, poked); busy_off(BUSY_PAGE); }
+    PS_MARK(PS_PAGE);
+#else
+    if (direct && !s_bg_busy && disp_bg_ready()) {
+        s_bg_busy = 1;                                 // the background task keeps off meanwhile
+        s_page_down = s_ui.t_down;
+        const int64_t t0 = esp_timer_get_time();
+        canvas_t cv = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+        const int rows = TOP_ROWS;
+        disp_bg_begin();
+        for (int y = 0; y < GFX_PH; y += rows) {
+            cv.y0 = y;
+            cv.h = y + rows <= GFX_PH ? rows : GFX_PH - y;
+            ui_strip(&s_ui, &cv);
+            const int64_t ts = esp_timer_get_time();
+            disp_strip(&cv);
+            s_send_us += (uint32_t)(esp_timer_get_time() - ts);
+            touch_sample(0);                           // a finger is read between strips, as the original loop does
+        }
+        memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));   // the moving layer's band again: from nothing
+        disp_frame_end();
+        s_bg_view = s_ui.view;
+        s_bg_us += (uint32_t)(esp_timer_get_time() - t0);
+        s_bg_frames++;
+        s_bg_busy = 0;
+        s_page_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+        s_page_at = (uint32_t)(esp_timer_get_time() / 1000);
+    }
+#endif
+}
+#endif
+
+#if (DISP_JC8012 || DISP_WAVE7) && CONFIG_FREERTOS_USE_TRACE_FACILITY
+/* (fork addition) where the internal RAM is, once a minute: each region of it (free, in one piece,
+ * at the least) and each task's stack (bytes never used, and whether it is in the PSRAM) */
+static void mem_report(void)
+{
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+    static TaskStatus_t st[40];
+    UBaseType_t n = uxTaskGetSystemState(st, 40, NULL);
+    char line[512];
+    int at = 0;
+    for (UBaseType_t i = 0; i < n && at < (int)sizeof line - 40; i++)
+        at += snprintf(line + at, sizeof line - at, "%s %u%s, ", st[i].pcTaskName, (unsigned)st[i].usStackHighWaterMark,
+                       esp_ptr_external_ram(st[i].pxStackBase) ? "P" : "");
+    ESP_LOGI(TAG, "stacks, bytes never used (P: in the PSRAM): %s", line);
+}
+#endif
+
 static void ui_task(void *arg)
 {
     (void)arg;
+    s_ui_task = xTaskGetCurrentTaskHandle();
     fr_cfg_t c;
     lock();
     c = s_cfg;
@@ -1146,11 +2273,17 @@ static void ui_task(void *arg)
     disp_profile(screen);
     s_screen = screen;
 #endif
+#if RADAR_OVERLAY
+    uint32_t *work = s_top.px;                         // screen_early made them
+    ovl_waiter(xTaskGetCurrentTaskHandle());
+    ovl_planner_start(disp_frame_us, 0, 6);            // the next frame's busiest chunks, beside and above this task
+#else
 #if DISP_LCD_SPI || DISP_LCD_RGB || DISP_LCD_DSI || DISP_ILI9486
     disp_flip(c.flip);
 #endif
     disp_init();
     uint32_t *work = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint32_t), MALLOC_CAP_INTERNAL);
+#endif
     if (!work || !ui_init(&s_ui, now_ms())) {
         ESP_LOGE(TAG, "not enough memory for the screen: RAM %u free, %u in one piece, heap %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
@@ -1173,7 +2306,19 @@ static void ui_task(void *arg)
     button_init();
     esp_task_wdt_add(NULL);
     tp_init();
-#if RADAR_TOUCH_CAL
+#if RADAR_OVERLAY
+    /* the Waveshare 7/7B (fork addition): a capacitive GT911 that counts the glass's own pixels, so how
+     * its numbers fall on the screen is known: the layout is the glass scaled down (config.h GFX_SCALE),
+     * turned with the picture when it is turned. the five-cross alignment is never started. a port of
+     * this build to a resistive panel (an XPT2046 and the like) wants it back: take this block out and
+     * the stored-alignment check below runs as on the other boards */
+    s_ui.cal = (touch_cal_t){ (float)GFX_W / (float)GFX_PW, 0, 0, 0, (float)GFX_H / (float)GFX_PH, 0 };
+    if (c.flip) {                                      // as screen_flip turns it
+        touch_cal_t *k = &s_ui.cal;
+        k->a = -k->a; k->b = -k->b; k->c = (float)(GFX_W - 1) - k->c;
+        k->d = -k->d; k->e = -k->e; k->f = (float)(GFX_H - 1) - k->f;
+    }
+#elif RADAR_TOUCH_CAL
     int have = store_load_cal(&s_ui.cal);
     const float want = (float)GFX_W / (float)tp_raw_span();
     float sx = fabsf(s_ui.cal.a) + fabsf(s_ui.cal.b), sy = fabsf(s_ui.cal.d) + fabsf(s_ui.cal.e);
@@ -1184,8 +2329,23 @@ static void ui_task(void *arg)
 
     uint32_t frames = 0, t_stat = now_ms(), busy_us = 0, dirty = 0;
     int light = 0;
+    /* (fork addition) the gaps between passes, for the 10 s log: the longest, and those over 100 ms by what
+     * the fetch task was doing as the pass that made it began */
+    uint32_t gap_max = 0, gap_long[FP_N] = { 0 };
+    uint8_t  gap_fp = FP_IDLE, pass_fp = FP_IDLE;
+    int64_t  pass_at = 0;
     for (;;) {
         uint32_t now = now_ms();
+        {
+            const int64_t t = esp_timer_get_time();
+            if (pass_at) {
+                const uint32_t g = (uint32_t)((t - pass_at) / 1000);
+                if (g > gap_max) { gap_max = g; gap_fp = pass_fp; }
+                if (g > 100u) gap_long[pass_fp]++;
+            }
+            pass_at = t;
+            pass_fp = s_fp;
+        }
         ui_cmd_t cmd;
         memset(&cmd, 0, sizeof cmd);
 
@@ -1213,6 +2373,9 @@ static void ui_task(void *arg)
             if (s_ui.view == VIEW_CAL) ui_button(&s_ui, 1, &cmd);
         }
         touch_sample(1);
+#if DISP_JC8012
+        scrolltest(now);
+#endif
         int finger = 0;                                // a sample comes every frame, with a finger or without
         for (int i = 0; i < s_nts; i++) finger |= s_ts[i].down;
         if (finger || ev) {                            // a finger or BOOT: what the LED shows is seen, it goes out
@@ -1223,6 +2386,10 @@ static void ui_task(void *arg)
         for (int i = 0; i < s_nts; i++) {
             const tsample_t *s = &s_ts[i];
             ui_touch(&s_ui, s->down, s->x, s->y, s->rx, s->ry, s->t, &cmd);
+#if DISP_JC8012
+            static int s_was_down;
+            if (s->down != s_was_down) { s_was_down = s->down; s_touch_edge_at = s->t; }
+#endif
         }
         s_nts = 0;
 
@@ -1386,10 +2553,13 @@ static void ui_task(void *arg)
 #if DISP_HELPER
         helper_set(s_ui.view == VIEW_MAIN && s_ui.cfg.look == LOOK_RADAR);
         const int step = s_helper ? 2 * DISP_STRIP : DISP_STRIP;
-#else
+#elif !RADAR_OVERLAY
         const int step = DISP_STRIP;
 #endif
         int64_t t0 = esp_timer_get_time();
+#if RADAR_OVERLAY
+        frame_layered(now);
+#else
         ui_frame(&s_ui, now);
         for (int sy0 = 0; sy0 < GFX_PH; sy0 += step) {
             canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0 };
@@ -1418,6 +2588,7 @@ static void ui_task(void *arg)
             touch_sample(0);
         }
         disp_frame_end();
+#endif
         busy_us += (uint32_t)(esp_timer_get_time() - t0);
         frames++;
         if (light < 100) disp_backlight(light += 10);
@@ -1426,10 +2597,35 @@ static void ui_task(void *arg)
             uint32_t f = frames ? frames : 1;
             ESP_LOGI(TAG, "%u fps, %u ms a frame, view %d, %d planes, heap %u", (unsigned)(frames * 1000u / (now - t_stat)),
                      (unsigned)(busy_us / 1000u / f), s_ui.view, s_ui.snap.n, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+            {
+                char by[160];
+                int at = 0;
+                for (int k = 0; k < FP_N; k++)
+                    if (gap_long[k]) at += snprintf(by + at, sizeof by - (size_t)at, " %s %u", FP_NAME[k], (unsigned)gap_long[k]);
+                by[at] = 0;
+                uint32_t reused, fresh;
+                net_get_stats(&reused, &fresh);
+                ESP_LOGI(TAG, "pacing: longest gap between ui passes %u ms (fetch: %s); over 100 ms:%s; lock: %u waits, %u ms "
+                         "the longest (held by %s, fetch: %s), %u ms in all; net: %u requests on a kept connection, %u connections made",
+                         (unsigned)gap_max, FP_NAME[gap_fp], at ? by : " none", (unsigned)s_lw_n, (unsigned)(s_lw_max_us / 1000u),
+                         s_lw_by[0] ? s_lw_by : "-", FP_NAME[s_lw_fp], (unsigned)(s_lw_sum_us / 1000u), (unsigned)reused, (unsigned)fresh);
+#if DISP_JC8012
+                ps_log();
+                builder_log();
+#endif
+                gap_max = 0;
+                memset(gap_long, 0, sizeof gap_long);
+                s_lw_max_us = s_lw_sum_us = s_lw_n = 0;
+                s_lw_by = "";
+            }
 #if CONFIG_SPIRAM
             // the heap above counts the PSRAM too: what the WiFi, the second core and the AES under TLS want is this
             ESP_LOGI(TAG, "RAM %u free, %u in one piece, %u at the least", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+#endif
+#if (DISP_JC8012 || DISP_WAVE7) && CONFIG_FREERTOS_USE_TRACE_FACILITY
+            static uint8_t s_mem_n;
+            if (s_mem_n++ % 6 == 0) mem_report();
 #endif
             const uint32_t *pr = s_ui.prof;                // where a frame's time goes, ms: what to make faster
             ESP_LOGI(TAG, "ms a frame: background %u, disc %u, compass %u, planes %u, panel %u, the rest %u, "
@@ -1443,6 +2639,60 @@ static void ui_task(void *arg)
                          (unsigned)(s_help_wait_us / 1000u / f), (unsigned)uxTaskGetStackHighWaterMark(s_helper));
             s_help_wait_us = 0;
 #endif
+#if RADAR_OVERLAY
+            ESP_LOGI(TAG, "moving layer: %u ms a frame to make; background: %u frames, %u ms each",
+                     (unsigned)(s_top_us / 1000u / f), (unsigned)s_bg_frames,
+                     (unsigned)(s_bg_frames ? s_bg_us / 1000u / s_bg_frames : 0));
+#if DISP_JC8012
+            ESP_LOGI(TAG, "touch: %u backgrounds given up, %u radar presses drawn at once", (unsigned)s_bg_cancels, (unsigned)s_mp_draws);
+            s_bg_cancels = s_mp_draws = 0;
+#endif
+#if DISP_JC8012
+            if (s_ui.view != VIEW_MAIN)
+                ESP_LOGI(TAG, "page: %u looks, %u with nothing changed, %u bands sent (%d a whole page), last change at byte %u of ui_t; "
+                              "finger down/up to the glass: %u times, %u ms on average (%u before the drawing began), %u at most; %u rectangles",
+                         (unsigned)s_page_passes, (unsigned)s_page_skips, (unsigned)s_page_sent, PAGE_BANDS, (unsigned)s_sig_off,
+                         (unsigned)s_lat_n, (unsigned)(s_lat_n ? s_lat_sum / s_lat_n : 0),
+                         (unsigned)(s_lat_n ? s_lat_wait / s_lat_n : 0), (unsigned)s_lat_max, (unsigned)s_rects);
+            s_rects = 0;
+            s_page_sent = s_page_passes = s_page_skips = 0;
+            s_lat_n = s_lat_sum = s_lat_max = s_lat_wait = 0;
+            {
+                uint32_t gn, gl;
+                disp_scroll_stats(&gn, &gl);
+                if (s_ui.view != VIEW_MAIN || gn)
+                    ESP_LOGI(TAG, "scrolling: list drawn %u times (%u ms), %u drags, %u passes dragging before the list was ready, "
+                                  "%u chunks gathered, %u gathered late%s",
+                             (unsigned)s_sc_renders, (unsigned)(s_sc_render_us / 1000), (unsigned)s_sc_starts, (unsigned)s_sc_unready,
+                             (unsigned)gn, (unsigned)gl, disp_copier_ok() ? "" : ", THE GDMA COPIER IS GONE");
+                s_sc_renders = s_sc_render_us = s_sc_drags = s_sc_starts = s_sc_unready = 0;
+            }
+#endif
+            {
+                ovl_stats_t os;
+                ovl_stats(&os, 1);
+                ESP_LOGI(TAG, "moving layer: %u panel frames, %u made, %u never shown, %u too full, %u words at most",
+                         (unsigned)os.frames, (unsigned)os.built, (unsigned)os.skipped, (unsigned)os.overflow,
+                         (unsigned)os.words_max);
+                ESP_LOGI(TAG, "moving layer: %u busiest rows a layer made whole beforehand", (unsigned)(os.built ? os.busy / os.built : 0));
+                ESP_LOGI(TAG, "moving layer: %u chunks composed beforehand on this core, %u of them used by the fill",
+                         (unsigned)os.pre_made, (unsigned)os.pre_used);
+                ovl_log_chunks();
+                ESP_LOGI(TAG, "rows lost by where the beam was, 12 3 6 9 o'clock and between: %u %u %u | %u %u %u | %u %u %u | %u %u %u",
+                         (unsigned)os.late_by_beam[0], (unsigned)os.late_by_beam[1], (unsigned)os.late_by_beam[2],
+                         (unsigned)os.late_by_beam[3], (unsigned)os.late_by_beam[4], (unsigned)os.late_by_beam[5],
+                         (unsigned)os.late_by_beam[6], (unsigned)os.late_by_beam[7], (unsigned)os.late_by_beam[8],
+                         (unsigned)os.late_by_beam[9], (unsigned)os.late_by_beam[10], (unsigned)os.late_by_beam[11]);
+                ESP_LOGI(TAG, "moving layer in the fill: sweep %u us a frame, layer %u us a frame, %u words a frame, "
+                              "%u rows with the sweep alone",
+                         (unsigned)(os.frames ? os.beam_cyc / CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ / os.frames : 0),
+                         (unsigned)(os.frames ? os.layer_cyc / CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ / os.frames : 0),
+                         (unsigned)(os.frames ? os.words / os.frames : 0), (unsigned)os.layer_dropped);
+            }
+            disp_log();
+            s_top_us = s_bg_us = s_bg_frames = 0;
+            // the 7B's backlight is said again in disp_log, with what the board reports round it
+#endif
             memset(s_ui.prof, 0, sizeof s_ui.prof);
             if (now / 1000u - s_ran_kept >= 60u) {     // a reset from here on knows how long this run was
                 s_ran_kept = now / 1000u;
@@ -1454,12 +2704,30 @@ static void ui_task(void *arg)
             t_stat = now;
         }
         esp_task_wdt_reset();
+#if RADAR_OVERLAY
+        /* till the next panel frame starts (ovl.c). a frame begun while this pass ran is let go: the pass
+         * always waits for a fresh one, so this core is always free for part of a frame. with many planes
+         * the moving layer takes longer than a frame, and with the fetch task's TLS the core had no time
+         * left for its idle task: the watchdog restarted the board (2026-11-11). the layer then changes
+         * every second or third panel frame; the sweep keeps every one, the fill draws it from the clock */
+        PS_MARK(PS_REST);                              // after the drawing: the LED, the log, the stats
+        busy_off(BUSY_UI);
+        ulTaskNotifyTake(pdTRUE, 0);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+        busy_on(BUSY_UI);
+        PS_MARK(PS_WAIT);
+#if DISP_JC8012
+        ps_pass_end();
+#endif
+#else
         vTaskDelay(1);
+#endif
     }
 }
 
 void app_main(void)
 {
+    logbuf_start();                                    // (fork addition) the log no longer waits for the UART
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -1492,12 +2760,26 @@ void app_main(void)
 #if DISP_LCD_DSI
     disp_board_up();                                   // the Tab5: the radio's power switch, before the WiFi asks for it
 #endif
+#if RADAR_OVERLAY
+    screen_early();
+#endif
     net_start(&s_nets);                                // up even without settings: a SET then just connects
     /* the TLS handshake runs on the fetch task, and the map is made there. one core (the C3): it
      * gets the screen's priority, the two take turns a tick each. under the screen it had less
      * than a millisecond a frame, a map took it over ten seconds and IDLE starved into the watchdog */
+#if DISP_JC8012 || DISP_WAVE7
+    /* (fork addition) its stack in the PSRAM: 12 KB the internal RAM has not got to spare. with XIP
+     * from PSRAM a flash write leaves the cache on, so a stack there is safe (spi_flash_os_func_app.c) */
+    if (xTaskCreatePinnedToCoreWithCaps(fetch_task, "fetch", 12288, NULL, 4, &s_fetch, 0, MALLOC_CAP_SPIRAM) != pdPASS)
+#endif
     xTaskCreatePinnedToCore(fetch_task, "fetch", 12288, NULL, portNUM_PROCESSORS > 1 ? 4 : 5, &s_fetch, 0);
+#if RADAR_OVERLAY
+    /* the Waveshare 7/7B: the second core is the panel's (its fill follows every chunk's copy down
+     * the rows and lays the moving layer over them); the drawing goes on the first, beside the WiFi */
+    xTaskCreatePinnedToCore(ui_task, "ui", 8192, NULL, 5, NULL, 0);
+#else
     xTaskCreatePinnedToCore(ui_task, "ui", 8192, NULL, 5, NULL, portNUM_PROCESSORS > 1 ? 1 : 0);
+#endif
     /* the console last, and READY with it: the site sends its SET the moment it reads READY. said
      * before, the SET was lost (no console yet) or notified a fetch task not made yet (an assert) */
     console_start(on_line);

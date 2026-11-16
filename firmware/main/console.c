@@ -6,6 +6,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "freertos/idf_additions.h"
+#include "esp_heap_caps.h"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 #include "board.h"
@@ -25,9 +27,12 @@ static void take(line_t *l, uint8_t ch)
     if (ch == '\r') return;
     if (ch == '\n') {
         l->line[l->n] = 0;
+        /* (fork addition) from "OWLOS " on: a reset (opening the port does one) leaves a few stray bytes in the
+         * UART, and glued to the front of the first line they hid its command */
+        const char *at = strstr(l->line, "OWLOS ");
         if (l->n && s_fn) {
             xSemaphoreTake(s_one, portMAX_DELAY);
-            s_fn(l->line);
+            s_fn(at ? at : l->line);
             xSemaphoreGive(s_one);
         }
         l->n = 0;
@@ -78,6 +83,10 @@ void console_start(console_line_fn fn)
         ESP_LOGE(TAG, "no UART driver: settings can't come from the site on UART0");
         return;
     }
+#if DISP_JC8012 || DISP_WAVE7
+    /* (fork addition) its stack in the PSRAM: no deadline, and with XIP from PSRAM nothing runs with the cache off */
+    if (xTaskCreateWithCaps(uart_task, "console", 4096, NULL, 3, NULL, MALLOC_CAP_SPIRAM) != pdPASS)
+#endif
     xTaskCreate(uart_task, "console", 4096, NULL, 3, NULL);
 #else
     /* the log goes to the chip's USB alone (the P4: the Tab5). UART0 was never started, and the

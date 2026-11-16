@@ -147,6 +147,13 @@ typedef struct {
     uint8_t  t_panel;      /* 1 + whether the panel was shown when that began: the scope stays put under the finger, 0 none */
     float    t_a0, t_r0, t_up0, t_range0;
     int16_t  t_sx[16], t_sy[16];
+    /* (fork addition) momentum: a list let go while it moves goes on by itself, slowing (ui_frame steps it) */
+    uint8_t  fling;        /* 1 while the list coasts */
+    uint8_t  t_caught;     /* this press stopped a coasting list: it is not a tap, a long press or a repeat */
+    int16_t  fl_y;         /* while dragging: the finger's last y that moved */
+    uint32_t fl_at;        /* while dragging: when it moved; while coasting: the last step */
+    float    fl_v;         /* the scroll's speed, layout pixels a ms (+: further down the list) */
+    float    fl_pos;       /* while coasting: the scroll, unrounded */
     /* touch alignment */
     touch_cal_t cal;
     int      cal_step;
@@ -185,6 +192,45 @@ void ui_set_cfg(ui_t *u, const fr_cfg_t *c);
 // copy the sky and the net state into u->snap / u->net before this
 void ui_frame(ui_t *u, uint32_t now);
 void ui_strip(ui_t *u, canvas_t *cv);
+#if RADAR_OVERLAY
+/* (fork addition) which rectangles of the page can differ between the states a and b (layout pixels,
+ * x1 / y1 not included; ui_wifi.c): how many were put in r[] (max at least 8), 0 none, -1 all of it */
+typedef struct { int16_t x0, y0, x1, y1; } ui_rect_t;
+int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max);
+/* (fork addition) a page that scrolls (the plane list, the setup, the networks): its viewport (layout rows
+ * y0 .. y1 - 1, what gfx_sub clips its rows to), where it is scrolled to, how far it goes, and columns inside
+ * the viewport that do not scroll with it (the setup's scroll bar, bx0 .. bx1 - 1; none if equal). 0: this
+ * page does not scroll, or it all fits. ui_scrolled: the same page drawn scrolled to s (a copy of the ui) */
+typedef struct { int y0, y1, scroll, max, bx0, bx1; } ui_scroll_t;
+int  ui_scroll_info(const ui_t *u, ui_scroll_t *s);
+void ui_scrolled(ui_t *u, int s);
+/* (fork addition) what the page shows pressed under the finger (a button, a row), 0 nothing: the scope
+ * under a finger is not a press (it turns or zooms) */
+int  ui_pressed(const ui_t *u);
+#endif
+#if RADAR_OVERLAY
+/* the boards that put the moving things over the frame as the panel is fed (config.h): ui_strip
+ * draws the layer the canvas says (canvas_t.layer). BG leaves out the planes, the sweep and the compass
+ * ring; ui_top_strip draws just those on a canvas of nothing (gfx.h GFX_ALPHA). a field of the canvas,
+ * not a global: the two layers are drawn on different cores at once */
+enum { UI_LAYER_ALL, UI_LAYER_BG, UI_LAYER_TOP };
+void ui_top_strip(ui_t *u, canvas_t *cv);
+/* what the display driver needs to add the sweep itself, in the glass's pixels, and where the
+ * moving layer stops on the right (the square map's panel slides in over it) */
+typedef struct {
+    int      beam;          /* the sweep turns: the radar look on the main page */
+    int      cx, cy, r;     /* its middle and the range ring's radius */
+    uint32_t prim, focus;   /* the theme's colours for its trail and its edge, 0x00RRGGBB */
+    uint32_t turn_ms;       /* once round in this */
+    int      clip_x;        /* the layer is cut off from here rightwards */
+    int      any;           /* 0: nothing moves on this page */
+    int      holes;         /* popups over the scope (the DEMO card, a toast, the update note): nothing moving shows */
+    int      hx0[4], hy0[4], hx1[4], hy1[4];   /* in them, glass pixels, x1 and y1 past the end */
+    int      x0, y0, x1, y1;   /* where it can be, glass pixels, x1 and y1 past the end: no need to look elsewhere */
+    int      ring_only;     /* a finger turns the compass: the layer is the ring alone, made every frame */
+} ui_top_t;
+void ui_top_info(const ui_t *u, ui_top_t *t);
+#endif
 
 void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_cmd_t *cmd);
 void ui_button(ui_t *u, int ev, ui_cmd_t *cmd);     /* BOOT: 1 short, 2 long */

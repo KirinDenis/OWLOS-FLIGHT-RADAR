@@ -61,7 +61,7 @@ void fr_cfg_defaults(fr_cfg_t *c)
 void scope_opt_defaults(scope_opt_t *o)
 {
     memset(o, 0, sizeof *o);
-    o->version = SCOPE_OPT_VERSION;
+    o->version = SCOPE_OPT_VERSION;                    // beam_step off, as in the original: the planes move all the time
 }
 
 static const float TO_KM[3] = { 1.0f, 1.852f, 1.609344f };
@@ -175,6 +175,28 @@ void chamfer_box(canvas_t *cv, int x, int y, int w, int h, uint32_t fill, int fi
 {
     if (!gfx_touches(cv, y - 1, y + h)) return;
     const int k = 5, x1 = x + w - 1, y1 = y + h - 1;
+#if GFX_SCALED && GFX_SCALE_NUM != 3
+    /* scales other than 3/2 (the Waveshare 7B's 15/8, the Tab5's 9/4; fork): the straight sides as
+     * whole pixels and the cut corners as smooth lines between pixel middles only line up at 3/2.
+     * elsewhere the corners stepped. every side the same way instead, through the pixels' middles */
+    {
+        const float X0 = (float)x, Y0 = (float)y, X1 = (float)x1, Y1 = (float)y1, K = (float)k;
+        const float P[6][2] = { { X0 + K, Y0 }, { X1, Y0 }, { X1, Y1 - K }, { X1 - K, Y1 }, { X0, Y1 }, { X0, Y0 + K } };
+        /* the fill the same shape, a layout row at a time: from under the left side (one in, so its whole
+         * glass pixels never show past the side) to under the right one, each cut row stopping at the cut.
+         * a rectangle showed past the sides top and left and in the cut corners; the smooth polygon
+         * did not, but cost so much a keyboard page took seconds */
+        if (fill_a) {
+            for (int yy = y + 1; yy <= y1; yy++) {
+                const int l = yy < y + k ? x + (y + k - yy) : x + 1;
+                const int r = yy > y1 - k ? x1 - (yy - (y1 - k)) : x1;
+                if (r >= l) gfx_fill(cv, l, yy, r - l + 1, 1, fill, fill_a);
+            }
+        }
+        for (int i = 0; i < 6; i++) gfx_line(cv, P[i][0], P[i][1], P[(i + 1) % 6][0], P[(i + 1) % 6][1], 1.0f, line, line_a);
+        return;
+    }
+#endif
     if (fill_a) gfx_fill(cv, x, y, w, h, fill, fill_a);
     // the straight sides are whole pixels, only the two cut corners need smoothing
     gfx_hline(cv, x + k + 1, x1, y, line, line_a);
@@ -307,8 +329,8 @@ void page_header(canvas_t *cv, const char *title, const char *right, uint32_t co
 
 /* all of this is in pixels of the glass */
 #define BG_GRID GFX_Z(12)
-static uint32_t s_bgrow[GFX_PH];
-static uint16_t s_vigx[GFX_PW], s_vigy[GFX_PH];
+static CORE_BIG uint32_t s_bgrow[GFX_PH];
+static CORE_BIG uint16_t s_vigx[GFX_PW], s_vigy[GFX_PH];
 static int16_t  s_gridcols[GFX_PW / BG_GRID + 2];
 static int      s_ngrid, s_grid_cx = -1;
 static struct { int16_t x, y; uint8_t a; } s_stars[128];
@@ -406,8 +428,51 @@ void ui_set_cfg(ui_t *u, const fr_cfg_t *c)
     ui_set_theme(u, c->theme);
 }
 
+/* (fork addition) the page's list scroll and how far it goes, NULL: this page has no list that scrolls.
+ * the numbers are the drag's in ui_touch (they were there inline) */
+static int *list_scroll_of(ui_t *u, int *maxs)
+{
+    const int list = u->view == VIEW_LIST, wifi = u->view == VIEW_WIFI;
+    if (!list && !wifi && u->view != VIEW_SETUP) return NULL;
+    const int rows = list ? u->n_order : wifi ? wifi_rows(u) : setup_rows(u);
+    const int rh = list ? LIST_ROW : wifi ? NET_H : ROW_H;
+    const int y1 = list ? LIST_Y1 : BAR_Y - 3;
+    *maxs = rows * rh - (y1 - LIST_Y0);
+    if (*maxs < 0) *maxs = 0;
+    return list ? &u->list_scroll : wifi ? &u->wifi_scroll : &u->setup_scroll;
+}
+
+/* (fork addition) momentum. the speed decays by e every FLING_TAU ms, so the list comes to rest
+ * FLING_TAU * the speed further on (a flick of 1.5 px/ms: ~490 px, ~1.5 lists). it stops at either end */
+#define FLING_TAU   325.0f
+#define FLING_MIN   0.25f          /* px/ms at the lift: slower is a placed list, not a flick */
+#define FLING_MAX   4.0f
+#define FLING_STOP  0.02f          /* px/ms: at rest */
+#define FLING_FRESH 150u           /* ms: the finger moved this recently before the lift. the library reports
+                                    * the last point for ~4 reads after a lift, so the end of a flick looks still */
+
+static void fling_step(ui_t *u, uint32_t now)
+{
+    if (!u->fling) return;
+    int maxs, *sp = list_scroll_of(u, &maxs);
+    if (u->t_down || !sp) { u->fling = 0; return; }
+    int32_t dt = (int32_t)(now - u->fl_at);
+    if (dt <= 0) return;
+    if (dt > 100) dt = 100;                            // a long gap (a page drawn meanwhile) is not a jump
+    u->fl_at = now;
+    const float k = expf(-(float)dt / FLING_TAU);
+    u->fl_pos += u->fl_v * FLING_TAU * (1.0f - k);     // the distance the decaying speed covers in dt
+    u->fl_v *= k;
+    int s = (int)lroundf(u->fl_pos);
+    if (s <= 0) { s = 0; u->fling = 0; }
+    if (s >= maxs) { s = maxs; u->fling = 0; }
+    if (fabsf(u->fl_v) < FLING_STOP) u->fling = 0;
+    *sp = s;
+}
+
 void ui_frame(ui_t *u, uint32_t now)
 {
+    fling_step(u, now);
     u->now = now;
     u->beam = wrap360((float)(now % BEAM_TURN_MS) * (360.0f / BEAM_TURN_MS));
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
@@ -679,6 +744,41 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
     }
 }
 
+#if RADAR_OVERLAY
+/* (fork addition) see ui.h. the numbers are ui_touch's own (just below) and the pages' gfx_sub bounds */
+#define SCROLL_LIST_HEAD (RADAR_ROUND ? 0 : 14)        /* ui_pages.c LIST_HEAD */
+int ui_scroll_info(const ui_t *u, ui_scroll_t *s)
+{
+    const int list = u->view == VIEW_LIST, wifi = u->view == VIEW_WIFI, setup = u->view == VIEW_SETUP;
+    if (!list && !wifi && !setup) return 0;
+    const int rows = list ? u->n_order : wifi ? wifi_rows(u) : setup_rows(u);
+    const int rh = list ? LIST_ROW : wifi ? NET_H : ROW_H;
+    const int y1 = list ? LIST_Y1 : BAR_Y - 3;
+    const int maxs = rows * rh - (y1 - LIST_Y0);
+    if (maxs <= 0) return 0;
+    s->y0 = list ? LIST_Y0 + SCROLL_LIST_HEAD : LIST_Y0;
+    s->y1 = list ? LIST_Y1 : BAR_Y - 2;
+    s->scroll = list ? u->list_scroll : wifi ? u->wifi_scroll : u->setup_scroll;
+    s->max = maxs;
+    s->bx0 = setup ? PG_R - 3 : 0;
+    s->bx1 = setup ? PG_R - 1 : 0;
+    return 1;
+}
+
+int ui_pressed(const ui_t *u)
+{
+    if (!u->t_down || u->t_moved || u->t_hit == HIT_NONE || u->t_hit == HIT_SCOPE) return 0;
+    return u->t_hit;
+}
+
+void ui_scrolled(ui_t *u, int s)
+{
+    if (u->view == VIEW_LIST) u->list_scroll = s;
+    else if (u->view == VIEW_WIFI) u->wifi_scroll = s;
+    else if (u->view == VIEW_SETUP) u->setup_scroll = s;
+}
+#endif
+
 void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_cmd_t *cmd)
 {
     if (u->view == VIEW_CAL) { cal_touch(u, down, rx, ry, now, cmd); return; }
@@ -689,8 +789,13 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
         u->t_since = now;
         u->t_moved = u->t_long = u->t_ns = u->t_reps = u->t_rpt = u->t_turn = 0;
         u->t_panel = 0;
-        u->t_hit = hit_at(u, x, y);
+        u->t_caught = u->fling;                        // (fork addition) a finger on a coasting list stops it, nothing more
+        u->fling = 0;
+        u->t_hit = u->t_caught ? HIT_NONE : hit_at(u, x, y);
         u->t_scroll0 = u->view == VIEW_LIST ? u->list_scroll : u->view == VIEW_WIFI ? u->wifi_scroll : u->setup_scroll;
+        u->fl_y = (int16_t)y;
+        u->fl_at = now;
+        u->fl_v = 0;
     }
     if (down) {
         u->t_x = x;
@@ -699,7 +804,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
         if (u->t_ns == 3) {                            // the first readings of a resistive press wander
             u->t_x0 = median16(u->t_sx, 3);
             u->t_y0 = median16(u->t_sy, 3);
-            u->t_hit = hit_at(u, u->t_x0, u->t_y0);
+            u->t_hit = u->t_caught ? HIT_NONE : hit_at(u, u->t_x0, u->t_y0);
             if (repeats(u, u->t_hit)) { u->t_rpt = 1; u->t_rep = now + 450u; }
             if (u->view == VIEW_MAIN && u->t_hit == HIT_SCOPE) {
                 /* the scope under a finger: on the rim it turns the map, inside it zooms. one finger
@@ -728,23 +833,26 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
                 u->cfg.range = clampf(u->t_range0 * u->t_r0 / r, RANGE_MIN, RANGE_MAX);
             }
         } else if (u->t_moved && (u->view == VIEW_LIST || u->view == VIEW_SETUP || u->view == VIEW_WIFI)) {
-            const int list = u->view == VIEW_LIST, wifi = u->view == VIEW_WIFI;
-            int rows = list ? u->n_order : wifi ? wifi_rows(u) : setup_rows(u);
-            int rh = list ? LIST_ROW : wifi ? NET_H : ROW_H;
-            int y1 = list ? LIST_Y1 : BAR_Y - 3;
-            int maxs = rows * rh - (y1 - LIST_Y0);
+            int maxs, *sp = list_scroll_of(u, &maxs);
             int s = u->t_scroll0 - (y - u->t_y0);
             if (s > maxs) s = maxs;
             if (s < 0) s = 0;
-            if (list) u->list_scroll = s;
-            else if (wifi) u->wifi_scroll = s;
-            else u->setup_scroll = s;
+            *sp = s;
+            /* (fork addition) the finger's speed, for the momentum at the lift: from the samples that moved,
+             * smoothed over the last few. the scroll goes the other way to the finger */
+            if (y != u->fl_y) {
+                const int32_t dt = (int32_t)(now - u->fl_at);
+                const float vi = (float)(u->fl_y - y) / (float)(dt > 0 ? dt : 1);
+                u->fl_v = dt > 100 ? vi : 0.5f * u->fl_v + 0.5f * vi;   // after a pause: from now on
+                u->fl_y = (int16_t)y;
+                u->fl_at = now;
+            }
         } else if (!u->t_moved && u->t_rpt && (int32_t)(now - u->t_rep) >= 0) {
             act(u, u->t_hit, 0, u->t_x0, u->t_y0, cmd);
             u->t_reps++;
             u->t_rep = now + (now - u->t_since > 2500u ? 50u : 110u);
         }
-        if (!u->t_moved && !u->t_long && !u->t_rpt && now - u->t_since >= 1200u) {
+        if (!u->t_moved && !u->t_long && !u->t_rpt && !u->t_caught && now - u->t_since >= 1200u) {
             u->t_long = 1;
             act(u, u->t_hit, 1, u->t_x0, u->t_y0, cmd);
         }
@@ -755,7 +863,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
     } else if (u->t_down) {
         u->t_down = 0;
         int dx = u->t_x - u->t_x0, dy = u->t_y - u->t_y0;
-        if (!u->t_moved && !u->t_long && !u->t_reps) {
+        if (!u->t_moved && !u->t_long && !u->t_reps && !u->t_caught) {   // (a catch only stopped the list: no tap)
             int n = u->t_ns > 2 ? u->t_ns - 1 : u->t_ns;
             int tx = median16(u->t_sx, n), ty = median16(u->t_sy, n);
             act(u, hit_at(u, tx, ty), 0, tx, ty, cmd);
@@ -768,7 +876,16 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
             cmd->cfg = cmd->refetch = 1;
         } else if (u->t_moved && u->view == VIEW_MAIN && abs(dx) > 70 && abs(dx) > 2 * abs(dy)) {
             u->view = dx < 0 ? VIEW_LIST : VIEW_SETUP;  // a swipe on the panel
+        } else if (u->t_moved) {                       // (fork addition) a list let go while it moved: it coasts on
+            int maxs, *sp = list_scroll_of(u, &maxs);
+            if (sp && now - u->fl_at <= FLING_FRESH && fabsf(u->fl_v) >= FLING_MIN) {
+                u->fl_v = clampf(u->fl_v, -FLING_MAX, FLING_MAX);
+                u->fl_pos = (float)*sp;
+                u->fl_at = now;
+                u->fling = 1;
+            }
         }
+        u->t_caught = 0;
         u->t_turn = 0;
         u->t_panel = 0;                                // the panel goes as the plane says again
         u->t_hit = HIT_NONE;
@@ -802,6 +919,10 @@ void ui_button(ui_t *u, int ev, ui_cmd_t *cmd)
 }
 
 /* --- draw one strip --- */
+
+#if RADAR_OVERLAY
+void ui_top_strip(ui_t *u, canvas_t *cv) { main_top(u, cv); }
+#endif
 
 void ui_strip(ui_t *u, canvas_t *cv)
 {

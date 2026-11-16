@@ -86,6 +86,11 @@ static int apply(int at)
     memcpy(wc.sta.ssid, n->ssid, strnlen(n->ssid, sizeof wc.sta.ssid));
     memcpy(wc.sta.password, n->pass, strnlen(n->pass, sizeof wc.sta.password));
     wc.sta.threshold.authmode = n->pass[0] ? WIFI_AUTH_WEP : WIFI_AUTH_OPEN;
+    /* a network served by several access points (fork addition, every board): look on every channel and
+     * join the strongest. ESP-IDF's default takes the first it hears, the lowest channel, which here was
+     * one far off (-85 dBm) with another 3 m away (-47 dBm) */
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     s_have_ssid = n->ssid[0] != 0;
     if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK) return 0;
     s_why = WHY_NONE;                                 // a new network: nothing known about it yet
@@ -198,6 +203,12 @@ void net_start(const nets_t *l)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     apply(0);
     ESP_ERROR_CHECK(esp_wifi_start());
+#if RADAR_OVERLAY
+    /* the Waveshare 7/7B (fork addition): no modem sleep. their antenna sits behind a 7" panel and its
+     * backlight, the signal is weak (-77 to -85 dBm seen), and a radio that sleeps between beacons there
+     * missed DNS answers and lost the network. the boards run from a wall supply */
+    esp_wifi_set_ps(WIFI_PS_NONE);
+#endif
     ESP_LOGI(TAG, "WiFi started, network \"%s\", %d kept", s_name, s_nets.count);
 }
 
@@ -235,43 +246,77 @@ uint32_t net_utc(void)
     return t > 1700000000 ? (uint32_t)t : 0;          // not set yet, it counts from 1970
 }
 
+/* (fork addition, 2026-11-14) one connection kept open between requests: the planes are asked every 5 s,
+ * and a TLS handshake each time (seen at 6.5 s on the JC8012) kept the first core and the PSRAM busy. only
+ * esp_http_client_perform reuses a connection (the open/read calls never write a second request line), so
+ * the body comes through its ON_DATA event. a request to another host closes it (esp_http_client_set_url);
+ * a kept connection the server has closed meanwhile fails and is asked again on a new one. the fetch task
+ * is the only caller */
+typedef struct { net_sink_fn sink; void *ctx; int len; } net_body_t;
+static net_body_t               s_body;
+static esp_http_client_handle_t s_keep;
+static uint32_t                 s_reused, s_fresh;     // requests on a kept connection / connections made, for the log
+
+static esp_err_t on_http(esp_http_client_event_t *e)
+{
+    if (e->event_id == HTTP_EVENT_ON_CONNECTED) s_fresh++;
+    if (e->event_id == HTTP_EVENT_ON_DATA && e->data_len > 0 && esp_http_client_get_status_code(e->client) == 200) {
+        s_body.sink(s_body.ctx, (const char *)e->data, e->data_len);
+        s_body.len += e->data_len;
+    }
+    return ESP_OK;
+}
+
+void net_get_stats(uint32_t *reused, uint32_t *fresh) { *reused = s_reused; *fresh = s_fresh; s_reused = s_fresh = 0; }
+
 int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, int *status)
 {
-    static char buf[1024];                            // one piece; the fetch task is the only caller
     *status = 0;
-    if (!s_up) return -1;
-    esp_http_client_config_t c = {
-        .url = url,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 9000,
-        .user_agent = NET_USER_AGENT,
-        .buffer_size = 2048,
-        .buffer_size_tx = 1024,
-    };
-    esp_http_client_handle_t h = esp_http_client_init(&c);
-    if (!h) return -1;
+    if (!s_up) {
+        if (s_keep) { esp_http_client_cleanup(s_keep); s_keep = NULL; }
+        return -1;
+    }
+    if (!s_keep) {
+        esp_http_client_config_t c = {
+            .url = url,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .timeout_ms = 9000,
+            .user_agent = NET_USER_AGENT,
+            .buffer_size = 2048,
+            .buffer_size_tx = 1024,
+            .event_handler = on_http,
+            .keep_alive_enable = true,
+        };
+        s_keep = esp_http_client_init(&c);
+        if (!s_keep) return -1;
+    } else if (esp_http_client_set_url(s_keep, url) != ESP_OK) {
+        esp_http_client_cleanup(s_keep);
+        s_keep = NULL;
+        return -1;
+    }
+    esp_http_client_handle_t h = s_keep;
     esp_http_client_set_header(h, "Accept", "application/json");
     if (bearer && bearer[0]) {
         static char auth[640];
         snprintf(auth, sizeof auth, "Bearer %s", bearer);
         esp_http_client_set_header(h, "Authorization", auth);
         esp_http_client_set_header(h, "Accept-Version", "v1");
+    } else {
+        esp_http_client_delete_header(h, "Authorization");
+        esp_http_client_delete_header(h, "Accept-Version");
     }
-    int len = -1;
-    if (esp_http_client_open(h, 0) == ESP_OK) {
-        esp_http_client_fetch_headers(h);
-        *status = esp_http_client_get_status_code(h);
-        len = 0;
-        while (*status == 200) {
-            int r = esp_http_client_read(h, buf, sizeof buf);
-            if (r <= 0) break;
-            sink(ctx, buf, r);
-            len += r;
+    s_body = (net_body_t){ sink, ctx, 0 };
+    for (int attempt = 0; attempt < 2; attempt++) {
+        const uint32_t fresh0 = s_fresh;
+        if (esp_http_client_perform(h) == ESP_OK) {
+            *status = esp_http_client_get_status_code(h);
+            if (s_fresh == fresh0) s_reused++;
+            return *status == 200 ? s_body.len : 0;
         }
+        esp_http_client_close(h);                     // gone stale, or the request failed: a new connection
+        if (s_body.len) break;                         // part of a body is in the sink already: not twice
     }
-    esp_http_client_close(h);
-    esp_http_client_cleanup(h);
-    return len;
+    return -1;
 }
 
 int net_post_json(const char *url, const char *body, int *status)

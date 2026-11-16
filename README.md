@@ -69,6 +69,21 @@ The map under them comes from OpenStreetMap.
   the touch work. Not run on one here yet, nor on the two other panels the Tab5 is sold with. No BOOT
   the firmware can see; its console is the USB port alone, and the writing is smaller than on the other
   5" boards for now.
+- **7" Waveshare ESP32-S3-Touch-LCD-7**: ESP32-S3, 800x480 on the RGB bus, capacitive touch (GT911), the
+  5" boards' layout, with the sweep turning at the panel's own frame rate (see The moving layer).
+  Brought in by Michael Caldwell-Waller (chipguyhere) from
+  the fork [chipguyhere/OWLOS-FLIGHT-RADAR-7-7B](https://github.com/chipguyhere/OWLOS-FLIGHT-RADAR-7-7B),
+  and run on one there. Its BOOT button
+  is a line of the panel, so the firmware does not read it.
+- **7" Waveshare ESP32-S3-Touch-LCD-7B**: the same board with a 1024x600 panel, the layout 15/8 as big,
+  the moving layer too. Brought in by Michael Caldwell-Waller, who runs it on one. The writing is 4/5
+  of its size for now.
+- **10.1" Guition JC8012P4A1C**: ESP32-P4 with an ESP32-C6 for the WiFi, 800x1280 on MIPI-DSI shown
+  lying as 1280x800, capacitive touch (GSL3680), the moving layer by columns. Brought in by Michael
+  Caldwell-Waller, who runs it on one. The touch needs its controller's firmware, Silead's, which is
+  GPL-2.0 and so not in this tree: install it once with
+  [chipguyhere's installer](https://github.com/chipguyhere/ESP32-P4-C6-firmware-installer). Without it
+  the radar runs with the touch off and the log says why. The writing is 3/5 of its size for now.
 
 ## Flash it
 
@@ -294,6 +309,38 @@ been running, what it started after (power on, the reset pin, a watchdog, a cras
 long the run before lasted. It keeps that through a reset and a power cut. If opening the port restarted
 it, the run before is the one that stood still.
 
+## The moving layer
+
+On the Waveshare 7 and 7B and the Guition JC8012P4A1C the sweep turns at the panel's own frame rate:
+about 34 frames a second on the 7, 30 on the 7B and 52 on the JC8012. This is Michael Caldwell-Waller's
+work (chipguyhere), made in the fork
+[chipguyhere/OWLOS-FLIGHT-RADAR-7-7B](https://github.com/chipguyhere/OWLOS-FLIGHT-RADAR-7-7B) and brought
+in here. The notes on the design, the measurements and what is still open are in
+[FORK-NOTES.md](FORK-NOTES.md), and the fork has
+[a video of the 7B](https://github.com/chipguyhere/OWLOS-FLIGHT-RADAR-7-7B/blob/main/media/wave7b.mp4) on
+live traffic.
+
+- The frame in PSRAM holds only what stands still, and is drawn again in the background as time allows.
+  The planes, the sweep and the compass ring are laid over each piece of it while the panel is fed:
+  after a chunk of the frame lands in a bounce buffer, the fill lays the moving layer over it just
+  before the panel scans it.
+- The fill works out the sweep itself for every panel frame. The planes, their labels and the compass
+  ring are made into a layer on the other core a few times a second, and the fill blends it in with the
+  chip's 128-bit PIE instructions.
+- The heaviest chunks of the next frame are composed ahead of time, so they never race the panel.
+  Popups are cut out of the layer, and while a finger turns the compass the layer is the ring alone.
+- The layer, `firmware/main/ovl.c`, knows nothing about the board. The panels are driven by
+  chipguyhere's board and display libraries, vendored in `firmware/components/chipguy_lcd7_7b` and
+  `firmware/components/chipguy_jc8012` with a small Arduino shim. Their licences are in those folders.
+  chipguyhere's libraries for other ESP32-S3 RGB and ESP32-P4 boards are at
+  [github.com/chipguyhere](https://github.com/chipguyhere).
+- It suits an ESP32-S3 with an RGB parallel panel, by rows, or an ESP32-P4 with a DPI or MIPI-DSI panel,
+  by rows or by columns. An SPI or QSPI panel keeps its own frame memory and has no feed to lay anything
+  onto, and the other ESP32 chips have no PIE.
+- The JC8012P4A1C's planner uses PIE from a task that can be preempted, which needs a fix to ESP-IDF
+  5.5's FreeRTOS port (espressif/esp-idf `51d5738ad769` on release/v5.5, in no 5.5.x release yet). On a
+  stock 5.5.x, set `OVL_PLANNER_PIE` to 0 in `ovl.c`, or thin 8-pixel slivers appear.
+
 ## Build it yourself
 
 The firmware is ESP-IDF 5.5. The screen code in `core/` is plain C, the same files build the firmware
@@ -301,8 +348,10 @@ and a PC preview.
 
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
   `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
-  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`. Each
-  screen has its own build folder and sdkconfig.
+  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
+  `wave7`, `wave7b`, `jc8012`. Each screen has its own build folder and sdkconfig.
+- `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012` and
+  `crow70` (chipguyhere's).
 - `.github/workflows/pages.yml` builds them all in Espressif's ESP-IDF image and publishes the site
   with them on GitHub Pages, on every push to main.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site
@@ -371,7 +420,11 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
 
 ## Data and licences
 
-- The code is MIT licensed, see `LICENSE`.
+- The code is MIT licensed, see `LICENSE`. The moving layer and the Waveshare 7, 7B and Guition
+  JC8012P4A1C support are Michael Caldwell-Waller's (chipguyhere), MIT too. The libraries in
+  `firmware/components/chipguy_lcd7_7b` and `firmware/components/chipguy_jc8012` keep their own licence
+  files: MIT, and Apache-2.0 for the panel drivers `esp_lcd_jd9365` (Espressif's) and
+  `esp_lcd_panel_dpi_bb` (Espressif's, changed by chipguyhere) in `chipguy_jc8012`.
 - Planes: [adsb.lol](https://adsb.lol/) (ODbL) and [adsb.fi](https://adsb.fi/), or
   [Flightradar24](https://fr24api.flightradar24.com/) with your own key.
 - The map and the town names: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL).

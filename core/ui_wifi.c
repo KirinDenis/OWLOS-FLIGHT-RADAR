@@ -321,3 +321,56 @@ void keys_act(ui_t *u, int hit, ui_cmd_t *cmd)
         break;
     }
 }
+
+#if RADAR_OVERLAY
+/* (chipguyhere) the rectangles of the page that can differ between two states of the ui, so a firmware
+ * that sends the page in pieces (the JC8012: turned into the frame by the CPU) draws and sends only those,
+ * whichever way its panel scans. in layout pixels, x1 / y1 not included. returns how many it put in r[]
+ * (max at least 8), 0: nothing the page shows changed, -1: all of it (any page but the keyboard, or a change
+ * it does not place: the keys' page, a toast, the theme) */
+static int key_pressed(const ui_t *u)
+{
+    if (!u->t_down || u->t_moved || u->t_hit < HIT_KEY || u->t_hit >= HIT_KEY + 40) return -1;
+    return u->t_hit - HIT_KEY;
+}
+
+static int key_rect(const ui_t *u, int cell, ui_rect_t *r)
+{
+    int a, b;
+    key_span(u, cell, &a, &b);
+    const int row = cell / 10;
+    *r = (ui_rect_t){ (int16_t)(a % 10 * KB_CW), (int16_t)(KB_Y0 + row * KB_RH),
+                      (int16_t)((b % 10 + 1) * KB_CW), (int16_t)(KB_Y0 + (row + 1) * KB_RH) };
+    return 1;
+}
+
+int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max)
+{
+    if (max < 8 || a->view != VIEW_KEYS || b->view != VIEW_KEYS) return -1;
+    if (a->kb_mode != b->kb_mode || a->kb_page != b->kb_page || a->theme != b->theme ||
+        memcmp(&a->cfg, &b->cfg, sizeof a->cfg) ||
+        (int32_t)(a->toast_until - a->now) > 0 || (int32_t)(b->toast_until - b->now) > 0)
+        return -1;
+    int n = 0;
+    int ca, cb;
+    const char *ta = typed((ui_t *)a, &ca), *tb = typed((ui_t *)b, &cb);
+    const int la = (int)strlen(ta), lb = (int)strlen(tb);
+    const int fa = la && a->now - a->kb_typed < 1200u, fb = lb && b->now - b->kb_typed < 1200u;
+    if (strcmp(ta, tb) || a->kb_show != b->kb_show || fa != fb || ((a->now / 500u) & 1) != ((b->now / 500u) & 1))
+        r[n++] = (ui_rect_t){ 6, (int16_t)FIELD_Y, (int16_t)(GFX_W - 6), (int16_t)(FIELD_Y + FIELD_H) };   // the field
+    const int ka = key_pressed(a), kb = key_pressed(b);
+    if (ka != kb) {
+        if (ka >= 0) n += key_rect(a, ka, &r[n]);
+        if (kb >= 0) n += key_rect(b, kb, &r[n]);
+    }
+    const int ba = a->t_down && !a->t_moved && a->t_hit >= HIT_BAR && a->t_hit < HIT_BAR + 3 ? a->t_hit : -1;
+    const int bb = b->t_down && !b->t_moved && b->t_hit >= HIT_BAR && b->t_hit < HIT_BAR + 3 ? b->t_hit : -1;
+    if (ba != bb || (!la) != (!lb))                    // a key under the keyboard pressed, or JOIN / FIND lit
+        r[n++] = (ui_rect_t){ (int16_t)BAR_L, (int16_t)BAR_Y, (int16_t)BAR_R, (int16_t)(BAR_Y + BAR_H) };
+    if (a->t_down != b->t_down || (b->t_down && (a->t_x != b->t_x || a->t_y != b->t_y))) {   // the ring under the finger
+        if (a->t_down) r[n++] = (ui_rect_t){ (int16_t)(a->t_x - 12), (int16_t)(a->t_y - 12), (int16_t)(a->t_x + 13), (int16_t)(a->t_y + 13) };
+        if (b->t_down) r[n++] = (ui_rect_t){ (int16_t)(b->t_x - 12), (int16_t)(b->t_y - 12), (int16_t)(b->t_x + 13), (int16_t)(b->t_y + 13) };
+    }
+    return n;
+}
+#endif

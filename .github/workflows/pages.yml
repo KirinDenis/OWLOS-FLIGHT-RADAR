@@ -12,14 +12,20 @@ name: Firmware and flasher site
 on:
   push:
     branches: [ main ]
+  # a pull request into main: every board and the radar page are built, nothing is published (the
+  # site job below), and the firmware stays with the run as its artifacts
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 # each job asks for what it needs on top of this
 permissions:
   contents: read
 
+# a push to main cancels the run of main before it, a pull request's push the run of that request:
+# a pull request never stops the site being published
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -42,6 +48,9 @@ jobs:
           - { disp: tab5, num: 12, target: esp32p4 }
           - { disp: esp4827s043, num: 13, target: esp32s3 }
           - { disp: crow70, num: 14, target: esp32s3 }
+          - { disp: wave7, num: 15, target: esp32s3 }
+          - { disp: wave7b, num: 16, target: esp32s3 }
+          - { disp: jc8012, num: 17, target: esp32p4 }
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +129,7 @@ jobs:
   site:
     name: Flasher site
     needs: [ firmware, web ]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

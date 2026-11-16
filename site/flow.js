@@ -33,6 +33,11 @@ const BOARDS = {
   esp4827s043: { name: '4.3" ESP32-4827S043C', spec: 'ESP32-S3, 480x272, capacitive touch, experimental', chip: 's3', w: 480, h: 272, inch: 4.3, touch: 'capacitive', twin: 'Twin5', shot: 'esp4827s043/02-live.png', screens: 'two' },
   // its BOOT is the screen's clock line: nothing to press while it runs
   crow70: { name: '7" CrowPanel 7.0', spec: 'ESP32-S3, 800x480, capacitive touch, experimental', chip: 's3', w: 800, h: 480, inch: 7, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', screens: 'two', noboot: true },
+  // Michael Caldwell-Waller's (chipguyhere): the sweep at the panel's own frame rate. on the 7 and the
+  // 7B BOOT is a line of the panel. the JC8012's touch firmware lives in NVS, so an erase takes it too
+  wave7: { name: '7" Waveshare Touch-LCD-7', spec: 'ESP32-S3, 800x480, capacitive touch, experimental', chip: 's3', w: 800, h: 480, inch: 7, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', noboot: true },
+  wave7b: { name: '7" Waveshare Touch-LCD-7B', spec: 'ESP32-S3, 1024x600, capacitive touch, experimental', chip: 's3', w: 1024, h: 600, inch: 7, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', noboot: true },
+  jc8012: { name: '10.1" Guition JC8012P4A1C', spec: 'ESP32-P4 and C6, 1280x800, capacitive touch, experimental', chip: 'p4', w: 1280, h: 800, inch: 10.1, touch: 'capacitive, its firmware installed once (see the README)', twin: 'Twin', shot: 'crowadv50/02-live.png', nvsfw: true },
 };
 const CHIP_NAME = { esp32: 'ESP32', s3: 'ESP32-S3', c3: 'ESP32-C3', c5: 'ESP32-C5', p4: 'ESP32-P4' };
 const THEMES = ['arctic', 'phosphor', 'amber', 'crimson', 'synth'];
@@ -1068,7 +1073,7 @@ function showBoards(all = false, oldVersion = null) {
     <div class="boards">${list.map(card).join('')}</div>
     <div class="row"><button class="btn" id="go" ${app.kind ? '' : 'disabled'}>${app.kind ? `FLASH ${newest} TO THE ${name.toUpperCase()}` : 'PICK YOUR BOARD'}</button>
     ${all ? '' : '<button class="plain" id="all">Not this one? Show all boards</button>'}</div>
-    <label class="erase"><input type="checkbox" id="erase" ${app.erase ? 'checked' : ''}> Erase the board first: its WiFi, settings and saved maps go too</label>`);
+    <label class="erase"><input type="checkbox" id="erase" ${app.erase ? 'checked' : ''}> Erase the board first: its WiFi, settings and saved maps go too${app.kind && BOARDS[app.kind].nvsfw ? ', and its touch firmware: install that again after' : ''}</label>`);
   $('erase').addEventListener('change', (e) => {
     app.erase = e.target.checked;
   });

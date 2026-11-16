@@ -12,6 +12,10 @@ dependencies:
     version: "^1.2.1"    # the newest when the Tab5 was built; a 2.x may change the calls touch.c makes
     rules:
       - if: "target == esp32p4"
+  espressif/esp_lvgl_port:       # the Tab5's package wants it; 2.9.0 (2026-11) uses a DPI callback ESP-IDF 5.5.3 does not have
+    version: "~2.8.0"            # (chipguyhere: every P4 build stopped on it, the JC8012P4A1C's too, which does not use it)
+    rules:
+      - if: "target == esp32p4"
   espressif/esp_wifi_remote:
     version: "^1.6.5"    # the newest when the Tab5 was built; 1.6.3 and older refuse an esp_hosted 3.x
     rules:

@@ -1,0 +1,33 @@
+# the Guition JC8012P4A1C (RADAR_DISPLAY 17, chipguyhere), read after sdkconfig.defaults.esp32p4 (the
+# Tab5's: the P4's PSRAM, clock and flash settings hold here too, and are not repeated)
+# the console on UART0: the board's CH340 (its USB_UART port) is the one to upload and watch on
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# the 16 MB layout with a core dump on flash, as the Waveshare 7/7B have
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_jc8012.csv"
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+# big state no interrupt touches goes in the PSRAM (core/gfx.h CORE_BIG), as on the 7/7B
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# the watchdog keeps watching the ui task, not the first core's idle task (sdkconfig.defaults.wave7 says why)
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is not set
+# the WiFi: the ESP32-C6 on SDIO slot 1 as on Espressif's ESP32-P4-Function-EV-Board (CLK 18, CMD 19,
+# D0..D3 14..17, the C6's reset on 54: chipguy_JC8012P4A1C_board's pin map), not the Tab5's wires
+# CONFIG_ESP32P4_TAB5_C6_BOARD is not set
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+# 128-byte lines in the L2 cache: the fill reads the frames out of the PSRAM a chunk at a time
+CONFIG_CACHE_L2_CACHE_LINE_128B=y
+# code and read-only data copied into the PSRAM at start and run from there: a flash write (a map tile
+# kept, the settings) then no longer stops everything outside IRAM on both cores, the panel's fill and
+# its interrupts among them. the S3 builds have it too (sdkconfig.defaults.s3rgb)
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# each task's share of each core, for the 10 s log (lcd_jc8012.c disp_log)
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+# internal RAM (2026-11-13): the fill's bounce buffers and tables leave ~75 KB free and no block over
+# ~31 KB, and TLS handshakes were failing in it. what has no deadline goes to the PSRAM: mbedTLS
+# (with XIP from PSRAM, flash writes leave the cache on, so nothing here runs with it off), lwIP's
+# buffers, ESP-Hosted's task stacks. the SDIO buffers stay internal (DMA)
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y

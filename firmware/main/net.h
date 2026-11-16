@@ -25,6 +25,8 @@ int  net_scan_get(ap_t *out, int *n);
  * answer; *status = the HTTP status */
 typedef void (*net_sink_fn)(void *ctx, const char *data, int len);
 int  net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, int *status);
+/* (chipguyhere) since the last call: net_get requests on a kept connection, connections made */
+void net_get_stats(uint32_t *reused, uint32_t *fresh);
 /* POST a small JSON body, the answer's body is not read. 0 = it went and an answer came, -1 not;
  * *status = the HTTP status */
 int  net_post_json(const char *url, const char *body, int *status);

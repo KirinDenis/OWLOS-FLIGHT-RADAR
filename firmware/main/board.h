@@ -173,7 +173,10 @@
  * another runs 40. 30 asked, the SPI driver takes the nearest it can make below */
 #define LCD_SPI_HZ    (30 * 1000 * 1000)
 #define LCD_MADCTL    0xA0      // MY|MV, RGB: the landscape most of them use, the other is the screen turned over
-#define DISP_STRIP    24
+/* 20 strips. at 24 rows they took 60 KB of the chip's own RAM and left none for the AES: with TLS
+ * in the PSRAM it decrypts through a buffer of up to 1.6 KB in that RAM, and every answer failed
+ * ("esp-aes: Failed to allocate memory", a tester's log). 12 gives back 30 KB */
+#define DISP_STRIP    12
 /* no inversion, every source agrees. RGB or BGR they do not: RGB in the maker's Arduino setup and
  * in most ports, BGR in its MicroPython demo. both are in the build, RGB first, BOOT in the first
  * seconds switches (lcd_spi.c) */

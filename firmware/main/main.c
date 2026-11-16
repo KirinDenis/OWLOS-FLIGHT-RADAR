@@ -1426,8 +1426,8 @@ static void ui_task(void *arg)
             uint32_t f = frames ? frames : 1;
             ESP_LOGI(TAG, "%u fps, %u ms a frame, view %d, %d planes, heap %u", (unsigned)(frames * 1000u / (now - t_stat)),
                      (unsigned)(busy_us / 1000u / f), s_ui.view, s_ui.snap.n, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
-#if DISP_LCD_RGB || DISP_LCD_DSI
-            // the heap above counts the PSRAM too: what the WiFi and the second core want is this
+#if CONFIG_SPIRAM
+            // the heap above counts the PSRAM too: what the WiFi, the second core and the AES under TLS want is this
             ESP_LOGI(TAG, "RAM %u free, %u in one piece, %u at the least", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
 #endif

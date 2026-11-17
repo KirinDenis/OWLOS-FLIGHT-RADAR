@@ -12,7 +12,8 @@ case "$DISP" in
   wave7b) NUM=16 ;;
   crow70) NUM=14 ;;
   jc8012) NUM=17 ;;
-  *) echo "this script knows wave7 wave7b crow70 jc8012; the rest: BUILD.BAT"; exit 1 ;;
+  crow50) NUM=18 ;;
+  *) echo "this script knows wave7 wave7b crow70 jc8012 crow50; the rest: BUILD.BAT"; exit 1 ;;
 esac
 TARGET=esp32s3
 [ "$NUM" = 17 ] && TARGET=esp32p4

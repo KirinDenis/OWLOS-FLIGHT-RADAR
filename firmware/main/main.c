@@ -785,7 +785,7 @@ static void fetch_task(void *arg)
         }
         uint32_t every = FREE_EVERY_MS;
         const int up = net_up();
-        if (up && s_opt.clock) net_time_start();
+        if (up) net_time_start();                          // asked once the WiFi is up, drawn clock or not
         int trying = 0;
         if (configured && !up) {
             uint32_t now = now_ms();
@@ -996,6 +996,8 @@ static const char *board_name(void)
     return "esp4827s043";
 #elif RADAR_DISPLAY == DISPLAY_CROW70_800x480
     return "crow70";
+#elif RADAR_DISPLAY == DISPLAY_CROW50_800x480
+    return "crow50";
 #elif RADAR_DISPLAY == DISPLAY_WAVE7_800x480
     return "wave7";
 #elif RADAR_DISPLAY == DISPLAY_WAVE7B_1024x600

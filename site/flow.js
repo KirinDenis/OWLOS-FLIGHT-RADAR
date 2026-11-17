@@ -28,6 +28,8 @@ const BOARDS = {
   es3c28p: { name: '2.8" LCDWIKI ES3C28P', spec: 'ESP32-S3, 320x240, capacitive touch', chip: 's3', w: 320, h: 240, inch: 2.8, touch: 'capacitive', twin: 'Twin1', shot: '02-live.png', screens: 'three' },
   crowadv28: { name: '2.8" CrowPanel Advance', spec: 'ESP32-S3, 320x240 IPS, capacitive touch', chip: 's3', w: 320, h: 240, inch: 2.8, touch: 'capacitive', twin: 'Twin1', shot: '02-live.png', screens: 'two' },
   crowadv50: { name: '5" CrowPanel Advance', spec: 'ESP32-S3, 800x480 IPS, capacitive touch', chip: 's3', w: 800, h: 480, inch: 5, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', screens: 'two' },
+  // plain DIS07050H: BOOT is the panel clock
+  crow50: { name: '5" CrowPanel', spec: 'ESP32-S3, 800x480, capacitive touch', chip: 's3', w: 800, h: 480, inch: 5, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', screens: 'two', noboot: true },
   jc8048w550: { name: '5" Guition JC8048W550', spec: 'ESP32-S3, 800x480, capacitive touch', chip: 's3', w: 800, h: 480, inch: 5, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', screens: 'two' },
   tab5: { name: '5" M5Stack Tab5', spec: 'ESP32-P4 and C6, 1280x720 IPS, capacitive touch, experimental', chip: 'p4', w: 1280, h: 720, inch: 5, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png' },
   esp4827s043: { name: '4.3" ESP32-4827S043C', spec: 'ESP32-S3, 480x272, capacitive touch, experimental', chip: 's3', w: 480, h: 272, inch: 4.3, touch: 'capacitive', twin: 'Twin5', shot: 'esp4827s043/02-live.png', screens: 'two' },

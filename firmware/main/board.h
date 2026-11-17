@@ -251,6 +251,38 @@
 #define PIN_T_INT      1        // the touch's reset is on the board's own chip, this line only helps it wake
 #define PIN_BUTTON     0        // BOOT
 
+#elif RADAR_DISPLAY == DISPLAY_CROW50_800x480
+/* Elecrow CrowPanel 5.0" plain (DIS07050H), not the Advance. pins from the P2000 firmware that
+ * already runs on this board: backlight is GPIO 2, high, and the touch is I2C on 19 and 20 with a
+ * PCA9557 at 0x18. the Advance's 15 and 16 are green bits of the picture here */
+#define DISP_LCD_RGB   1
+#define LCD_RGB_DATA   8, 3, 46, 9, 1,  5, 6, 7, 15, 16, 4,  45, 48, 47, 21, 14   // blue, green, red, lowest bit first
+#define PIN_LCD_HSYNC 39
+#define PIN_LCD_VSYNC 41
+#define PIN_LCD_DE    40
+#define PIN_LCD_PCLK   0        // BOOT is the panel's clock: no button the firmware can read
+#define LCD_RGB_HZ    (10 * 1000 * 1000)
+#define LCD_RGB_H_PULSE 1
+#define LCD_RGB_H_FRONT 8
+#define LCD_RGB_H_BACK  32
+#define LCD_RGB_V_PULSE 1
+#define LCD_RGB_V_FRONT 8
+#define LCD_RGB_V_BACK  8
+#define LCD_RGB_SYNC_IDLE_LOW 1
+#define PIN_LCD_BL     2        // high = lit
+#define DISP_STRIP    12
+#define DISP_HELPER   1
+#define LCD_PROFILES   2
+#define LCD_ORDER      { 0, 1 }
+#define TOUCH_GT911    1
+#define GT911_STOP     1        // this panel wants a stop between the register and the read
+#define I2C_BUS_HZ     100000
+#define TOUCH_PCA9557_BOOT 0x18 // the reset sequence the P2000 firmware runs before it asks the touch
+#define PIN_I2C_SDA   19        // the S3's own USB pins: this board has a CH340, they are free
+#define PIN_I2C_SCL   20
+#define NO_CHIP_USB    1
+#define PIN_BUTTON    (-1)
+
 #elif RADAR_DISPLAY == DISPLAY_JC8048W550_800x480
 /* Guition JC8048W550C, 5": ESP32-S3 N16R8, 800x480 on the RGB bus (ST7262), GT911, a CH340. pins from
  * one source so far, rzeldent/platformio-espressif32-sunton, JC8048W550C.json: the same as its

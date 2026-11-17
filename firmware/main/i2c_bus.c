@@ -2,6 +2,10 @@
 #ifdef PIN_I2C_SDA
 #include "esp_err.h"
 
+#ifndef I2C_BUS_HZ
+#define I2C_BUS_HZ 400000
+#endif
+
 static i2c_master_bus_handle_t s_bus;
 
 static void bus_up(void)
@@ -24,7 +28,7 @@ i2c_master_dev_handle_t i2c_dev(uint8_t addr)
     i2c_device_config_t dev = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = addr,
-        .scl_speed_hz = 400000,
+        .scl_speed_hz = I2C_BUS_HZ,
     };
     i2c_master_dev_handle_t h = NULL;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus, &dev, &h));

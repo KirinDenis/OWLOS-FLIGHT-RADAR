@@ -51,6 +51,7 @@ jobs:
           - { disp: wave7, num: 15, target: esp32s3 }
           - { disp: wave7b, num: 16, target: esp32s3 }
           - { disp: jc8012, num: 17, target: esp32p4 }
+          - { disp: crow50, num: 18, target: esp32s3 }
     steps:
       - uses: actions/checkout@v4
 

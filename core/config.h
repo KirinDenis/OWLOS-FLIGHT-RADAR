@@ -20,6 +20,7 @@
 #define DISPLAY_WAVE7_800x480   15   // Waveshare ESP32-S3-Touch-LCD-7: RGB bus, GT911, chipguy's 7/7B driver (chipguyhere)
 #define DISPLAY_WAVE7B_1024x600 16   // Waveshare ESP32-S3-Touch-LCD-7B: 1024x600, the same driver (chipguyhere)
 #define DISPLAY_JC8012_1280x800 17   // Guition JC8012P4A1C 10.1": ESP32-P4, 800x1280 standing on MIPI-DSI, GSL3680, chipguy's driver (chipguyhere)
+#define DISPLAY_CROW50_800x480  18   // Elecrow CrowPanel 5.0" plain (DIS07050H), not the Advance: ESP32-S3, RGB bus, GT911, backlight on GPIO 2
 
 #ifndef RADAR_DISPLAY
 #define RADAR_DISPLAY DISPLAY_ILI9341_320x240
@@ -45,7 +46,8 @@
 #define GFX_H 272
 #define RADAR_EPAPER 1
 #elif RADAR_DISPLAY == DISPLAY_CROWADV50_800x480 || RADAR_DISPLAY == DISPLAY_JC8048W550_800x480 || \
-      RADAR_DISPLAY == DISPLAY_CROW70_800x480 || RADAR_DISPLAY == DISPLAY_WAVE7_800x480
+      RADAR_DISPLAY == DISPLAY_CROW70_800x480 || RADAR_DISPLAY == DISPLAY_CROW50_800x480 || \
+      RADAR_DISPLAY == DISPLAY_WAVE7_800x480
 /* the 5" boards and the 7": the 3.5"'s layout, everything half as big again on an 800x480 glass.
  * GFX_W and GFX_H stay the layout's: the pages, the touch and every number in them go on as they are, and
  * core/gfx.c puts it on the glass in the glass's own pixels (GFX_Z). 534 and not 533: its middle
@@ -157,9 +159,10 @@
 #define RADAR_LED_RED_PIN (RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ST7796_480x320)
 
 /* a BOOT button the firmware can read: every board but the Tab5, whose buttons go to its power
- * chip and its C6, not the P4, and the CrowPanel 7.0, whose BOOT is on the screen's clock line.
- * the pages say what BOOT does only where there is one */
+ * chip and its C6, not the P4, and the plain CrowPanel 5.0 and the CrowPanel 7.0, whose BOOT is
+ * the screen's clock line. the pages say what BOOT does only where there is one */
 #define RADAR_HAS_BUTTON (RADAR_DISPLAY != DISPLAY_TAB5_1280x720 && RADAR_DISPLAY != DISPLAY_CROW70_800x480 && \
+                          RADAR_DISPLAY != DISPLAY_CROW50_800x480 && \
                           (!RADAR_OVERLAY || RADAR_OVERLAY_COLS))   // the Waveshare 7/7B: BOOT is GPIO0, a panel data line. the JC8012's is GPIO 35
 
 #define RADAR_NAME "OWLOS FLIGHTS"
@@ -181,6 +184,8 @@
 #define RADAR_BOARD "2.8\" CrowPanel Advance, S3"
 #elif RADAR_DISPLAY == DISPLAY_CROWADV50_800x480
 #define RADAR_BOARD "5\" CrowPanel Advance, S3"
+#elif RADAR_DISPLAY == DISPLAY_CROW50_800x480
+#define RADAR_BOARD "5\" CrowPanel, S3"
 #elif RADAR_DISPLAY == DISPLAY_JC8048W550_800x480
 #define RADAR_BOARD "5\" Guition JC8048W550, S3"
 #elif RADAR_DISPLAY == DISPLAY_TAB5_1280x720

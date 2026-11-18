@@ -151,8 +151,8 @@ on the site; none of the built ones here has been run on that board yet unless i
 
 - Asked 2026-11-05: "Any chance for a 5" board like an elecrow advanced 5"?" The second ask for 800x480,
   after the Guition above. Whether the asker has one, and would test, is not known yet.
-- Elecrow's name: CrowPanel Advance 5.0-HMI ESP32 AI Display, DIS02050A. Not the plain CrowPanel 5.0,
-  whose pins are others (ESPHome's page is for that one).
+- Elecrow's name: CrowPanel Advance 5.0-HMI ESP32 AI Display, DIS02050A. Not the plain CrowPanel 5.0
+  (DIS07050H): that one is `crow50`, built from the pins a P2000 firmware already runs.
 - ESP32-S3-WROOM-1 N16R8 (16 MB flash, 8 MB octal PSRAM), 800x480 IPS on a 16-bit RGB bus, ST7262, GT911
   capacitive touch at 0x5D, USB-C through a CH340K to UART0. BOOT is GPIO 0.
 - Pins from Elecrow's repository

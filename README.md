@@ -52,6 +52,9 @@ The map under them comes from OpenStreetMap.
 - **5" Elecrow CrowPanel Advance** (the 5.0" HMI ESP32 AI display, V1.0 to V1.3): ESP32-S3, 800x480 IPS
   on the RGB bus, capacitive touch (GT911). Experimental, never run on a real board here: the pins come
   from Elecrow's examples.
+- **5" Elecrow CrowPanel**, the plain one (DIS07050H), not the Advance: ESP32-S3, 800x480 on the RGB
+  bus, capacitive touch (GT911), the same layout. The pins are the ones a P2000 firmware already runs
+  on this board. Its BOOT button is the screen's clock line, so the firmware does not read it.
 - **5" Guition JC8048W550**: ESP32-S3, 800x480 on the RGB bus, capacitive touch (GT911). Experimental,
   never run on a real board here: the pins come from one board file so far.
 - **4.3" ESP32-4827S043C**: ESP32-S3, 480x272 on the RGB bus, capacitive touch (GT911), with a layout of
@@ -348,10 +351,10 @@ and a PC preview.
 
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
   `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
-  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
+  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `crow50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
   `wave7`, `wave7b`, `jc8012`. Each screen has its own build folder and sdkconfig.
-- `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012` and
-  `crow70` (chipguyhere's).
+- `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012`,
+  `crow70` and `crow50`.
 - `.github/workflows/pages.yml` builds them all in Espressif's ESP-IDF image and publishes the site
   with them on GitHub Pages, on every push to main.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site

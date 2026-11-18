@@ -30,7 +30,13 @@ static int64_t  s_gt_seen;
 static int gt_reg(uint16_t reg, uint8_t *buf, int n)
 {
     uint8_t r[2] = { (uint8_t)(reg >> 8), (uint8_t)reg };
+#ifdef GT911_STOP
+    /* this panel's GT911 wants a stop after the register, then the read. a repeated start comes back empty */
+    if (i2c_master_transmit(s_gt, r, 2, 20) != ESP_OK) return 0;
+    return i2c_master_receive(s_gt, buf, (size_t)n, 20) == ESP_OK;
+#else
     return i2c_master_transmit_receive(s_gt, r, 2, buf, (size_t)n, 20) == ESP_OK;
+#endif
 }
 
 static int gt_find(void)
@@ -240,6 +246,24 @@ void tp_init(void)
     gpio_config_t in = { .pin_bit_mask = 1ULL << PIN_T_INT, .mode = GPIO_MODE_INPUT };
     gpio_config(&in);
     vTaskDelay(pdMS_TO_TICKS(60));
+#endif
+#ifdef TOUCH_PCA9557_BOOT
+    /* DIS07050H, the sequence the P2000 firmware runs before it looks for the GT911.
+     * P0 is the touch's reset, P1 its interrupt */
+    {
+        i2c_master_dev_handle_t x = i2c_dev(TOUCH_PCA9557_BOOT);
+        const uint8_t prep[][2] = { { 3, 0xFF }, { 1, 0xFF }, { 2, 0x00 }, { 3, 0x00 }, { 1, 0xFE }, { 1, 0xFC } };
+        int ok = 1;
+        for (int i = 0; i < 6; i++) ok = ok && i2c_master_transmit(x, prep[i], 2, 50) == ESP_OK;
+        vTaskDelay(pdMS_TO_TICKS(20));
+        const uint8_t rel[2] = { 1, 0xFD };
+        ok = ok && i2c_master_transmit(x, rel, 2, 50) == ESP_OK;
+        vTaskDelay(pdMS_TO_TICKS(100));
+        const uint8_t let_go[2] = { 3, 0xFE };
+        ok = ok && i2c_master_transmit(x, let_go, 2, 50) == ESP_OK;
+        vTaskDelay(pdMS_TO_TICKS(60));
+        ESP_LOGI(TAG, "PCA9557 touch reset %s", ok ? "taken" : "not taken");
+    }
 #endif
 #ifdef TOUCH_RESET_PCA9557
     /* the CrowPanel 7.0: its reset is IO0 of a PCA9557, its INT IO1. ESPHome's people found that a

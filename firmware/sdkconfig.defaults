@@ -16,6 +16,10 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 # the servers are HTTPS: the common root certificates, enough for the ADS-B networks and FR24
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# ADSB.FI sends its GTS Root R4 signed by an old GlobalSign root. that old root is not in
+# this bundle, and the same GTS root is already trusted on its own. ESP-IDF 6. a 5.5 build
+# warns that it does not know this line and skips it
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
 # TLS buffers only while they are used, the certificates let go after the handshake: the peak of
 # a request drops, and the map's picture fits beside it on the 3.5" board
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y

@@ -4,6 +4,15 @@ What changed in each version of OWLOS Flight Radar, the newest first. The first 
 version: the firmware is built with it, the site publishes it, and a board compares its own with it.
 The site keeps the firmware of each version: a new number here keeps the one before it as it was.
 
+## 0.15
+
+- The plain Elecrow CrowPanel 5.0 (DIS07050H), not the Advance: `crow50`. ESP32-S3, 800x480, GT911.
+  Its picture pins and its touch (I2C on GPIO 19 and 20, a PCA9557 at 0x18, backlight on GPIO 2) are
+  the ones a P2000 firmware already runs on this board. BOOT is the panel's clock, so it is not read.
+- The time is asked as soon as the WiFi is up, whether or not the clock is drawn.
+- ESP-IDF 6: the RGB panel is asked for RGB565 by name, and ADSB.FI's cross-signed GTS root is trusted.
+  A 5.5 build skips the certificate line it does not know.
+
 ## 0.14
 
 - Three new boards, by Michael Caldwell-Waller (chipguyhere), from the fork

@@ -5,6 +5,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
@@ -190,6 +191,11 @@ void net_start(const nets_t *l)
 {
     if (s_started) return;
     s_started = 1;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && !defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY)
+    /* an sdkconfig left from an older configure never reads the new default, and ADSB.FI
+     * then fails with "No matching trusted root certificate found" */
+    ESP_LOGW(TAG, "delete sdkconfig and build again: a cross-signed certificate cannot be checked");
+#endif
     s_lock = xSemaphoreCreateMutex();
     s_nets = *l;
     ESP_ERROR_CHECK(esp_netif_init());

@@ -16,7 +16,7 @@ endif()
 if(RADAR_DISPLAY EQUAL 7 OR RADAR_DISPLAY EQUAL 9)   # the S3 boards with an LCD
     set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.s3lcd")
 elseif(RADAR_DISPLAY EQUAL 10 OR RADAR_DISPLAY EQUAL 11 OR RADAR_DISPLAY EQUAL 13 OR RADAR_DISPLAY EQUAL 14 OR
-       RADAR_DISPLAY EQUAL 15 OR RADAR_DISPLAY EQUAL 16)   # and those with an RGB panel (15, 16: the Waveshare 7/7B)
+       RADAR_DISPLAY EQUAL 15 OR RADAR_DISPLAY EQUAL 16 OR RADAR_DISPLAY EQUAL 18)   # and those with an RGB panel (15, 16: the Waveshare 7/7B, 18: the plain CrowPanel 5.0)
     set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.s3lcd;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.s3rgb")
     if(RADAR_DISPLAY EQUAL 15 OR RADAR_DISPLAY EQUAL 16)
         list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.wave7")

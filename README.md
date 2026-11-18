@@ -53,8 +53,10 @@ The map under them comes from OpenStreetMap.
   on the RGB bus, capacitive touch (GT911). Experimental, never run on a real board here: the pins come
   from Elecrow's examples.
 - **5" Elecrow CrowPanel**, the plain one (DIS07050H), not the Advance: ESP32-S3, 800x480 on the RGB
-  bus, capacitive touch (GT911), the same layout. The pins are the ones a P2000 firmware already runs
-  on this board. Its BOOT button is the screen's clock line, so the firmware does not read it.
+  bus, capacitive touch (GT911), the same layout. Experimental, brought in by Bert van Mullem (bertvm,
+  pull request #11): the pins are the ones a P2000 firmware already runs on this board, and the radar
+  itself has not run on one yet. Its BOOT button is the screen's clock line, so the firmware does not
+  read it.
 - **5" Guition JC8048W550**: ESP32-S3, 800x480 on the RGB bus, capacitive touch (GT911). Experimental,
   never run on a real board here: the pins come from one board file so far.
 - **4.3" ESP32-4827S043C**: ESP32-S3, 480x272 on the RGB bus, capacitive touch (GT911), with a layout of
@@ -192,7 +194,8 @@ smaller letters and its list of the nearest planes without their heights.
   - **AUTOPILOT**: the label says the height set on the autopilot, when the plane sends it: `FL280>350`.
   - **VECTORS**: a line ahead of each plane, its length says how fast.
   - **BEAM STEPS**: a plane moves only when the beam goes over it, as on a real scope.
-  - **CLOCK**: the time in UTC, which the board asks from pool.ntp.org only while this is on.
+  - **CLOCK**: the time in UTC. The board asks pool.ntp.org for it as soon as the WiFi is up, whether
+    this is on or not.
   - **LOST PLANES**: a plane with no position for 12 seconds goes dim and says CST, for coasting.
   - **CONFLICT**: two planes over 5000 ft that will come closer than 3 NM and 1000 ft within two minutes
     blink red with a line between them. This is a toy: it is public data, and nothing to act on.

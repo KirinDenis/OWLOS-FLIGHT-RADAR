@@ -43,14 +43,62 @@ const BOARDS = {
 };
 const CHIP_NAME = { esp32: 'ESP32', s3: 'ESP32-S3', c3: 'ESP32-C3', c5: 'ESP32-C5', p4: 'ESP32-P4' };
 const THEMES = ['arctic', 'phosphor', 'amber', 'crimson', 'synth'];
-const LOOKS = ['radar', 'map', 'classic'];
+const LOOKS = ['radar', 'map', 'classic', 'weather'];  // core/ui.h LOOK_*, in its order
+const WX_PAGES = ['dial', 'pressure', 'temperature'];  // the WEATHER look's pages, core/ui.h WXP_*
+const WX_EVERY_MS = 30 * 60 * 1000;                    // a screen's forecast asked again, as often as the board asks
+const WX_RETRY_MS = 60 * 1000;                         // and after an answer that did not come
 const RANGES = [2, 5, 10, 25, 50, 100, 250];
 const SWITCHES = { vectors: 'Vectors', clock: 'UTC clock', block: 'Data block', conflict: 'Conflict' };
+const BACKLIGHTS = [100, 50, 25, 10];                  // the board's BACKLIGHT steps, % as core/ui.h has them
+const ALERTS = ['storm', 'pressure', 'air', 'radiation'];   // the board's weather warnings: bit k is WXA_* k (core/weather.h)
+/* the board's weather units: the console's words, in the order core/ui.h numbers them, 0 auto (home's country's own),
+ * and what a chip says */
+const UNITS = {
+  temp: { key: 'temp_unit', title: 'Temperature', words: ['auto', 'c', 'f'], shown: ['AUTO', '°C', '°F'] },
+  pressure: { key: 'pressure_unit', title: 'Pressure', words: ['auto', 'hpa', 'mmhg', 'inhg'], shown: ['AUTO', 'HPA', 'MMHG', 'INHG'] },
+  wind: { key: 'wind_unit', title: 'Wind', words: ['auto', 'kmh', 'ms', 'mph', 'kt'], shown: ['AUTO', 'KM/H', 'M/S', 'MPH', 'KT'] },
+  rain: { key: 'rain_unit', title: 'Rain', words: ['auto', 'mm', 'in'], shown: ['AUTO', 'MM', 'IN'] },
+};
 const KEPT = 'owlos.boards';                           // the boards this browser knows, by MAC. it stays here
 
-let newest = '0';
+// the warnings on, as the console writes them: none, or their names with commas
+function alertWords(mask) {
+  return mask ? ALERTS.filter((a, i) => mask & (1 << i)).join(',') : 'none';
+}
+
+// and back: all, none, or names with commas. -1 for a name that is none of them
+function alertMask(value) {
+  if (value === 'all') {
+    return (1 << ALERTS.length) - 1;
+  }
+  if (value === 'none') {
+    return 0;
+  }
+  let mask = 0;
+  for (const name of value.split(',')) {
+    const k = ALERTS.indexOf(name);
+    if (k < 0) {
+      return -1;
+    }
+    mask |= 1 << k;
+  }
+  return mask;
+}
+
+let newest = '0';                                      // the stable: what version.json says every board
+let beta = '';                                         // the beta beside it, '' when there is none
+let betaBoards = [];                                   // the boards the beta was built for (fw/versions.json)
 
 const older = (a, b) => a.localeCompare(b, 'en', { numeric: true }) < 0;
+
+/* the version a board goes to: one above the stable runs a beta and follows the betas, or the stable a
+ * beta became. every other board follows the stable */
+function follows(u) {
+  return beta && u.version && older(newest, u.version) && betaBoards.includes(u.build) ? beta : newest;
+}
+
+/* where a version of a board's firmware is on the site: the stable in fw/<board>, a beta in its own folder */
+const fwDir = (build, ver) => (ver === newest ? `fw/${build}` : `fw/${ver}/${build}`);
 
 /* --- a screen: one running radar --- */
 
@@ -166,12 +214,51 @@ class Screen {
   fromBoard(c) {
     this.home = { lat: c.lat, lon: c.lon, place: c.place, country: c.country };
     this.m._twin_board(1);
-    this.apply({ range: c.range, up: c.up, theme: c.theme, look: c.look, map: c.map, ground: c.ground, dist_unit: c.dist_unit, alt_unit: c.alt_unit, labels: c.labels });
+    // a board before 0.16 (no alerts) has three looks. one flashed back from a beta can keep WEATHER's 3, which it draws as MAP
+    const look = c.alerts === undefined && c.look >= LOOKS.indexOf('weather') ? LOOKS.indexOf('map') : c.look;
+    this.apply({ range: c.range, up: c.up, theme: c.theme, look, map: c.map, ground: c.ground, dist_unit: c.dist_unit, alt_unit: c.alt_unit, labels: c.labels });
     Object.assign(this.opts, { vectors: c.vectors, beam_step: c.beam_step, clock: c.clock, block: c.block, autopilot: c.autopilot, lost: c.lost, conflict: c.conflict, fl_lo: c.fl_lo, fl_hi: c.fl_hi });
     this.setOpts();
     if (c.bare !== undefined) {                        // the radar without its panel: a board before 0.13 does not say
       this.m._twin_bare(c.bare);
     }
+    if (c.alerts !== undefined) {                      // the weather's warnings it shows
+      this.m._twin_alerts?.(c.alerts);
+    }
+    if (c.temp_unit !== undefined && this.m._twin_units) {   // its units, and home's country for the AUTO ones
+      const cc = this.m.stringToNewUTF8(c.cc || '');
+      this.m._twin_units(c.temp_unit, c.pressure_unit ?? 0, c.wind_unit ?? 0, c.rain_unit ?? 0, cc);
+      this.m._free(cc);
+    }
+  }
+
+  /* the forecast for the WEATHER look: Open-Meteo asked as the board asks it, for home rounded to a tenth of a
+   * degree, only while that look is up, every half an hour, a minute on after an answer that did not come. a new
+   * home's question is another one: asked at once */
+  async weather() {
+    const m = this.m;
+    if (!m?._twin_wants_weather || !m._twin_wants_weather() || this.wxBusy) {
+      return;
+    }
+    const urls = [0, 1, 2].map((k) => m.UTF8ToString(m._twin_wx_url(k)));
+    if (this.wxFor === urls[0] && performance.now() - this.wxAt < (this.wxOk ? WX_EVERY_MS : WX_RETRY_MS)) {
+      return;
+    }
+    this.wxBusy = true;
+    this.wxFor = urls[0];
+    this.wxAt = performance.now();
+    try {
+      const texts = await Promise.all(urls.map((url) => fetch(url).then((r) => (r.ok ? r.text() : '')).catch(() => '')));
+      const at = texts.map((t) => m.stringToNewUTF8(t));
+      this.wxOk = texts[0] !== '' && m._twin_weather(at[0], at[1], at[2]) === 1;
+      at.forEach((p) => m._free(p));
+    } finally {
+      this.wxBusy = false;
+    }
+  }
+
+  wxPage() {
+    return this.m?._twin_wx_page ? this.m._twin_wx_page() : 0;
   }
 
   /* a board's planes, line by line as it sends them */
@@ -277,6 +364,7 @@ class Screen {
     if (tiles) {
       this.map(tiles);
     }
+    this.weather();
   }
 }
 
@@ -296,6 +384,7 @@ const app = {
   kind: null,            // the board picked for it
   ours: false,           // it runs an older Flight Radar: its settings stay
   erase: false,          // ticked by the person, never by the page
+  wantsBeta: false,      // the beta for a new board: picked by the person, never by the page
   busy: null,            // { name, pct } while one is being flashed
 };
 let scene = null;
@@ -329,7 +418,7 @@ function barState() {
   if (app.busy) {
     return `FLASHING ${esc(app.busy.name.toUpperCase())} ${app.busy.pct}%`;
   }
-  const old = here().find((u) => older(u.version, newest));
+  const old = here().find((u) => older(u.version, follows(u)));
   let text = '';
   if (!app.units.length) {
     text = 'NO BOARD: A DEMO SKY';
@@ -552,11 +641,56 @@ function say(text, kind = '', port = null) {
 /* a setting on one board: the screen here, and the board itself */
 function setOne(u, name, value) {
   const s = u ? u.screen : hero;
+  if (name === 'wxpage') {                             // the WEATHER look's page: here, and on the board, which does not keep it
+    const k = WX_PAGES.indexOf(value);
+    if (k < 0 || !s.m?._twin_wxpage) {
+      return false;
+    }
+    s.m._twin_wxpage(k);
+    if (u?.link) {
+      u.link.send(`OWLOS SET ${JSON.stringify({ wxpage: k })}`).catch((e) => console.warn(e));
+    }
+    drawPane();
+    return true;
+  }
   if (name === 'flip') {                               // the board's own screen: this page shows it upright anyway
     if (!u?.link || !['on', 'off'].includes(value)) {
       return false;
     }
     u.link.send(`OWLOS SET ${JSON.stringify({ flip: value === 'on' ? 1 : 0 })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
+  if (name === 'backlight') {                          // the board's own light: a board that says none can't turn it down
+    const step = BACKLIGHTS.indexOf(Number(value));
+    if (!u?.link || step < 0 || u.cfg?.backlight === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ backlight: step })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
+  if (name === 'night') {                              // the light from dusk till dawn: off, or a step under full
+    const step = value === 'off' ? 0 : BACKLIGHTS.indexOf(Number(value));
+    if (!u?.link || step < 0 || (step === 0 && value !== 'off') || u.cfg?.night === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ night: step })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
+  if (name === 'alerts') {                             // the weather's warnings on every look: a board that says none has none
+    const mask = alertMask(value);
+    if (!u?.link || mask < 0 || u.cfg?.alerts === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ alerts: mask })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
+  if (UNITS[name]) {                                   // the weather's units: a board that says none has none
+    const n = UNITS[name];
+    const k = n.words.indexOf(value);
+    if (!u?.link || k < 0 || u.cfg?.[n.key] === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ [n.key]: k })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
     return true;
   }
   if (!s.m || !s.set(name, value)) {
@@ -574,6 +708,10 @@ const FILES = {
   config: (u) => {
     const c = u.screen.cfg();
     return [`theme=${THEMES[c.theme]}`, `look=${LOOKS[c.look]}`, `range=${Math.round(c.range)}`, `flip=${u.cfg?.flip ? 'on' : 'off'}`,
+      ...(u.cfg?.backlight !== undefined ? [`backlight=${BACKLIGHTS[u.cfg.backlight]}`] : []),
+      ...(u.cfg?.night !== undefined ? [`night=${u.cfg.night ? BACKLIGHTS[u.cfg.night] : 'off'}`] : []),
+      ...(u.cfg?.alerts !== undefined ? [`alerts=${alertWords(u.cfg.alerts)}`] : []),
+      ...Object.entries(UNITS).filter(([, n]) => u.cfg?.[n.key] !== undefined).map(([name, n]) => `${name}=${n.words[u.cfg[n.key]] ?? 'auto'}`),
       ...Object.keys(SWITCHES).map((k) => `${k}=${u.screen.opts[k] ? 'on' : 'off'}`)];
   },
   wifi: (u) => (u.nets?.length ? [...u.nets, '(passwords go in, never out)'] : ['no network set']),
@@ -589,7 +727,10 @@ const boardApi = {
   showAll: () => showAll(),
   showLive: (u) => showLive(u),
   files: FILES,
-  settings: [...THEMES.map((v) => `theme=${v}`), ...LOOKS.map((v) => `look=${v}`), ...RANGES.map((v) => `range=${v}`), ...Object.keys(SWITCHES).flatMap((k) => [`${k}=on`, `${k}=off`]), 'flip=on', 'flip=off'],
+  settings: [...THEMES.map((v) => `theme=${v}`), ...LOOKS.map((v) => `look=${v}`), ...RANGES.map((v) => `range=${v}`), ...Object.keys(SWITCHES).flatMap((k) => [`${k}=on`, `${k}=off`]), 'flip=on', 'flip=off',
+    ...BACKLIGHTS.map((p) => `backlight=${p}`), 'night=off', ...BACKLIGHTS.slice(1).map((p) => `night=${p}`),
+    'alerts=all', 'alerts=none', ...ALERTS.map((a) => `alerts=${a}`),
+    ...Object.entries(UNITS).flatMap(([name, n]) => n.words.map((w) => `${name}=${w}`)), ...WX_PAGES.map((p) => `wxpage=${p}`)],
   set: setOne,
   async send(u, line) {
     if (!u.link) {
@@ -810,6 +951,10 @@ async function attach(link, port, who) {
     if (what & 2) {
       link.send(`OWLOS PICK ${(u.screen.m._twin_sel() >>> 0).toString(16)}`).catch((e) => console.warn(e));
     }
+    if (what & 4) {                                    // a tap on the WEATHER look's dial or graph here: its page on the board too
+      link.send(`OWLOS SET ${JSON.stringify({ wxpage: u.screen.wxPage() })}`).catch((e) => console.warn(e));
+      drawPane();
+    }
   };
   link.onLine = (line) => {
     if (line.includes('Brownout detector')) {
@@ -832,6 +977,9 @@ async function attach(link, port, who) {
       desk.get(u.mac)?.body.querySelectorAll('[data-screen]').forEach((el) => {
         el.setAttribute('aria-pressed', String(names[now.screen] === el.dataset.screen));
       });
+      drawPane(u);
+    } else if (line.startsWith('OWLOS WXPAGE ')) {     // the WEATHER look's page, turned on the board: here too
+      u.screen.m._twin_wxpage?.(parseInt(line.slice(13), 10) || 0);
       drawPane(u);
     } else if (line.startsWith('OWLOS ALIGN ')) {
       u.aligning = line.endsWith('1');
@@ -1071,9 +1219,16 @@ function showBoards(all = false, oldVersion = null) {
       : sure ? 'This chip goes on one board of ours.'
         : `It has an ${CHIP_NAME[app.chip]}. The chip does not say which screen is on it, so pick yours.`;
   const name = app.kind ? BOARDS[app.kind].name : null;
+  // the stable, or the beta when there is one for this board and the person picked it
+  const canBeta = Boolean(beta && app.kind && betaBoards.includes(app.kind));
+  const ver = canBeta && app.wantsBeta ? beta : newest;
+  const channel = canBeta ? `<div class="field channel"><span>Version</span><div class="chips">
+      <button class="chip" data-beta="0" aria-pressed="${ver === newest}">STABLE ${newest}</button>
+      <button class="chip" data-beta="1" aria-pressed="${ver === beta}">BETA ${beta}</button></div>
+      ${ver === beta ? `<p class="note">A beta brings the new things first, and it may still go wrong. ${newest} is one flash away.</p>` : ''}</div>` : '';
   const s = stage(`<h2>${sure ? `We found your board: ${name}` : 'Which one is yours?'}</h2><p>${words}</p>
-    <div class="boards">${list.map(card).join('')}</div>
-    <div class="row"><button class="btn" id="go" ${app.kind ? '' : 'disabled'}>${app.kind ? `FLASH ${newest} TO THE ${name.toUpperCase()}` : 'PICK YOUR BOARD'}</button>
+    <div class="boards">${list.map(card).join('')}</div>${channel}
+    <div class="row"><button class="btn" id="go" ${app.kind ? '' : 'disabled'}>${app.kind ? `FLASH ${ver} TO THE ${name.toUpperCase()}` : 'PICK YOUR BOARD'}</button>
     ${all ? '' : '<button class="plain" id="all">Not this one? Show all boards</button>'}</div>
     <label class="erase"><input type="checkbox" id="erase" ${app.erase ? 'checked' : ''}> Erase the board first: its WiFi, settings and saved maps go too${app.kind && BOARDS[app.kind].nvsfw ? ', and its touch firmware: install that again after' : ''}</label>`);
   $('erase').addEventListener('change', (e) => {
@@ -1085,20 +1240,26 @@ function showBoards(all = false, oldVersion = null) {
       showBoards(all, oldVersion);
     });
   });
+  s.querySelectorAll('[data-beta]').forEach((el) => {
+    el.addEventListener('click', () => {
+      app.wantsBeta = el.dataset.beta === '1';
+      showBoards(all, oldVersion);
+    });
+  });
   s.querySelector('#all')?.addEventListener('click', () => showBoards(true, oldVersion));
-  s.querySelector('#go').addEventListener('click', flashNew);
+  s.querySelector('#go').addEventListener('click', () => flashNew(ver));
 }
 
 /* --- flashing --- */
 
-async function flashing(port, build, name, erase, others) {
+async function flashing(port, build, name, erase, others, ver = newest) {
   app.busy = { name, pct: 0 };
   renderBar();
   stage(`<h2>Flashing ${esc(name)}</h2><p>Leave the cable in, it takes about a minute.${others ? ' The other boards go on running.' : ''}</p>
     <div class="flashing"><span id="what">Starting</span><b id="pct">0%</b></div><div class="bar"><i id="fill"></i></div>`);
-  say(`flash ${newest}`, 'cmd');
+  say(`flash ${ver}`, 'cmd');
   try {
-    await writeFirmware(port, build, erase, (pct) => {
+    await writeFirmware(port, fwDir(build, ver), erase, (pct) => {
       app.busy.pct = pct;
       if ($('pct')) {
         $('what').textContent = pct < 100 ? 'Writing' : 'Restarting';
@@ -1107,7 +1268,7 @@ async function flashing(port, build, name, erase, others) {
       }
       $('barstate').textContent = `FLASHING ${name.toUpperCase()} ${pct}%`;
     }, (t) => say(t, 'page', port));
-    reportFlash(build, newest);                        // counted for the map only when the visitor allowed it
+    reportFlash(build, ver);                           // counted for the map only when the visitor allowed it
   } finally {
     app.busy = null;
   }
@@ -1139,12 +1300,12 @@ async function afterFlash(port) {
   }
 }
 
-async function flashNew() {
+async function flashNew(ver) {
   step(3);
   const build = app.kind;
   const port = app.port;
   try {
-    await flashing(port, build, BOARDS[build].name, app.erase, here().length);
+    await flashing(port, build, BOARDS[build].name, app.erase, here().length, ver);
   } catch (e) {
     console.warn(e);
     trouble('Flashing stopped', `${e.message}. Nothing was left half way that a new try can't fix.`);
@@ -1171,7 +1332,7 @@ async function update(u) {
   u.link = null;
   u.online = false;
   await link.close();
-  await flashing(port, u.build, u.name, false, here().length);
+  await flashing(port, u.build, u.name, false, here().length, follows(u));   // a beta board gets the beta again
   return (await afterFlash(port)) ?? u;
 }
 
@@ -1185,7 +1346,7 @@ async function updateThen(u) {
 }
 
 async function updateAll() {
-  for (const u of here().filter((v) => older(v.version, newest))) {
+  for (const u of here().filter((v) => older(v.version, follows(v)))) {
     await update(u);
   }
   showAll();
@@ -1358,12 +1519,17 @@ function panePart(u, tab) {
   } else if (tab === 'view') {
     const c = s.cfg();
     const range = RANGES.reduce((best, r, i) => (Math.abs(r - c.range) < Math.abs(RANGES[best] - c.range) ? i : best), 0);
-    const round = u && BOARDS[u.build].round;
-    pane.innerHTML = `${round ? '' : `<div class="field"><span>Look</span><div class="chips">${LOOKS.map((l, i) => `<button class="chip" data-set="look=${l}" aria-pressed="${c.look === i}">${l.toUpperCase()}</button>`).join('')}</div></div>`}
+    const looks = u && u.cfg?.alerts === undefined ? LOOKS.slice(0, 3) : LOOKS;   // a board before 0.16 has no WEATHER
+    pane.innerHTML = `<div class="field"><span>Look</span><div class="chips">${looks.map((l, i) => `<button class="chip" data-set="look=${l}" aria-pressed="${c.look === i}">${l.toUpperCase()}</button>`).join('')}</div></div>
+      ${c.look === LOOKS.indexOf('weather') ? `<div class="field"><span>Weather page</span><div class="chips">${WX_PAGES.map((p, i) => `<button class="chip" data-set="wxpage=${p}" aria-pressed="${s.wxPage() === i}">${p.toUpperCase()}</button>`).join('')}</div></div>` : ''}
       <div class="field"><span>Colours</span><div class="chips">${THEMES.map((t, i) => `<button class="chip" data-set="theme=${t}" aria-pressed="${c.theme === i}">${t.toUpperCase()}</button>`).join('')}</div></div>
       <label>Range: <b class="rangeword">${Math.round(c.range)}</b> km<input type="range" class="range" min="0" max="${RANGES.length - 1}" value="${range}"></label>
       <div class="field"><span>On the radar</span><div class="chips">${Object.entries(SWITCHES).map(([k, v]) => `<button class="chip" data-set="${k}=${s.opts[k] ? 'off' : 'on'}" aria-pressed="${!!s.opts[k]}">${v.toUpperCase()}</button>`).join('')}</div></div>
-      ${u ? `<div class="field"><span>The board's screen</span><div class="chips"><button class="chip" data-set="flip=${u.cfg?.flip ? 'off' : 'on'}" aria-pressed="${!!u.cfg?.flip}">UPSIDE DOWN</button></div></div>` : ''}`;
+      ${u ? `<div class="field"><span>The board's screen</span><div class="chips"><button class="chip" data-set="flip=${u.cfg?.flip ? 'off' : 'on'}" aria-pressed="${!!u.cfg?.flip}">UPSIDE DOWN</button></div></div>` : ''}
+      ${u?.cfg?.backlight !== undefined ? `<div class="field"><span>Backlight</span><div class="chips">${BACKLIGHTS.map((p, i) => `<button class="chip" data-set="backlight=${p}" aria-pressed="${u.cfg.backlight === i}">${p}%</button>`).join('')}</div></div>` : ''}
+      ${u?.cfg?.night !== undefined ? `<div class="field"><span>At night, from dusk till dawn at home</span><div class="chips">${BACKLIGHTS.map((p, i) => `<button class="chip" data-set="night=${i ? p : 'off'}" aria-pressed="${u.cfg.night === i}">${i ? `${p}%` : 'OFF'}</button>`).join('')}</div></div>` : ''}
+      ${u?.cfg?.alerts !== undefined ? `<div class="field"><span>Weather warnings, on every look</span><div class="chips">${ALERTS.map((a, i) => `<button class="chip" data-set="alerts=${alertWords(u.cfg.alerts ^ (1 << i))}" aria-pressed="${!!(u.cfg.alerts & (1 << i))}">${a.toUpperCase()}</button>`).join('')}</div></div>` : ''}
+      ${Object.entries(UNITS).filter(([, n]) => u?.cfg?.[n.key] !== undefined).map(([name, n]) => `<div class="field"><span>${n.title}${name === 'temp' ? `, AUTO: as at home${u.cfg.cc ? ` (${u.cfg.cc.toUpperCase()})` : ''}` : ''}</span><div class="chips">${n.words.map((w, i) => `<button class="chip" data-set="${name}=${w}" aria-pressed="${u.cfg[n.key] === i}">${n.shown[i]}</button>`).join('')}</div></div>`).join('')}`;
     const apply = (name, value) => {
       if (u) {
         term.run(`set ${name}=${value} --board ${short(u)}`);
@@ -1566,11 +1732,14 @@ async function showAll() {
   }
   app.view = 'all';
   app.cur = null;
-  const old = here().filter((u) => older(u.version, newest)).length;
+  const olds = here().filter((u) => older(u.version, follows(u)));
+  const old = olds.length;
+  const targets = [...new Set(olds.map(follows))];     // the stable, a beta, or both on one cable
+  const to = targets.length === 1 ? ` TO ${targets[0]}` : '';
   const w = desk.get('all') ?? desk.make('all', 'On every board', { onClose: () => renderBar() });
   w.body.innerHTML = `<div class="pane common"><div class="field"><span>Look</span><div class="chips">${LOOKS.map((l) => `<button class="chip" data-every="look=${l}">${l.toUpperCase()}</button>`).join('')}</div></div>
     <div class="field"><span>Colours</span><div class="chips">${THEMES.map((t) => `<button class="chip" data-every="theme=${t}">${t.toUpperCase()}</button>`).join('')}</div></div>
-    ${old ? `<button class="btn quiet updateall">UPDATE ${old === 1 ? 'THE OLD ONE' : `ALL ${old}`} TO ${newest}</button>` : ''}</div>`;
+    ${old ? `<button class="btn quiet updateall">UPDATE ${old === 1 ? 'THE OLD ONE' : `ALL ${old}`}${to}</button>` : ''}</div>`;
   w.body.querySelectorAll('[data-every]').forEach((el) => {
     el.addEventListener('click', () => term.run(`set ${el.dataset.every} --all`));
   });
@@ -1792,9 +1961,18 @@ loadRelief().then((fn) => {
     scene.setRelief(fn);
   }
 }).catch((e) => console.warn(e));
-fetch('version.json').then((r) => r.json()).then((v) => {
+fetch('version.json').then((r) => r.json()).then(async (v) => {
   newest = v.version;
   renderBar();
+  const b = typeof v.beta === 'string' && /^[0-9]+(\.[0-9]+)*$/.test(v.beta) ? v.beta : '';
+  if (b) {                                             // a beta: the boards it was built for are in fw/versions.json
+    const j = await (await fetch('fw/versions.json', { cache: 'no-cache' })).json();
+    if (j?.beta?.version === b && Array.isArray(j.beta.boards)) {
+      betaBoards = j.beta.boards;
+      beta = b;
+      renderBar();
+    }
+  }
 }).catch((e) => console.warn(e));
 setInterval(showStates, 10000);                        // an answer that stopped coming shows by itself
 startStats(BOARDS);                                    // the boards out there, when our server answers

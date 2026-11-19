@@ -169,18 +169,27 @@ void store_save_watch(const char *text)
     nvs_close(h);
 }
 
+/* the LED's settings as the versions before 4 kept them: six events, no WEATHER. version 2 ended
+ * before `red`. read into this, then over the defaults: WEATHER on, as a fresh board has it */
+typedef struct { uint8_t version, on[6], level, hold, near, red; } light_v3_t;
+_Static_assert(sizeof(light_v3_t) == 11 && offsetof(light_v3_t, red) == 10, "version 3 LED settings are 11 bytes, 2 the first 10");
+_Static_assert(LIGHT_WEATHER == 6, "a new LED event goes after the six that versions 2 and 3 kept");
+
 void store_load_light(light_cfg_t *c)
 {
     if (load_blob(NS, "light", c, sizeof *c) && c->version == LIGHT_CFG_VERSION) return;
-    /* version 2 is this one up to `red`: read over the defaults, the red one stays on GPIO 4 */
-    _Static_assert(offsetof(light_cfg_t, red) == 10, "version 2 LED settings are the first 10 bytes");
+    light_v3_t o;
+    memset(&o, 0, sizeof o);
+    o.red = LIGHT_RED_4;                               // version 2: the red one on GPIO 4
+    const int v3 = load_blob(NS, "light", &o, sizeof o) && o.version == 3;
+    const int v2 = !v3 && load_blob(NS, "light", &o, offsetof(light_v3_t, red)) && o.version == 2;
     light_defaults(c);
-    if (load_blob(NS, "light", c, offsetof(light_cfg_t, red)) && c->version == 2) {
-        c->version = LIGHT_CFG_VERSION;
-        c->red = LIGHT_RED_4;
-        return;
-    }
-    light_defaults(c);
+    if (!v3 && !v2) return;
+    memcpy(c->on, o.on, sizeof o.on);
+    c->level = o.level;
+    c->hold = o.hold;
+    c->near = o.near;
+    c->red = v3 ? o.red : LIGHT_RED_4;
 }
 
 void store_save_light(const light_cfg_t *c) { save_blob("light", c, sizeof *c); }
@@ -215,6 +224,56 @@ void store_save_bare(int bare)
 {
     uint8_t v = bare ? 1 : 0;
     save_blob("bare", &v, sizeof v);
+}
+
+int store_load_backlight(void)
+{
+    uint8_t v = 0;
+    return load_blob(NS, "backlight", &v, sizeof v) && v < UI_BACKLIGHTS ? v : 0;
+}
+
+void store_save_backlight(int step)
+{
+    uint8_t v = (uint8_t)step;
+    save_blob("backlight", &v, sizeof v);
+}
+
+int store_load_night(void)
+{
+    uint8_t v = 0;
+    return load_blob(NS, "night", &v, sizeof v) && v < UI_BACKLIGHTS ? v : 0;
+}
+
+void store_save_night(int step)
+{
+    uint8_t v = (uint8_t)step;
+    save_blob("night", &v, sizeof v);
+}
+
+int store_load_alerts(void)
+{
+    uint8_t v = WXA_ALL;                               // never set: all of them, as a fresh board has them
+    return load_blob(NS, "alerts", &v, sizeof v) && v <= WXA_ALL ? v : WXA_ALL;
+}
+
+void store_save_alerts(int mask)
+{
+    uint8_t v = (uint8_t)mask;
+    save_blob("alerts", &v, sizeof v);
+}
+
+void store_load_units(wx_units_t *w)
+{
+    wx_units_t v = { 0, 0, 0, 0 };                     // never set: home's country's own, each of them
+    if (!load_blob(NS, "units", &v, sizeof v) || v.temp >= TEMP_UNITS || v.pres >= PRES_UNITS || v.wind >= WIND_UNITS ||
+        v.rain >= RAIN_UNITS)
+        v = (wx_units_t){ 0, 0, 0, 0 };
+    *w = v;
+}
+
+void store_save_units(const wx_units_t *w)
+{
+    save_blob("units", w, sizeof *w);
 }
 
 uint32_t store_load_ran(void)

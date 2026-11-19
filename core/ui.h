@@ -10,6 +10,7 @@
 #include "map.h"
 #include "watch.h"
 #include "light.h"
+#include "weather.h"
 
 enum { VIEW_MAIN, VIEW_LIST, VIEW_SETUP, VIEW_CAL, VIEW_WIFI, VIEW_KEYS, VIEW_ABOUT };   /* WIFI: the networks, KEYS: the password */
 enum { KB_PASS, KB_HOME, KB_WATCH };               /* what the keyboard types */
@@ -19,8 +20,20 @@ enum { SRC_FREE, SRC_FR24 };                       /* where the planes come from
 enum { FREE_ADSB_LOL, FREE_ADSB_FI, FREE_SERVERS };           /* open, no key: airplanes.live and adsb.one closed to strangers */
 enum { DIST_KM, DIST_NM, DIST_MI };
 enum { ALT_FT, ALT_M };
-enum { LOOK_RADAR, LOOK_MAP, LOOK_CLASSIC, LOOKS };   /* the beam over the ground, the flat map, the map in its own colours */
-#define RANGE_MIN 2.0f                              /* the radius of the scope, in the distance unit */
+/* the beam over the ground, the flat map, the map in its own colours, the next 24 hours' weather on the dial */
+enum { LOOK_RADAR, LOOK_MAP, LOOK_CLASSIC, LOOK_WEATHER, LOOKS };
+/* the WEATHER look's pages, a tap on the dial or the graph (or BOOT) to the next: the day on the dial, the
+ * pressure a day back and a day on, the temperature and the rain by the hour */
+enum { WXP_DIAL, WXP_PRESSURE, WXP_TEMP, WX_PAGES };
+/* the weather's units, SET's UNITS tab: 0 each the home country's own (the US's Fahrenheit, inches and mph,
+ * the millimetres of mercury east of Poland...), else one of these. the pressure in hPa and inHg is at the
+ * sea's level as forecasts give it, in mmHg at home's height as a barometer there reads */
+enum { TEMP_AUTO, TEMP_C, TEMP_F, TEMP_UNITS };
+enum { PRES_AUTO, PRES_HPA, PRES_MMHG, PRES_INHG, PRES_UNITS };
+enum { WIND_AUTO, WIND_KMH, WIND_MS, WIND_MPH, WIND_KN, WIND_UNITS };
+enum { RAIN_AUTO, RAIN_MM, RAIN_IN, RAIN_UNITS };
+typedef struct { uint8_t temp, pres, wind, rain; } wx_units_t;
+#define RANGE_MIN 2.0f                             /* the radius of the scope, in the distance unit */
 #define RANGE_MAX 250.0f
 
 /* settings the screen shows and changes. saved by the firmware */
@@ -111,6 +124,10 @@ typedef struct {
     uint8_t light_test;    /* the LED's red, green, blue */
     uint8_t help;          /* ui_t.help changed: use it, keep it */
     uint8_t bare;          /* ui_t.bare changed: keep it */
+    uint8_t backlight;     /* ui_t.backlight changed: use it, keep it */
+    uint8_t night;         /* ui_t.night changed: use it, keep it */
+    uint8_t alerts;        /* ui_t.alerts changed: keep it */
+    uint8_t units;         /* ui_t.units changed: keep it */
 } ui_cmd_t;
 
 #define TRAIL_GAP INT16_MIN       /* a trail point off the scope: the trail breaks there */
@@ -167,6 +184,8 @@ typedef struct {
     uint32_t menu_until;   /* round glass: the HUE LIST SET row shows till then */
     uint8_t  panel_open;   /* the square map: the panel slid in over it (the three dots) */
     uint8_t  bare;         /* the radar without its panel, the scope in the middle (its three dots). the firmware keeps it */
+    uint8_t  backlight;    /* the screen's light, a step of UI_BACKLIGHTS, 0 the brightest. SET's BACKLIGHT, the firmware keeps it */
+    uint8_t  night;        /* SET's NIGHT: 0 off, else the step the light goes down to while the sun is down at home */
     /* the WiFi page and its keyboard. the keyboard types the home and the watch list too */
     int      wifi_scroll;
     char     wifi_ssid[33];
@@ -183,6 +202,15 @@ typedef struct {
     uint8_t  kb_show;          /* the password in clear, not dots */
     uint32_t kb_typed;         /* when the last letter came: it shows a moment before it turns to a dot */
     const map_t *map;      /* the ground under the scope, NULL: none */
+    const weather_t *wx;   /* the forecast for the WEATHER look, NULL: none yet */
+    uint8_t  wx_page;      /* the WEATHER look's page shown, WXP_*: the dial each time the look comes */
+    uint8_t  alerts;      /* the weather's warnings shown on every look, 1 << WXA_* (weather.h): SET's DATA tab,
+                              all of them at first. the firmware keeps it */
+    wx_units_t units;      /* the weather's units, SET's UNITS tab: 0 each home's country's own. the firmware keeps it */
+    char     home_cc[3];   /* home's country, its two small letters, "" not known: the firmware copies it in like net */
+    wx_alert_t alert;      /* the warnings now: ui_frame works them out of wx each frame */
+    uint8_t  alert_was[WXA_KINDS];   /* their levels the frame before */
+    uint8_t  alert_new;    /* the kinds that came or got worse this frame (1 << WXA_*): the firmware lights the LED */
     uint32_t prof[6];      /* us spent a layer, summed till the firmware logs them: background, disc,
                               compass, planes, panel, the rest */
 } ui_t;
@@ -190,6 +218,15 @@ typedef struct {
 /* a deadline in the 32-bit milliseconds still ahead. 0 is none: ui_frame lets a passed one go at once,
  * or 24.8 days on the clock would wrap round to it and read it as ahead again, a toast back for good */
 static inline int ui_until(uint32_t until, uint32_t now) { return until && (int32_t)(until - now) > 0; }
+
+/* the screen's light in SET's BACKLIGHT steps, as a percent: the firmware turns the glass to it where
+ * it can (config.h RADAR_HAS_DIM). each step about half the one before, which the eye sees as even */
+#define UI_BACKLIGHTS 4
+static inline int ui_backlight_pct(int step)
+{
+    static const uint8_t PCT[UI_BACKLIGHTS] = { 100, 50, 25, 10 };
+    return PCT[step >= 0 && step < UI_BACKLIGHTS ? step : 0];
+}
 
 int  ui_init(ui_t *u, uint32_t now);
 void ui_set_cfg(ui_t *u, const fr_cfg_t *c);
@@ -255,6 +292,7 @@ extern const char *ui_screen_name;
 extern uint32_t (*ui_clock_us)(void);
 /* this firmware's version, the first "## " line of CHANGES.md, set by the firmware. NULL: none */
 extern const char *ui_version;
+extern int ui_beta;                                  /* a beta build ("(beta)" on that line): ABOUT says BETA */
 int ui_version_cmp(const char *a, const char *b);   /* <0 a is older, 0 the same, >0 newer: 0.9 < 0.10 */
 int ui_update(const ui_t *u);                       /* the site has a newer one than this */
 #define UI_SCREEN_PICK_MS 8000u            /* BOOT picks the screen this long after power on */

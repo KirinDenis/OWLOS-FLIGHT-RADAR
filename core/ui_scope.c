@@ -606,8 +606,8 @@ static void conflicts(ui_t *u)
     }
 }
 
-/* what the strips share is worked out here, once a frame. the strips only read: on the 3.5" two
- * cores draw them at once (main.c) */
+/* what the strips share is worked out here, once a frame. the strips only read: on the boards with
+ * two cores both draw them at once (main.c), every view and every look */
 void scope_frame(ui_t *u)
 {
     const int radar = u->cfg.look == LOOK_RADAR;
@@ -1145,9 +1145,9 @@ static void sq_scale(ui_t *u, canvas_t *cv, int right, int y)
     gfx_vline(cv, x + w / 2, y - 2, y, ink, 200);
 }
 
-/* the three dots: the panel in and out, lit while it is in. the square map's, and the radar's in the
- * corner of its panel or where that was (w: the 2.8"'s are narrower there) */
-static void panel_dots(ui_t *u, canvas_t *cv, int x, int y, int w)
+/* the three dots: the panel in and out, lit while it is in. the square map's, and the radar's (and the
+ * weather's) in the corner of its panel or where that was (w: the 2.8"'s are narrower there) */
+void panel_dots(ui_t *u, canvas_t *cv, int x, int y, int w)
 {
     const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_DOTS, in = panel_shown(u);
     uint32_t dot;
@@ -1875,10 +1875,63 @@ static void round_note(ui_t *u, canvas_t *cv)
 
 #endif
 
+/* a weather warning (weather.h): a chip with a sign and the worst one's word, "+1" for each more.
+ * under the town's name, where the note of a newer version goes (the note moves under it); on the
+ * round glass over the card under home. a tap opens the WEATHER look. none while a plane is picked
+ * or the round menu is up, nor in the WEATHER look but on the round glass: its panel says it in full */
+static void alert_text(const ui_t *u, char *t, int sz)
+{
+    const int k = wx_alert_worst(&u->alert);
+    int more = 0;
+    for (int i = 0; i < WXA_KINDS; i++) more += i != k && u->alert.level[i];
+    if (more) snprintf(t, (size_t)sz, "%s +%d", alert_word(&u->alert, k), more);
+    else snprintf(t, (size_t)sz, "%s", alert_word(&u->alert, k));
+}
+
+#define ALERT_H 13
+#define ALERT_SIGN 12                                  /* the sign and the gap after it */
+
+int alert_box(const ui_t *u, note_box_t *b)
+{
+    if (u->view != VIEW_MAIN || wx_alert_worst(&u->alert) < 0) return 0;
+    char t[24];
+    alert_text(u, t, sizeof t);
+    const int w = 4 + ALERT_SIGN + micro_width(t, 1) + 6;
+#if RADAR_ROUND
+    if (u->sel || menu_up(u) || demo_shown(u)) return 0;
+    *b = (note_box_t){ SCX - w / 2, SCY + 28, w, ALERT_H };
+#else
+    if (u->cfg.look == LOOK_WEATHER) return 0;
+    *b = (note_box_t){ 2, square_look(u) ? 28 : u->opt.clock ? CLOCK_Y + 9 : 27, w, ALERT_H };
+#endif
+    return 1;
+}
+
+void alert_chip(ui_t *u, canvas_t *cv)
+{
+    note_box_t b;
+    if (!alert_box(u, &b) || !gfx_touches(cv, b.y - 1, b.y + b.h + 1)) return;
+    char t[24];
+    alert_text(u, t, sizeof t);
+    const int lv = u->alert.level[wx_alert_worst(&u->alert)], classic = u->cfg.look == LOOK_CLASSIC;
+    const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_ALERT;
+    const float br = 0.5f + 0.5f * sinf((float)(u->now % 6284u) * 0.002f);   // it breathes, never blinks
+    const uint32_t c = classic && lv >= WXA_RED ? CL_ALARM : alert_colour(lv);
+    if (classic) paper_card(cv, b.x, b.y, b.w, b.h);  // on the light map: paper, the sign in its colour
+    else chamfer_box(cv, b.x, b.y, b.w, b.h, pressed ? c : C_BG0, pressed ? 120 : 215, c, (int)(150.0f + 105.0f * br));
+    // the sign: a triangle with a mark cut out of it
+    const float sx = (float)b.x + 4.0f + 5.0f, sy = (float)b.y + b.h * 0.5f;
+    gfx_tri(cv, sx, sy - 5.0f, sx + 5.5f, sy + 4.5f, sx - 5.5f, sy + 4.5f, c, classic ? 255 : (int)(180.0f + 75.0f * br));
+    const uint32_t cut = classic ? CL_PAPER : C_BG0;
+    gfx_line(cv, sx, sy - 1.8f, sx, sy + 1.0f, 1.3f, cut, 255);
+    gfx_dot(cv, sx, sy + 2.8f, cut, 255);
+    micro_text(cv, b.x + 4 + ALERT_SIGN, b.y + (b.h - MICRO_H) / 2 + 1, t, classic ? CL_INK : c, 250, 1);
+}
+
 /* the site has a newer version: a small note, a tap on it opens ABOUT. over the radar it is the
- * panel's title, over the square map and the radar without its panel a card under the town's, on
- * the round glass one under its box. while a plane is picked or the round menu is up, they have
- * the place */
+ * panel's title, over the square map and the radar without its panel a card under the town's (under
+ * a weather warning's chip, if there is one), on the round glass one under its box. while a plane is
+ * picked or the round menu is up, they have the place */
 int update_note_box(const ui_t *u, note_box_t *b)
 {
     if (!ui_update(u) || u->view != VIEW_MAIN) return 0;
@@ -1889,13 +1942,15 @@ int update_note_box(const ui_t *u, note_box_t *b)
     if (u->sel || menu_up(u) || demo_shown(u)) return 0;
     *b = (note_box_t){ SCX - w / 2, SCY + 79, w, 13 };
 #else
+    note_box_t ab;
+    const int under = alert_box(u, &ab) ? ab.y + ab.h + 2 : 0;
     if (!square_look(u) && panel_shown(u)) {
         if (u->sel) return 0;
         *b = (note_box_t){ TX - 3, 3, title_end(u) - TX + 6, 14 };
     } else if (!square_look(u)) {                      // under the town's name and the clock, if it is on
-        *b = (note_box_t){ 2, u->opt.clock ? CLOCK_Y + 9 : 27, w, 13 };
+        *b = (note_box_t){ 2, under ? under : u->opt.clock ? CLOCK_Y + 9 : 27, w, 13 };
     } else {
-        *b = (note_box_t){ 2, 28, w, 13 };
+        *b = (note_box_t){ 2, under ? under : 28, w, 13 };
     }
 #endif
     return 1;
@@ -1921,6 +1976,21 @@ void update_note(ui_t *u, canvas_t *cv)
 
 void main_draw(ui_t *u, canvas_t *cv)
 {
+    if (u->cfg.look == LOOK_WEATHER) {                 // the next day on the dial (ui_weather.c), the same glass and panel
+        weather_draw(u, cv);
+        alert_chip(u, cv);                             // the round glass's: the others say it in the panel
+#if RADAR_ROUND
+        if (menu_up(u)) round_menu(u, cv);
+#endif
+        ui_lap(u, cv, 4);
+        return;
+    }
+#if RADAR_OVERLAY
+    /* its tables back to the heap, if it had any. here only on the moving layer's boards, whose background
+     * task is the one drawing the dial: elsewhere weather_frame does it, before strips the second core may
+     * draw at the same time, which here both gave them back */
+    weather_close();
+#endif
 #if !RADAR_ROUND
     if (square_look(u)) {                              // the flat square: no glass, no rim, no rings
         sq_ground(u, cv);
@@ -1932,6 +2002,7 @@ void main_draw(ui_t *u, canvas_t *cv)
         gesture(u, cv);
         ui_lap(u, cv, 3);
         sq_chrome(u, cv);
+        alert_chip(u, cv);
         update_note(u, cv);
         demo_card(u, cv);
         if (panel_shown(u)) {                          // slid in over the map: darker, so it reads on any ground
@@ -1964,11 +2035,13 @@ void main_draw(ui_t *u, canvas_t *cv)
     else if (menu_up(u)) round_menu(u, cv);
     else {
         round_note(u, cv);
+        alert_chip(u, cv);
         update_note(u, cv);
     }
 #else
     demo_card(u, cv);
     corners(u, cv);
+    alert_chip(u, cv);
     if (panel_shown(u)) {
         chamfer_box(cv, PX, 2, PW, GFX_H - 4, C_PANEL, 120, C_QUIET, 200);
         if (p) panel_plane(u, cv, p);
@@ -1993,7 +2066,7 @@ static int ring_turning(const ui_t *u) { return u->t_down && u->t_turn == 1 && u
  * the display driver adds it as the panel is fed (firmware/main/lcd_wave7.cpp) */
 void main_top(ui_t *u, canvas_t *cv)
 {
-    if (u->view != VIEW_MAIN) return;
+    if (u->view != VIEW_MAIN || u->cfg.look == LOOK_WEATHER) return;   // no planes over the weather
     const int was = cv->layer;
     cv->layer = UI_LAYER_TOP;
 #if !RADAR_ROUND
@@ -2107,10 +2180,24 @@ int main_hit(const ui_t *u, int x, int y)
         for (int i = 0; i < MENU_N; i++) if (x >= menu_x(i) && x < menu_x(i) + MENU_W) return menu_hit(i);
     if (u->sel && in_box(x, y, SCX - CARD_W / 2, CARD_Y, CARD_W, CARD_H)) return HIT_PANEL;
     note_box_t nb;
+    if (alert_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12)) return HIT_ALERT;
     if (update_note_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12)) return HIT_NEWS;
     return HIT_SCOPE;
 #else
     const int lx = look_x(u), ly = LOOK_Y + LOOK_H + 12;
+    if (u->cfg.look == LOOK_WEATHER) {   // the three dots, the look's button, the panel's three; the dial or the graph turns its page
+        const int panel = panel_shown(u);
+#if RADAR_HAS_TOUCH
+        if (y < (panel ? LOOK_Y + LOOK_H + 2 : ly) && x >= RDOTS_X - 4) return HIT_DOTS;
+#endif
+        if (y < ly && x >= lx - 12 && x < (panel ? PX - 2 : RDOTS_X - 4)) return HIT_LOOK;
+        if (!panel || x < PX - 2) return HIT_WXPAGE;
+        if (y >= BTN_Y - 2) {
+            int b = (x - btn_x(0)) / (BTN_W + 3);
+            return b >= 0 && b < 3 ? HIT_BTN + b : HIT_NONE;
+        }
+        return HIT_NONE;
+    }
     const int sx = x - view_cx(u), sy = y - SCY;
     const int on_scope = !square_look(u) && sx * sx + sy * sy <= (SR + 6) * (SR + 6);
 #if RADAR_HAS_TOUCH
@@ -2118,9 +2205,14 @@ int main_hit(const ui_t *u, int x, int y)
      * panel only the dots themselves: under them the panel is its own (a tap there picks the next plane) */
     if (!square_look(u) && y < (panel_shown(u) ? LOOK_Y + LOOK_H + 2 : ly) && x >= RDOTS_X - 4) return HIT_DOTS;
 #endif
-    note_box_t nb;                                     // a finger is wide: the note answers round it too, off the scope
-    if (update_note_box(u, &nb) && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12) &&
-        (!on_scope || in_box(x, y, nb.x, nb.y, nb.w, nb.h))) return HIT_NEWS;
+    /* a finger is wide: the warning's chip and the note answer round them too, off the scope. the note
+     * sits right under the chip: on either of them first, then round them */
+    note_box_t ab, nb;
+    const int chip = alert_box(u, &ab), note = update_note_box(u, &nb);
+    if (chip && in_box(x, y, ab.x, ab.y, ab.w, ab.h)) return HIT_ALERT;
+    if (note && in_box(x, y, nb.x, nb.y, nb.w, nb.h)) return HIT_NEWS;
+    if (chip && !on_scope && in_box(x, y, ab.x - 6, ab.y - 6, ab.w + 12, ab.h + 12)) return HIT_ALERT;
+    if (note && !on_scope && in_box(x, y, nb.x - 6, nb.y - 6, nb.w + 12, nb.h + 12)) return HIT_NEWS;
     // the buttons over the map answer further out than they are drawn: a finger is wide, a
     // resistive panel is a few pixels off
 #if UI_WIFI_PAGE

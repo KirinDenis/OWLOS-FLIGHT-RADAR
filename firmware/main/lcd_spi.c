@@ -440,7 +440,7 @@ void disp_init(void)
         .miso_io_num = PIN_LCD_MISO,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = (int)strip_bytes * (DISP_HELPER ? 2 : 1) + 8,   // the second core's pairs go in one
+        .max_transfer_sz = (int)strip_bytes * (DISP_HELPER && !DISP_HELPER_HALF ? 2 : 1) + 8,   // the second core's pairs go in one
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO));
 

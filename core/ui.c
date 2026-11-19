@@ -29,7 +29,7 @@ static const float NICE[] = { 2, 3, 5, 8, 10, 15, 20, 25, 30, 40, 50, 60, 80, 10
 static const float BOOT_RANGES[] = { 5, 10, 25, 50, 100, 200 };
 #define NNICE ((int)(sizeof NICE / sizeof NICE[0]))
 const char *const SERVER_NAME[FREE_SERVERS] = { "ADSB.LOL", "ADSB.FI" };
-const char *const LOOK_NAME[LOOKS] = { "RADAR", "MAP", "CLASSIC" };
+const char *const LOOK_NAME[LOOKS] = { "RADAR", "MAP", "CLASSIC", "WEATHER" };
 const char *ui_screen_name;
 uint32_t (*ui_clock_us)(void);
 static uint32_t s_lap;
@@ -83,7 +83,7 @@ float range_km(const fr_cfg_t *c)
 // glass that in every look)
 void ui_ground_size(const fr_cfg_t *c, int *w, int *h, int *disc)
 {
-    int square = !RADAR_ROUND && c->look != LOOK_RADAR;
+    int square = !RADAR_ROUND && c->look != LOOK_RADAR && c->look != LOOK_WEATHER;   // the weather keeps the radar's, ready for it
     *w = square ? GFX_PW : 2 * G_PR;                 // a texel a pixel of the glass
     *h = square ? GFX_PH : 2 * G_PR;
     *disc = !square;
@@ -412,6 +412,7 @@ int ui_init(ui_t *u, uint32_t now)
     if (!scope_init()) return 0;
     fr_cfg_defaults(&u->cfg);
     light_defaults(&u->light);
+    u->alerts = WXA_ALL;
     /* default touch alignment of the 2.8" CYD (the WiFi radar's numbers) till the user aligns */
     u->cal = (touch_cal_t){ 0.0f, -0.0894f, 333.3f, -0.0666f, 0.0f, 251.1f };
     const int in = RADAR_ROUND ? (int)(GFX_W * 0.2f) : 30;   // round glass: the corners are not there, the diagonals are
@@ -470,11 +471,35 @@ static void fling_step(ui_t *u, uint32_t now)
     *sp = s;
 }
 
+/* the weather's warnings, out of the forecast the firmware copied in. one that comes, or gets worse,
+ * says so a few seconds over whatever is shown and tells the firmware, which lights the LED */
+static void alerts_frame(ui_t *u)
+{
+    wx_alerts(u->wx, u->alerts, &u->alert);
+    u->alert_new = 0;
+    int said = -1;
+    for (int k = 0; k < WXA_KINDS; k++) {
+        if (u->alert.level[k] > u->alert_was[k]) {
+            u->alert_new |= (uint8_t)(1u << k);
+            if (said < 0 || u->alert.level[k] > u->alert.level[said]) said = k;
+        }
+        u->alert_was[k] = u->alert.level[k];
+    }
+    if (said >= 0) {
+        char t[sizeof u->toast];
+        alert_said(&u->alert, said, t, sizeof t);
+        toast(u, t);
+        u->toast_until = u->now + 5000u;               // longer than a look's name: it may be read across the room
+    }
+}
+
 void ui_frame(ui_t *u, uint32_t now)
 {
     fling_step(u, now);
     u->now = now;
+    weather_frame(u);                                       // the WEATHER look's page, and what its strips will read
     if (!ui_until(u->toast_until, now)) u->toast_until = 0;    // passed: let go, see ui_until
+    alerts_frame(u);
     if (!ui_until(u->menu_until, now)) u->menu_until = 0;
     u->beam = wrap360((float)(now % BEAM_TURN_MS) * (360.0f / BEAM_TURN_MS));
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
@@ -671,6 +696,7 @@ static void next_look(ui_t *u, ui_cmd_t *cmd)
 {
     u->cfg.look = (uint8_t)((u->cfg.look + 1) % LOOKS);
     u->panel_open = 0;
+    u->wx_page = WXP_DIAL;                             // the weather comes on its dial
     cmd->cfg = cmd->refetch = 1;                       // its map is another size, the square asks further out
     toast(u, LOOK_NAME[u->cfg.look]);
 }
@@ -686,7 +712,34 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
         if (hit == HIT_WIFI) { wifi_open(u, cmd); return; }
         if (hit == HIT_NEWS) { about_open(u); return; }
         if (hit == HIT_GEAR) { setup_open_radar(u); return; }
+        if (hit == HIT_ALERT) {                        // a warning's chip: the weather, where the panel says it in full
+            const int k = wx_alert_worst(&u->alert);
+            if (u->cfg.look == LOOK_WEATHER) {         // there already (the round glass has no panel): what it is, again
+                if (k == WXA_PRESSURE) u->wx_page = WXP_PRESSURE;
+                if (k >= 0) {
+                    char t[sizeof u->toast];
+                    alert_said(&u->alert, k, t, sizeof t);
+                    toast(u, t);
+                }
+                return;
+            }
+            u->cfg.look = LOOK_WEATHER;
+            u->wx_page = k == WXA_PRESSURE ? WXP_PRESSURE : WXP_DIAL;   // the pressure's warning: straight to its graph
+            u->panel_open = 0;
+            u->sel = 0;
+            cmd->cfg = cmd->refetch = 1;
+            toast(u, LOOK_NAME[LOOK_WEATHER]);
+            return;
+        }
+        if (hit == HIT_WXPAGE) { next_wx_page(u); return; }
         if (hit == HIT_SCOPE) {
+#if RADAR_ROUND
+            if (u->cfg.look == LOOK_WEATHER) {         // the round glass's dial or graph: the next page, and the row to leave by
+                next_wx_page(u);
+                u->menu_until = u->now + ROUND_MENU_MS;
+                return;
+            }
+#endif
             int i = scope_pick(u, x, y);
 #if RADAR_ROUND
             // round glass, no panel: a tap on nothing brings the HUE LIST SET row, another one hides it
@@ -706,7 +759,7 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
             if (square_look(u)) {                      // the square map's panel: in, or out again
                 u->panel_open ^= 1;
                 if (!u->panel_open) u->sel = 0;
-            } else {                                   // the radar's: what is shown goes, what is away comes
+            } else {                                   // the radar's and the weather's: what is shown goes, what is away comes
                 const uint8_t was = u->bare;
                 if (panel_shown(u)) {                  // kept, or there for the picked plane: away, and the plane let go
                     u->bare = 1;
@@ -858,7 +911,7 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
             u->t_long = 1;
             act(u, u->t_hit, 1, u->t_x0, u->t_y0, cmd);
         }
-        if (!u->t_moved && u->t_long == 1 && u->t_hit == HIT_NONE && now - u->t_since >= 4000u) {
+        if (!u->t_moved && u->t_long == 1 && (u->t_hit == HIT_NONE || u->t_hit == HIT_WXPAGE) && now - u->t_since >= 4000u) {
             u->t_long = 2;
             ui_start_calibration(u);                   // hold 4 s on nothing: align the touch again
         }
@@ -902,6 +955,9 @@ void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_
 void ui_button(ui_t *u, int ev, ui_cmd_t *cmd)
 {
     if (u->view == VIEW_CAL) { u->view = VIEW_MAIN; toast(u, "TOUCH SKIPPED"); return; }
+    /* the weather has no range and no planes to step through: a press turns its pages, the one way to them
+     * on a board without touch */
+    if (ev == 1 && u->view == VIEW_MAIN && u->cfg.look == LOOK_WEATHER) { next_wx_page(u); return; }
 #if !RADAR_HAS_TOUCH
     /* no touch (the RPi LCD): a press steps through the planes on the scope, nearest first, and
      * past the last one lets go. held: the next range */

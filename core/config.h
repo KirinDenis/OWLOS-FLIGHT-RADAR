@@ -165,6 +165,12 @@
                           RADAR_DISPLAY != DISPLAY_CROW50_800x480 && \
                           (!RADAR_OVERLAY || RADAR_OVERLAY_COLS))   // the Waveshare 7/7B: BOOT is GPIO0, a panel data line. the JC8012's is GPIO 35
 
+/* the screen's light turns down (SET's BACKLIGHT): a PWM pin, or a driver that dims it. not the RPi LCD
+ * (its light is wired to the power), the round board (a bit of its expander), the CrowPanel Advance 5.0
+ * (its own chip only turns it on) or e-paper */
+#define RADAR_HAS_DIM (!RADAR_EPAPER && RADAR_DISPLAY != DISPLAY_ILI9486_480x320 && \
+                       RADAR_DISPLAY != DISPLAY_GC9A01_240x240 && RADAR_DISPLAY != DISPLAY_CROWADV50_800x480)
+
 #define RADAR_NAME "OWLOS FLIGHTS"
 
 /* the board, as ABOUT says it */

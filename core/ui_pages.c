@@ -75,41 +75,55 @@ void list_draw(ui_t *u, canvas_t *cv)
 }
 
 /* --- setup: one row a setting, what it does under its name. the rows sit in tabs: how it looks,
- * what it shows and where from, the LED. the tabs are the bottom bar's buttons, BACK the last --- */
+ * what it shows and where from, the units, the radar's own, the LED. the tabs are the bottom bar's buttons,
+ * BACK the last --- */
 
-enum { S_RANGE, S_GROUND, S_WATCH, S_DIST, S_ALT, S_UP, S_FLIP, S_LABELS, S_THEME, S_LOOK, S_MAP,
+enum { S_RANGE, S_GROUND, S_WATCH, S_DIST, S_ALT, S_TEMP, S_PRES, S_WIND, S_RAIN,   /* the weather's units in WXU_* order */
+       S_UP, S_FLIP, S_BACKLIGHT, S_NIGHT, S_LABELS, S_THEME, S_LOOK, S_MAP,
        S_FL_LO, S_FL_HI, S_BLOCK, S_AUTOPILOT, S_VECTORS, S_BEAM, S_CLOCK, S_LOST, S_CONFLICT,
        S_SOURCE, S_SERVER, S_HOME, S_WIFI, S_HELP,
+       S_WX_STORM, S_WX_PRESSURE, S_WX_AIR, S_WX_RADIATION,   /* in the order of WXA_* (weather.h) */
 #if RADAR_HAS_LED
-       S_LED_SOS, S_LED_RANGE, S_LED_UP, S_LED_DOWN, S_LED_NEAR, S_LED_NEAR_KM, S_LED_NODATA, S_LED_LEVEL, S_LED_HOLD,
+       S_LED_SOS, S_LED_RANGE, S_LED_UP, S_LED_DOWN, S_LED_NEAR, S_LED_NEAR_KM, S_LED_NODATA, S_LED_WEATHER, S_LED_LEVEL, S_LED_HOLD,
        S_LED_TEST,
 #if RADAR_LED_RED_PIN
        S_LED_RED,
 #endif
 #endif
        S_TOUCH, S_ABOUT, S_ROWS };
+// a row's keys are HIT_SDEC, HIT_SINC, HIT_SBTN + its number: more rows than a range holds and a press lands on another
+_Static_assert(S_ROWS <= HIT_SINC - HIT_SDEC && S_ROWS <= HIT_SBTN - HIT_SINC && S_ROWS <= HIT_NET - HIT_SBTN,
+               "more SET rows than the HIT_ ranges in ui_int.h hold");
 enum { K_NUM, K_BTN, K_INFO };
-/* the tabs, in the order of the bar. the round glass's bar has no room for a fourth and it has no
- * gear: the radar's rows go under VIEW there */
+/* the tabs, in the order of the bar. the round glass's bar has no room for a third and it has no
+ * gear: the radar's rows and the units go under VIEW there */
 #if RADAR_ROUND
-enum { T_VIEW, T_DATA, T_LED, T_RADAR = T_VIEW };
+enum { T_VIEW, T_DATA, T_LED, T_RADAR = T_VIEW, T_UNITS = T_VIEW };
 #define TABS 2
 #else
-enum { T_VIEW, T_DATA, T_RADAR, T_LED };
-#define TABS (RADAR_HAS_LED ? 4 : 3)
+enum { T_VIEW, T_DATA, T_UNITS, T_RADAR, T_LED };
+#define TABS (RADAR_HAS_LED ? 5 : 4)
 #endif
 
 static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = {
     { "RANGE",       "or drag inside the scope",     K_NUM, T_VIEW },
     { "ON GROUND",   "planes parked or taxiing",     K_BTN, T_DATA },
     { "WATCH",       "",                             UI_WIFI_PAGE ? K_BTN : K_INFO, T_DATA },   /* planes to follow */
-    { "DISTANCE",    "km, nautical miles or miles",  K_BTN, T_VIEW },
-    { "ALTITUDE",    "feet or metres",               K_BTN, T_VIEW },
+    { "DISTANCE",    "km, nautical miles or miles",  K_BTN, T_UNITS },
+    { "ALTITUDE",    "feet or metres",               K_BTN, T_UNITS },
+    /* the weather's units (ui.h TEMP_* ...): AUTO is home's country's own; the page's radar has no forecast */
+    { "TEMPERATURE", "C or F, AUTO: home's country", K_BTN, RADAR_WEB ? -1 : T_UNITS },
+    { "PRESSURE",    "hPa, mmHg at home's height, inHg", K_BTN, RADAR_WEB ? -1 : T_UNITS },
+    { "WIND",        "km/h, m/s, mph or knots",      K_BTN, RADAR_WEB ? -1 : T_UNITS },
+    { "RAIN",        "millimetres or inches",        K_BTN, RADAR_WEB ? -1 : T_UNITS },
     { "MAP UP",      "or drag the scope's rim",      K_NUM, T_VIEW },
     { "SCREEN",      "mounted upside down?",         K_BTN, T_VIEW },
+    /* the screen's light: only where it turns down, and the site's radar has none */
+    { "BACKLIGHT",   "how bright the screen is",     K_BTN, RADAR_HAS_DIM && !RADAR_WEB ? T_VIEW : -1 },
+    { "NIGHT",       "dimmer from dusk till dawn",   K_BTN, RADAR_HAS_DIM && !RADAR_WEB ? T_VIEW : -1 },
     { "LABELS",      "names beside the planes",      K_BTN, T_VIEW },
     { "COLOURS",     "five colour themes",           K_BTN, T_VIEW },
-    { "LOOK",        "radar, flat map, map's colours", K_BTN, T_VIEW },
+    { "LOOK",        "radar, two maps, the weather", K_BTN, T_VIEW },
     { "MAP",         "OpenStreetMap under the scope", K_BTN, T_VIEW },
     { "LOWEST",      "planes under this are hidden", K_NUM, T_RADAR },
     { "HIGHEST",     "planes over this are hidden",  K_NUM, T_RADAR },
@@ -126,6 +140,12 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "WIFI",        "",                             UI_WIFI_PAGE ? K_BTN : K_INFO, T_DATA },
     /* the site's map of boards: country and board type, only when on. the page's radar has no board to count */
     { "COUNT ME",    "country, board: the site's map", K_BTN, RADAR_WEB ? -1 : T_DATA },
+    /* the weather's warnings on every look (weather.h); the page's radar has no forecast. the round
+     * glass's row has twelve letters before its switch: the pressure and the radiation by their units */
+    { "STORM ALERT", "gusts from 75 km/h, thunder",  K_BTN, RADAR_WEB ? -1 : T_DATA },
+    { RADAR_ROUND ? "HPA ALERT" : "PRESSURE ALERT", "6 hPa up or down in 12 hours", K_BTN, RADAR_WEB ? -1 : T_DATA },
+    { "AIR ALERT",   "the air poor or worse",        K_BTN, RADAR_WEB ? -1 : T_DATA },
+    { RADAR_ROUND ? "GAMMA ALERT" : "RADIATION ALERT", "over 0.3 \xC2\xB5Sv/h near home", K_BTN, RADAR_WEB ? -1 : T_DATA },
 #if RADAR_HAS_LED
     /* the LED on the back (core/light.h): each event on or off, in the order they win */
     { "SOS",         "7500 7600 7700 round home: red", K_BTN, T_LED },
@@ -135,6 +155,7 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "ANY NEAR",    "any plane in the air near: white", K_BTN, T_LED },
     { "HOW NEAR",    "from home, for ANY NEAR",      K_BTN, T_LED },
     { "NO DATA",     "no WiFi or no answer: amber",  K_BTN, T_LED },
+    { "WEATHER",     "a weather warning: yellow",    K_BTN, T_LED },
     { "BRIGHTNESS",  "low for the night",            K_BTN, T_LED },
     { "HOW LONG",    "till touched, 10 s, while it lasts", K_BTN, T_LED },
     { "TEST",        "red, green, blue in turn",     K_BTN, T_LED },
@@ -192,6 +213,7 @@ static int led_event(int i)
     case S_LED_DOWN:   return LIGHT_DOWN;
     case S_LED_NEAR:   return LIGHT_NEAR;
     case S_LED_NODATA: return LIGHT_NODATA;
+    case S_LED_WEATHER: return LIGHT_WEATHER;
     default:           return -1;
     }
 }
@@ -206,8 +228,14 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_GROUND: snprintf(b, (size_t)sz, c->ground ? "SHOW" : "HIDE"); break;
     case S_DIST:   snprintf(b, (size_t)sz, "%s", unit_name(c->dist_unit)); break;
     case S_ALT:    snprintf(b, (size_t)sz, c->alt_unit ? "M" : "FT"); break;
+    case S_TEMP: case S_PRES: case S_WIND: case S_RAIN: wx_unit_text(u, WXU_TEMP + (i - S_TEMP), b, sz); break;
     case S_UP:     if (c->up) snprintf(b, (size_t)sz, "%03d\xC2\xB0", c->up); else snprintf(b, (size_t)sz, "NORTH"); break;
     case S_FLIP:   snprintf(b, (size_t)sz, c->flip ? "FLIPPED" : "NORMAL"); break;
+    case S_BACKLIGHT: snprintf(b, (size_t)sz, "%d%%", ui_backlight_pct(u->backlight)); break;
+    case S_NIGHT:
+        if (u->night) snprintf(b, (size_t)sz, "%d%%", ui_backlight_pct(u->night));
+        else snprintf(b, (size_t)sz, "OFF");
+        break;
     case S_LABELS: snprintf(b, (size_t)sz, c->labels ? "PICKED" : "ALL"); break;
     case S_THEME:  snprintf(b, (size_t)sz, "%s", UI_THEME[u->theme].name); break;
     case S_LOOK:   snprintf(b, (size_t)sz, "%s", LOOK_NAME[c->look < LOOKS ? c->look : 0]); break;
@@ -233,9 +261,12 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_HOME:   snprintf(b, (size_t)sz, "CHANGE"); break;
     case S_WATCH:  snprintf(b, (size_t)sz, u->watch.n ? "CHANGE" : "SET UP"); break;
     case S_HELP:   snprintf(b, (size_t)sz, u->help == 1 ? "ON" : "OFF"); break;
+    case S_WX_STORM: case S_WX_PRESSURE: case S_WX_AIR: case S_WX_RADIATION:
+        snprintf(b, (size_t)sz, u->alerts & (1u << (i - S_WX_STORM)) ? "ON" : "OFF");
+        break;
     case S_ABOUT:  if (ui_update(u)) update_text(u, b, sz, 1); else snprintf(b, (size_t)sz, "OPEN"); break;
 #if RADAR_HAS_LED
-    case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA:
+    case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA: case S_LED_WEATHER:
         snprintf(b, (size_t)sz, u->light.on[led_event(i)] ? "ON" : "OFF");
         break;
     case S_LED_NEAR_KM: snprintf(b, (size_t)sz, "%d %s", light_near_units(&u->light), unit_name(c->dist_unit)); break;
@@ -335,7 +366,7 @@ void setup_draw(ui_t *u, canvas_t *cv)
     page_header(cv, "SETUP", RADAR_ROUND ? NULL : "DRAG TO SCROLL", C_FOCUS);
     static const char *const L[] = { "VIEW", "DATA",
 #if !RADAR_ROUND
-                                     "RADAR",
+                                     "UNITS", "RADAR",
 #endif
 #if RADAR_HAS_LED
                                      "LED",
@@ -393,17 +424,29 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
         break;
     }
     case S_ALT:    c->alt_unit ^= 1; break;
-    case S_UP:     c->up = (int16_t)(((c->up + dir * 15) % 360 + 360) % 360); break;
+    case S_TEMP: case S_PRES: case S_WIND: case S_RAIN:   // the next unit, AUTO after the last: its own setting, not fr_cfg_t
+        wx_unit_next(u, WXU_TEMP + (i - S_TEMP));
+        cmd->units = 1;
+        return;
+    case S_UP:     c->up =(int16_t)(((c->up + dir * 15) % 360 + 360) % 360); break;
     case S_FLIP:
         c->flip ^= 1;
         toast(u, c->flip ? "SCREEN FLIPPED" : "SCREEN NORMAL");
         break;
+    case S_BACKLIGHT:                                  // the next step down, from the dimmest back to full
+        u->backlight = (uint8_t)((u->backlight + 1) % UI_BACKLIGHTS);
+        cmd->backlight = 1;                            // its own setting, not fr_cfg_t
+        return;
+    case S_NIGHT:                                      // off, then the steps under full, then off again
+        u->night = (uint8_t)((u->night + 1) % UI_BACKLIGHTS);
+        cmd->night = 1;
+        return;
     case S_LABELS: c->labels ^= 1; break;
     case S_THEME:
         c->theme = (uint8_t)((u->theme + 1) % UI_THEMES);
         ui_set_theme(u, c->theme);
         break;
-    case S_LOOK:   c->look = (uint8_t)((c->look + 1) % LOOKS); cmd->refetch = 1; break;
+    case S_LOOK:   c->look = (uint8_t)((c->look + 1) % LOOKS); u->wx_page = WXP_DIAL; cmd->refetch = 1; break;
     case S_MAP:    c->map ^= 1; break;
     case S_FL_LO:                                      // the two never cross
         u->opt.fl_lo = fl_step(u->opt.fl_lo, dir, 0);
@@ -437,9 +480,13 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
         toast(u, u->help == 1 ? "COUNTED: THANK YOU" : "NOT COUNTED");
         cmd->help = 1;
         return;
+    case S_WX_STORM: case S_WX_PRESSURE: case S_WX_AIR: case S_WX_RADIATION:
+        u->alerts ^= (uint8_t)(1u << (i - S_WX_STORM));
+        cmd->alerts = 1;                               // its own setting, not fr_cfg_t
+        return;
     case S_ABOUT:  about_open(u); return;
 #if RADAR_HAS_LED
-    case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA:
+    case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA: case S_LED_WEATHER:
         u->light.on[led_event(i)] ^= 1;
         cmd->light = 1;                                // the LED's own settings, not fr_cfg_t
         return;

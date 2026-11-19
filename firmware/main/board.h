@@ -33,6 +33,11 @@
 #define LCD_SPI_HZ    (40 * 1000 * 1000)   // 80 MHz APB / 2. ViewOwl asks for 50, the divider ends up here anyway
 #define LCD_MADCTL    0xE8      // landscape for this panel: MY|MX|MV|BGR, same as ViewOwl
 #define DISP_STRIP    24        // rows a strip: 240 / 24 = 10 strips
+/* the second core draws the lower half of every strip while this one draws the upper (main.c). a
+ * strip of its own and twice the DMA buffers, as the 3.5" has them, would take ~60 KB this board
+ * does not have to spare: this way it costs its stack */
+#define DISP_HELPER   1
+#define DISP_HELPER_HALF 1
 /* XPT2046 has its own pins here, we bit-bang it, cheap and the LCD bus stays free.
  * 36 and 39 are input only pins */
 #define TOUCH_XPT_BITBANG 1
@@ -68,9 +73,13 @@
 #define PIN_LCD_BL    27
 #define LCD_SPI_HZ    (40 * 1000 * 1000)
 #define LCD_MADCTL    0xE8      // MY|MX|MV|BGR, ViewOwl lcd_init.c
-#define DISP_STRIP    8         // 480 wide and no PSRAM: low strips, the map's picture needs the heap
-/* twice the 2.8"'s pixels on the same chip: in the radar look the second core draws every other
- * strip (main.c). the square map leaves it be, there the SPI is what it waits for */
+/* 480 wide and no PSRAM: low strips, the map's picture needs the heap. 6, not 8, since the weather
+ * came (2026-11-18): 8 left the tile reader too little room on the square map after a while, and
+ * each row less is 3.8 KB less for the strip and its DMA buffers, and as much less for the second core */
+#define DISP_STRIP    6
+/* twice the 2.8"'s pixels on the same chip: in the radar and the weather looks, and on their pages,
+ * the second core draws every other strip (main.c). the square maps leave it be: their picture wants
+ * the memory, and there the SPI is what a frame waits for */
 #define DISP_HELPER   1
 #define TOUCH_XPT_SPI 1
 #define PIN_T_CS      33
@@ -96,7 +105,7 @@
 #define PIN_LCD_RST    4
 #define LCD_SPI_HZ    (20 * 1000 * 1000)   // the 74HC shift registers on the board top out here
 #define LCD_MADCTL    0x28      // MV|BGR, ViewOwl's sweep found this one
-#define DISP_STRIP    8         // as the 3.5" CYD: the map's picture needs the heap
+#define DISP_STRIP    8         // low, the map's picture needs the heap. the 3.5" went to 6 with the weather: not run here with it yet
 #define PIN_BUTTON     0
 
 #elif RADAR_DISPLAY == DISPLAY_GC9A01_240x240
@@ -459,6 +468,9 @@
 #endif
 #ifndef DISP_HELPER
 #define DISP_HELPER 0
+#endif
+#ifndef DISP_HELPER_HALF
+#define DISP_HELPER_HALF 0      // 0: the second core's strips are its own, under this core's (main.c)
 #endif
 
 // raw touch units across the screen, for the sanity check of a stored alignment

@@ -11,7 +11,12 @@ static const struct { uint8_t r, g, b; uint16_t on_ms, period_ms; } LOOK[LIGHT_E
     [LIGHT_DOWN]   = { 0, 255, 255, 700, 1400 },     // cyan
     [LIGHT_NEAR]   = { 255, 255, 255, 300, 2000 },   // white, a short blink now and then
     [LIGHT_NODATA] = { 255, 80, 0, 1000, 1000 },     // amber
+    [LIGHT_WEATHER] = { 255, 170, 0, 1000, 2000 },   // yellow, slow: no data's amber does not blink
 };
+
+/* which wins when several are lit: an emergency, a weather warning, the watched planes, any plane
+ * near, no data last */
+static const uint8_t ORDER[LIGHT_EVENTS] = { LIGHT_SOS, LIGHT_WEATHER, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA };
 
 static const uint8_t LEVEL[LIGHT_LEVELS] = { 12, 64, 255 };   // the CYD's LED is bright: low is for the night
 static const uint8_t NEAR_UNITS[LIGHT_NEARS] = { 1, 2, 5, 10 };
@@ -21,7 +26,7 @@ void light_defaults(light_cfg_t *c)
 {
     memset(c, 0, sizeof *c);
     c->version = LIGHT_CFG_VERSION;
-    c->on[LIGHT_SOS] = c->on[LIGHT_RANGE] = c->on[LIGHT_UP] = c->on[LIGHT_DOWN] = 1;
+    c->on[LIGHT_SOS] = c->on[LIGHT_RANGE] = c->on[LIGHT_UP] = c->on[LIGHT_DOWN] = c->on[LIGHT_WEATHER] = 1;
     // any plane near and no data: off. next to an airport the one is on all day, a fresh board has the other
     c->level = LIGHT_MID;
     c->hold = LIGHT_TOUCH;
@@ -95,7 +100,8 @@ void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t 
         rgb[(now - l->test) / 1500u] = (uint8_t)k;
         return;
     }
-    for (int ev = 0; ev < LIGHT_EVENTS; ev++) {
+    for (int k = 0; k < LIGHT_EVENTS; k++) {
+        const int ev = ORDER[k];
         if (!lit(l, c, ev, now)) continue;
         if ((now - l->since[ev]) % LOOK[ev].period_ms >= LOOK[ev].on_ms) return;   // the dark part of its blink
         rgb[0] = (uint8_t)(LOOK[ev].r * k / 255);

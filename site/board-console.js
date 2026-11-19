@@ -136,7 +136,7 @@ export function boardCommands(api) {
       },
     },
     {
-      name: 'set', group: 'boards', summary: 'a setting: theme, look, range, vectors, clock, block, conflict, flip', usage: 'set NAME=VALUE [--all] [--board NAME]', where: 'here',
+      name: 'set', group: 'boards', summary: 'a setting: theme, look, range, vectors, clock, block, conflict, flip, backlight, night, alerts, temp, pressure, wind, rain, wxpage', usage: 'set NAME=VALUE [--all] [--board NAME]', where: 'here',
       options: on, valued: ['board'], effect: 'writes', data: '{ name, value, boards }',
       complete: (word) => api.settings.filter((s) => s.startsWith(word)),
       run(ctx) {

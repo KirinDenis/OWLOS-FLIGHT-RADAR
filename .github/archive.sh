@@ -5,9 +5,14 @@
 # kept them from the workflow runs that built them (archive-seed.txt). nothing is built again.
 # the list only grows: a version the site has and this run can't fetch stops the run before it
 # publishes, and so does a lower number than one the site has
-#   archive.sh <fw> <version> <version text> <site url> <seed list>
-# <fw> holds a folder a board, as the firmware job leaves them, their manifests made. needs curl,
-# and gh (GH_TOKEN, GH_REPO, actions: read) only while a seed is still to be fetched
+# a beta (<beta> 1, "(beta)" on CHANGES.md's first "## " line) goes beside the stable: its build in
+# fw/<version>/<board>/, the newest stable left in fw/<board>/ where the boards and the older page look,
+# and versions.json says it apart, as "beta", after the list. one beta at a time: a new one replaces it,
+# a stable run ends it. it needs a number above the stable's
+#   archive.sh <fw> <version> <version text> <site url> <seed list> [beta]
+# <fw> holds a folder a board, as the firmware job leaves them, their manifests made (a beta's in
+# <fw>/<version>/). needs curl, and gh (GH_TOKEN, GH_REPO, actions: read) only while a seed is still to
+# be fetched
 #
 # GitHub releases were the first try: the workflow's token may not make a tag on this repository's
 # commits (403 "Resource not accessible by integration", each of them changes .github/workflows),
@@ -18,6 +23,7 @@ VER="$2"
 TEXT="$3"
 URL="${4%/}"
 SEEDS="$5"
+BETA="${6:-0}"
 FILES="bootloader.bin partition-table.bin owlos-flight-radar.bin flash_args"
 
 newer() {   # 1 if version $1 is above $2
@@ -31,9 +37,11 @@ live=$(mktemp)
 # (curl's --retry: 408, 429, 500, 502, 503, 504 and timeouts). an answer that stays bad still stops the run
 RETRY="--retry 4 --retry-delay 5"
 code=$(curl -sS $RETRY -o "$live.json" -w '%{http_code}' "$URL/fw/versions.json?run=${GITHUB_RUN_ID:-0}")
+livebeta=""                                      # the beta the site has, "": none
 case "$code" in
-  200) sed -n 's/.*"version": "\([^"]*\)", "text": "\([^"]*\)", "dir": "\([^"]*\)", "boards": \[ \(.*\) \].*/\1|\2|\3|\4/p' \
-         "$live.json" > "$live" ;;
+  200) grep -v '"beta":' "$live.json" |
+         sed -n 's/.*"version": "\([^"]*\)", "text": "\([^"]*\)", "dir": "\([^"]*\)", "boards": \[ \(.*\) \].*/\1|\2|\3|\4/p' > "$live"
+       livebeta=$(sed -n 's/.*"beta": { "version": "\([^"]*\)".*/\1/p' "$live.json") ;;
   404) echo "the site keeps no versions yet"
        : > "$live" ;;
   *)   echo "the site's fw/versions.json answered $code: stopping, or the versions it keeps would be lost" >&2
@@ -41,30 +49,60 @@ case "$code" in
 esac
 
 kept=$(mktemp)                                   # version|text of each older one, as they get here
+stable=""                                        # a beta's run: version|text of the stable left in fw/
 while IFS='|' read -r v text dir boards <&3; do
+  if [ "$BETA" = 1 ] && ! newer "$VER" "$v"; then
+    echo "CHANGES.md says beta $VER, the site has $v: a beta needs a number above the stable" >&2
+    exit 1
+  fi
   if newer "$v" "$VER"; then
     echo "CHANGES.md says $VER, the site has $v: a new version needs a higher number" >&2
     exit 1
   fi
   [ "$v" = "$VER" ] && continue                  # the same number: this build is that version now
+  to="$FW/$v"                                    # an older one, from now on
+  if [ "$BETA" = 1 ] && [ "$dir" = fw ]; then
+    to="$FW"                                     # the stable, where it was: a beta goes beside it
+  fi
   for b in $(echo "$boards" | tr -d '",'); do
-    mkdir -p "$FW/$v/$b"
+    mkdir -p "$to/$b"
     for f in $FILES; do
-      code=$(curl -sS $RETRY -o "$FW/$v/$b/$f" -w '%{http_code}' "$URL/$dir/$b/$f?run=${GITHUB_RUN_ID:-0}")
+      code=$(curl -sS $RETRY -o "$to/$b/$f" -w '%{http_code}' "$URL/$dir/$b/$f?run=${GITHUB_RUN_ID:-0}")
       if [ "$code" != 200 ]; then
         echo "$URL/$dir/$b/$f answered $code: stopping, or $v would be lost" >&2
         exit 1
       fi
     done
   done
-  echo "$v|$text" >> "$kept"
+  if [ "$to" = "$FW" ]; then
+    stable="$v|$text"
+  else
+    echo "$v|$text" >> "$kept"
+  fi
   echo "$v: $(echo "$boards" | tr -d '",'), from the site"
 done 3< "$live"
+
+# the site's beta: a newer one stops a beta's run, any other run ends it. its files are not kept
+if [ -n "$livebeta" ]; then
+  if [ "$BETA" = 1 ] && newer "$livebeta" "$VER"; then
+    echo "CHANGES.md says beta $VER, the site has beta $livebeta: a new beta needs a higher number" >&2
+    exit 1
+  fi
+  if [ "$BETA" = 1 ]; then
+    [ "$livebeta" = "$VER" ] || echo "beta $livebeta: replaced by $VER"
+  else
+    echo "beta $livebeta: ends, CHANGES.md opens with a stable version"
+  fi
+fi
+if [ "$BETA" = 1 ] && [ -z "$stable" ]; then
+  echo "beta $VER: the site has no stable version to keep beside it" >&2
+  exit 1
+fi
 
 # the versions from before, from their runs, while the site does not have them yet
 while read -r v run text <&3; do
   case "$v" in ""|\#*) continue ;; esac
-  if [ "$v" = "$VER" ] || grep -q "^$v|" "$kept"; then
+  if [ "$v" = "$VER" ] || [ "$v" = "${stable%%|*}" ] || grep -q "^$v|" "$kept"; then
     continue
   fi
   tmp=$(mktemp -d)
@@ -90,10 +128,19 @@ entry() {   # <version> <text> <dir as the page has it> <dir here>
   printf '    { "version": "%s", "text": "%s", "dir": "%s", "boards": [ %s ] }' "$1" "$2" "$3" "$boards"
 }
 
-list=$(entry "$VER" "$TEXT" "fw" "$FW")
+if [ "$BETA" = 1 ]; then                         # the stable stays the first, with its own text
+  bash .github/make-manifests.sh "$FW" "${stable#*|}" > /dev/null
+  list=$(entry "${stable%%|*}" "${stable#*|}" "fw" "$FW")
+else
+  list=$(entry "$VER" "$TEXT" "fw" "$FW")
+fi
 while IFS='|' read -r v text; do
   bash .github/make-manifests.sh "$FW/$v" "$text" > /dev/null
   list="$list,"$'\n'"$(entry "$v" "$text" "fw/$v" "$FW/$v")"
 done < <(sort -t '|' -k 1,1 -V -r "$kept")
-printf '{\n  "versions": [\n%s\n  ]\n}\n' "$list" > "$FW/versions.json"
+beta=""                                          # a line of its own after the list: the older page reads the list alone
+if [ "$BETA" = 1 ]; then
+  beta=","$'\n'"  \"beta\": $(entry "$VER" "$TEXT" "fw/$VER" "$FW/$VER" | sed 's/^ *//')"
+fi
+printf '{\n  "versions": [\n%s\n  ]%s\n}\n' "$list" "$beta" > "$FW/versions.json"
 cat "$FW/versions.json"

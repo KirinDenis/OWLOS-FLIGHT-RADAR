@@ -30,7 +30,9 @@ void        disp_flip(int on);
 void        disp_wait_idle(void);
 /* DISP_HELPER boards (lcd_spi.c): the second core packs its strip under the next one
  * (disp_pack_under), then both go in one transfer (disp_strip2 with its rows); the DMA buffers
- * sized for that (rows = 2 * DISP_STRIP) or back (DISP_STRIP), 0: no memory */
+ * sized for that (rows = 2 * DISP_STRIP) or back (DISP_STRIP), 0: no memory. DISP_HELPER_HALF
+ * boards use none of the three: there the second core draws the lower half of this core's strip,
+ * and the strip goes out as any other */
 #if DISP_LCD_DSI
 /* the Tab5 (lcd_dsi.c): the board package's I2C bus and the power switches on its IO expanders,
  * the radio's among them. before anything asks for the WiFi, from app_main */

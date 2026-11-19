@@ -153,6 +153,43 @@ static void press_bar(int i, int n)
     tap(BAR_L + 4 + i * (w + 4) + w / 2, BAR_Y + BAR_H / 2);
 }
 
+/* a stormy day for the weather's warnings: a front comes in the evening, the pressure falls 11 hPa
+ * ahead of it (red), the gusts reach 85 km/h (amber). utc is the hour it begins at, home an hour
+ * ahead of UTC */
+static void stormy_day(weather_t *w, uint32_t utc)
+{
+    memset(w, 0, sizeof *w);
+    w->at = utc - utc % 3600u;
+    w->updated = utc;
+    w->utc_min = 60;
+    for (int i = 0; i < WX_HOURS; i++) {
+        wx_hour_t *h = &w->hour[i];
+        const int front = i >= 6 && i <= 10;
+        h->t10 = (int16_t)(90 + 30 * (i < 6 ? i : 12 - i) / 6);
+        h->kind = front ? WX_RAIN : i < 6 ? WX_CLOUDY : WX_PARTLY;
+        h->cloud = (uint8_t)(front ? 100 : 70);
+        h->rain10 = (uint16_t)(front ? 20 + 10 * (i - 6) : 0);
+        h->hpa10 = (uint16_t)(10080 - (i <= 8 ? 14 * i : 112 - 4 * (i - 8)));
+        h->wind_from2 = 120;
+        h->wind_kmh = (uint8_t)(front ? 45 : 20);
+        h->gust_kmh = (uint8_t)(i == 7 ? 85 : front ? 70 : 32);
+        h->uv10 = 0;
+        h->aqi = 25;
+    }
+    w->now_t10 = w->hour[0].t10;
+    w->feels10 = (int16_t)(w->now_t10 - 30);
+    w->now_kind = WX_CLOUDY;
+    w->humidity = 80;
+    w->now_hpa10 = 10080;
+    w->wind_from = 240;
+    w->wind_kmh = 20;
+    w->gust_kmh = 32;
+    w->aqi = 25;
+    w->pm25_10 = 60;
+    static const wx_day_t DAYS[WX_DAYS] = { { 80, 30, WX_RAIN, 3 }, { 60, 10, WX_CLOUDY, 4 }, { 50, -10, WX_SNOW, 5 }, { 70, 0, WX_CLEAR, 6 } };
+    memcpy(w->day, DAYS, sizeof DAYS);
+}
+
 int main(int argc, char **argv)
 {
     g_dir = argc > 1 ? argv[1] : ".";
@@ -430,6 +467,46 @@ int main(int argc, char **argv)
     shot("41-new-version-map");
     ui.cfg.look = LOOK_RADAR;
 #endif
+
+    /* the weather's warnings: a stormy day. the toast when they come, the chip on every look (the note
+     * of the newer version under it), a tap on the chip opens the WEATHER look, whose panel says them */
+    {
+        static weather_t wx;
+        const uint32_t utc = 1763481600u;            // 16:00 UTC, 17:00 at home: the front comes in the evening
+        stormy_day(&wx, utc);
+        ui.wx = &wx;
+        ui.net.utc = utc + 600u;
+        fly(1);
+        shot("50-alert-toast");
+        fly(6);
+        shot("51-alert-radar");
+#if !RADAR_ROUND
+        ui.cfg.look = LOOK_MAP;
+        fly(2);
+        shot("52-alert-map");
+        ui.cfg.look = LOOK_CLASSIC;
+        shot("53-alert-classic");
+        ui.cfg.look = LOOK_RADAR;
+        ui.bare = 1;                                 // the radar without its panel: the note under the chip
+        shot("54-alert-bare");
+        ui.bare = 0;
+#endif
+        note_box_t ab;
+        if (alert_box(&ui, &ab)) tap(ab.x + ab.w / 2, ab.y + ab.h / 2);
+        printf("the warning's chip: %s\n", ui.cfg.look == LOOK_WEATHER ? "WEATHER" : "missed");
+        for (int k = 0; k < 7; k++) {                // the beam's first turn draws the day in: frames on the way
+            fly(1);
+            render();
+        }
+        shot("55-alert-weather");
+        ui.alerts = WXA_ALL & ~(1u << WXA_PRESSURE); // SET's PRESSURE ALERT off: the storm alone
+        fly(1);
+        shot("56-alert-weather-storm");
+        ui.alerts = WXA_ALL;
+        ui.cfg.look = LOOK_RADAR;
+        ui.wx = NULL;
+        fly(1);
+    }
     ui.newest[0] = 0;
 
     ui_start_calibration(&ui);

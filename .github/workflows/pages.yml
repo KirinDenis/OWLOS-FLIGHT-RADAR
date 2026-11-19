@@ -165,24 +165,48 @@ jobs:
 
       - name: Put the page together
         # the version is CHANGES.md's first "## " line, as the firmware takes it (firmware/CMakeLists.txt).
-        # version.json is what the boards ask for, CHANGES.md the history the page shows. the older
-        # versions go to fw/<version>/, fw/versions.json lists them all for the page
+        # "(beta)" on it makes it a beta: its build goes to fw/<version>/ beside the stable, which stays in
+        # fw/ (archive.sh). version.json is what the boards ask for: "version" the stable, which every board
+        # reads, "beta" the beta, which only a beta board follows. CHANGES.md is the history the page shows.
+        # the older versions go to fw/<version>/, fw/versions.json lists them all for the page
         env:
           SITE: ${{ steps.pages.outputs.base_url }}
         run: |
-          VER=$(sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' CHANGES.md | head -n 1)
+          HEAD=$(grep -m 1 '^## ' CHANGES.md || true)
+          VER=$(printf '%s\n' "$HEAD" | sed -n 's/^## \([0-9][0-9.]*\).*/\1/p')
           [ -n "$VER" ] || { echo "no version in CHANGES.md: its first '## ' line should be one" >&2; exit 1; }
-          VERSION="$VER, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
+          BETA=0
+          WORD=""
+          case "$HEAD" in *'(beta)'*) BETA=1; WORD=' beta' ;; esac
+          VERSION="$VER$WORD, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
           cp -r site/. public/
           cp CHANGES.md public/
           # where boards are counted for the map of boards (server/): server/public-url.txt, empty = nowhere.
           # the page and the boards both read it here, so the counting starts and stops with this file
           STATS=$(tr -d ' \r\n' < server/public-url.txt 2>/dev/null || true)
-          printf '{"version":"%s","stats":"%s"}\n' "$VER" "$STATS" > public/version.json
           mkdir -p public/shots && cp -r shots/. public/shots/
-          bash .github/make-manifests.sh public/fw "$VERSION"
-          bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" .github/archive-seed.txt
-          sed -i "s|@VERSION@|$VERSION|g" public/index.html public/previous/index.html
+          if [ "$BETA" = 1 ]; then                 # this run's boards go beside the stable, not over it
+            mkdir -p "public/fw/$VER"
+            for d in public/fw/*/; do
+              if [ -f "$d/flash_args" ]; then
+                mv "$d" "public/fw/$VER/$(basename "$d")"
+              fi
+            done
+            bash .github/make-manifests.sh "public/fw/$VER" "$VERSION"
+          else
+            bash .github/make-manifests.sh public/fw "$VERSION"
+          fi
+          bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" .github/archive-seed.txt "$BETA"
+          # the stable is the list's first, as archive.sh wrote it: a beta's run did not build it
+          STABLE=$(grep -v '"beta":' public/fw/versions.json | sed -n 's/.*"version": "\([^"]*\)", "text": "\([^"]*\)".*/\1|\2/p' | head -n 1)
+          [ -n "$STABLE" ] || { echo "fw/versions.json has no stable version" >&2; exit 1; }
+          BETA_VER=""
+          if [ "$BETA" = 1 ]; then
+            BETA_VER="$VER"
+          fi
+          printf '{"version":"%s","beta":"%s","stats":"%s"}\n' "${STABLE%%|*}" "$BETA_VER" "$STATS" > public/version.json
+          cat public/version.json
+          sed -i "s|@VERSION@|${STABLE#*|}|g" public/index.html public/previous/index.html
           find public -type f | sort
 
       # a second copy of every version, should the site ever lose them: each run's for 90 days

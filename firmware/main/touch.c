@@ -203,8 +203,9 @@ int tp_read(int *rx, int *ry)
     if (s_gt) return gt_read(rx, ry);
 #endif
     static uint32_t n;
+    static int was;                                  // the last read of the chip said pressed
     int idle = s_irq && gpio_get_level(PIN_T_IRQ);
-    if (idle && ++n % 20) return 0;                  // not pressed, says the pin. every 20th: ask anyway
+    if (idle && !was && ++n % 20) return 0;          // not pressed, says the pin. every 20th, and after a press read: ask anyway
     chip_select(1);
     int z1 = xfer(0xB1), z2 = xfer(0xC1);
     int z = z1 + 4095 - z2;
@@ -219,11 +220,16 @@ int tp_read(int *rx, int *ry)
     }
     xfer(0xD0);                                  // power down, pen interrupt on
     chip_select(0);
-    if (pressed && idle) {
+    /* a press counts once two reads in a row say it, 15 ms later than one would. one read alone was the chip's
+     * noise: now and then after a restart it said a press at the 3.5"'s look button, and the look went one on
+     * (four times in a day), or it took the pen interrupt for a liar and slowed every frame from then on */
+    const int sure = pressed && was;
+    was = pressed;
+    if (sure && idle) {
         s_irq = 0;
         ESP_LOGW(TAG, "a press the pen interrupt did not show: every sample asks the chip from now on");
     }
-    return pressed;
+    return sure;
 }
 
 #elif TOUCH_GT911

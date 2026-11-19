@@ -72,11 +72,11 @@ export async function detect(port, say) {
   }
 }
 
-async function parts(build) {
-  const manifest = await (await fetch(`fw/${build}/manifest.json`)).json();
+async function parts(dir) {
+  const manifest = await (await fetch(`${dir}/manifest.json`)).json();
   const list = manifest.builds[0].parts;
   return Promise.all(list.map(async (p) => {
-    const answer = await fetch(`fw/${build}/${p.path}`);
+    const answer = await fetch(`${dir}/${p.path}`);
     if (!answer.ok) {
       throw new Error(`${p.path}: the site answered ${answer.status}`);
     }
@@ -84,9 +84,10 @@ async function parts(build) {
   }));
 }
 
-/* erase: everything goes, for a board that had something else on it. settings stay without it */
-export async function flash(port, build, erase, progress, say) {
-  const fileArray = await parts(build);
+/* dir: the board's folder of the version, fw/<board> for the stable, fw/<version>/<board> for the beta.
+ * erase: everything goes, for a board that had something else on it. settings stay without it */
+export async function flash(port, dir, erase, progress, say) {
+  const fileArray = await parts(dir);
   const total = fileArray.reduce((sum, f) => sum + f.data.length, 0);
   const { transport, esp } = await loader(port, say);
   try {

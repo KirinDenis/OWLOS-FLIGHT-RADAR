@@ -4,8 +4,11 @@
  * finger, and it fetches the map's tiles itself: this file only hands things across.
  * the 5" layout, 800x480. a demo sky till a board is connected, then the board's planes: it sends
  * them over the serial port in the free networks' own words, this reads them with sky_read.
+ * the WEATHER look's forecast the page asks Open-Meteo for, with the questions the board asks, and this
+ * reads the answers with the board's own reader (wx_parse.c)
  */
 #include <emscripten.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +16,7 @@
 #include "ui_int.h"
 #include "demo.h"
 #include "map.h"
+#include "wx_parse.h"
 
 #define STRIP 48
 #define ANSWER_MS 5000u                                /* an answer every 5 s, like the board asks */
@@ -28,7 +32,9 @@ static int        s_planes;                            /* in the answer coming i
 static int        s_changed;                           /* what a finger here changed: TWIN_* */
 static uint32_t   s_sel_told;                          /* the picked plane the board knows of */
 
-enum { TWIN_CFG = 1, TWIN_SEL = 2 };
+enum { TWIN_CFG = 1, TWIN_SEL = 2, TWIN_PAGE = 4 };
+static uint8_t    s_page_told;                         /* the WEATHER look's page the board was told */
+static weather_t  s_wx;                                /* the forecast for the WEATHER look, s_ui.wx once read */
 static uint32_t   s_strip[GFX_PW * STRIP];
 static uint32_t   s_rgba[GFX_PW * GFX_PH];             /* bytes R G B A, what a canvas wants */
 
@@ -87,6 +93,10 @@ EMSCRIPTEN_KEEPALIVE uint8_t *twin_frame(uint32_t now, uint32_t utc, int down, i
     ui_touch(&s_ui, down, x * GFX_W / GFX_PW, y * GFX_H / GFX_PH, 0, 0, now, &cmd);
     if (cmd.cfg || cmd.opt || cmd.bare) {
         s_changed |= TWIN_CFG;
+    }
+    if (s_ui.wx_page != s_page_told) {                 // a tap on the dial or the graph turned the page: the board too
+        s_page_told = s_ui.wx_page;
+        s_changed |= TWIN_PAGE;
     }
     s_ui.net.fetched = s_answered;
     ui_frame(&s_ui, now);
@@ -171,13 +181,73 @@ EMSCRIPTEN_KEEPALIVE const char *twin_set_json(void)
     return b;
 }
 
-// the radar without its panel (its three dots), as the board keeps it. a finger on the page wins, as above
+// the radar and the weather without their panel (the three dots), as the board keeps it. a finger on the page wins, as above
 EMSCRIPTEN_KEEPALIVE void twin_bare(int bare)
 {
     if (!s_ui.t_down) {
         s_ui.bare = (uint8_t)(bare == 1);
     }
 }
+
+/* --- the weather: the board's units, home's country and the warnings it shows, as it says them (OWLOS GET);
+ * the forecast the page fetches; the WEATHER look's page --- */
+
+EMSCRIPTEN_KEEPALIVE void twin_units(int temp, int pres, int wind, int rain, const char *cc)
+{
+    s_ui.units = (wx_units_t){ (uint8_t)(temp >= 0 && temp < TEMP_UNITS ? temp : 0), (uint8_t)(pres >= 0 && pres < PRES_UNITS ? pres : 0),
+                               (uint8_t)(wind >= 0 && wind < WIND_UNITS ? wind : 0), (uint8_t)(rain >= 0 && rain < RAIN_UNITS ? rain : 0) };
+    snprintf(s_ui.home_cc, sizeof s_ui.home_cc, "%s", cc ? cc : "");
+}
+
+EMSCRIPTEN_KEEPALIVE void twin_alerts(int mask)
+{
+    s_ui.alerts = (uint8_t)(mask & WXA_ALL);
+}
+
+// 1: the WEATHER look is up, and the page asks Open-Meteo for it (only then: a page left on the radar asks nothing)
+EMSCRIPTEN_KEEPALIVE int twin_wants_weather(void)
+{
+    return s_ui.cfg.look == LOOK_WEATHER;
+}
+
+// the question for the forecast (0), the air (1) or the day before (2), for home rounded as the board rounds it
+EMSCRIPTEN_KEEPALIVE const char *twin_wx_url(int which)
+{
+    static char url[512];
+    const float lat = roundf(s_ui.cfg.lat * 10.0f) / 10.0f, lon = roundf(s_ui.cfg.lon * 10.0f) / 10.0f;
+    if (which == 0) wx_url_forecast(url, sizeof url, lat, lon);
+    else if (which == 1) wx_url_air(url, sizeof url, lat, lon);
+    else wx_url_past(url, sizeof url, lat, lon);
+    return url;
+}
+
+// the answers, read as the board reads them. "" for the air or the day before that did not come. 1: the forecast was read
+EMSCRIPTEN_KEEPALIVE int twin_weather(const char *forecast, const char *air, const char *past)
+{
+    weather_t w;
+    if (!forecast || !wx_parse_forecast(forecast, &w)) {
+        return 0;
+    }
+    if (air && air[0]) {
+        wx_parse_air(air, &w);
+    }
+    if (!(past && past[0] && wx_parse_past(past, &w)) && s_ui.wx) {   // as the board: the last answer's, moved on
+        wx_past_from(&w, s_ui.wx);
+    }
+    s_wx = w;
+    s_ui.wx = &s_wx;
+    return 1;
+}
+
+// the WEATHER look's page: 0 the dial, 1 the pressure, 2 the temperature. from the page's chips, so not told back
+EMSCRIPTEN_KEEPALIVE void twin_wxpage(int page)
+{
+    if (page >= 0 && page < WX_PAGES) {
+        s_ui.wx_page = s_page_told = (uint8_t)page;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE int twin_wx_page(void) { return s_ui.wx_page; }
 
 EMSCRIPTEN_KEEPALIVE uint32_t twin_sel(void) { return s_ui.sel; }
 

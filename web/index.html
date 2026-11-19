@@ -49,8 +49,8 @@
     <a href="https://kirindenis.github.io/OWLOS-FLIGHT-RADAR/">Flash a board</a>
   </div>
   <p id="state">Starting.</p>
-  <p>Nothing goes to a server of ours: the planes come over the cable, the map's tiles from OpenStreetMap. Needs Chrome
-     or Edge on a computer.</p>
+  <p>Nothing goes to a server of ours: the planes come over the cable, the map's tiles from OpenStreetMap, the weather
+     from Open-Meteo. Needs Chrome or Edge on a computer.</p>
 </div>
 <script src="twin.js"></script>
 <script>
@@ -128,6 +128,32 @@ async function makeMap(m, tiles) {
   console.log('map:', read, 'of', tiles, 'tiles');
 }
 
+/* the forecast for the WEATHER look: Open-Meteo asked as the board asks it, for home rounded to a tenth of a
+ * degree, only while that look is up, every half an hour, a minute on after an answer that did not come. a new
+ * home's question is another one: asked at once */
+const weather = { for: '', at: 0, ok: false, busy: false };
+
+async function askWeather(m) {
+  if (!m._twin_wants_weather() || weather.busy) {
+    return;
+  }
+  const urls = [0, 1, 2].map((k) => m.UTF8ToString(m._twin_wx_url(k)));
+  if (weather.for === urls[0] && performance.now() - weather.at < (weather.ok ? 30 * 60000 : 60000)) {
+    return;
+  }
+  weather.busy = true;
+  weather.for = urls[0];
+  weather.at = performance.now();
+  try {
+    const texts = await Promise.all(urls.map((url) => fetch(url).then((r) => (r.ok ? r.text() : '')).catch(() => '')));
+    const at = texts.map((t) => m.stringToNewUTF8(t));
+    weather.ok = texts[0] !== '' && m._twin_weather(at[0], at[1], at[2]) === 1;
+    at.forEach((p) => m._free(p));
+  } finally {
+    weather.busy = false;
+  }
+}
+
 let live = null;                                       // the connected board, null: the demo sky
 
 /* a finger here changed something: the board does the same. it does not say it back */
@@ -141,6 +167,9 @@ function tellBoard(m) {
   }
   if (what & 2) {
     live.send('OWLOS PICK ' + (m._twin_sel() >>> 0).toString(16)).catch((e) => console.warn(e));
+  }
+  if (what & 4) {                                      // a tap on the WEATHER look's dial or graph: its page
+    live.send('OWLOS SET ' + JSON.stringify({ wxpage: m._twin_wx_page() })).catch((e) => console.warn(e));
   }
 }
 
@@ -222,6 +251,8 @@ class Link {
       this.show(JSON.parse(line.slice(10)));           // a finger on the board changed something
     } else if (this === live && line.startsWith('OWLOS SEL ')) {
       this.m._twin_pick(parseInt(line.slice(10), 16) || 0);
+    } else if (this === live && line.startsWith('OWLOS WXPAGE ')) {   // the WEATHER look's page, turned on the board
+      this.m._twin_wxpage(parseInt(line.slice(13), 10) || 0);
     } else if (this !== live && line.startsWith('OWLOS ')) {
       this.lines.push(line);
     }
@@ -252,11 +283,19 @@ class Link {
 
   // what it says of itself: how the page shows it from now on
   show(c) {
-    this.call(this.m._twin_cfg, c.lat, c.lon, c.place || 'HOME', c.country || '', c.range, c.up, c.theme, c.look, c.map,
+    // a board before 0.16 (no alerts) has three looks. one flashed back from a beta can keep WEATHER's 3, which it draws as MAP
+    const look = c.alerts === undefined && c.look >= 3 ? 1 : c.look;
+    this.call(this.m._twin_cfg, c.lat, c.lon, c.place || 'HOME', c.country || '', c.range, c.up, c.theme, look, c.map,
               c.ground, c.dist_unit, c.alt_unit, c.labels);
     this.m._twin_opt(c.vectors, c.beam_step, c.clock, c.block, c.autopilot, c.lost, c.conflict, c.fl_lo, c.fl_hi);
     if (c.bare !== undefined) {                        // the radar without its panel: a board before 0.13 does not say
       this.m._twin_bare(c.bare);
+    }
+    if (c.alerts !== undefined) {                      // the weather's warnings it shows: a board before 0.16 does not say
+      this.m._twin_alerts(c.alerts);
+    }
+    if (c.temp_unit !== undefined) {                   // its units, and home's country for the AUTO ones
+      this.call(this.m._twin_units, c.temp_unit, c.pressure_unit ?? 0, c.wind_unit ?? 0, c.rain_unit ?? 0, c.cc || '');
     }
   }
 
@@ -373,6 +412,7 @@ Twin().then((m) => {
     if (tiles) {
       makeMap(m, tiles);
     }
+    askWeather(m);
   }
   function run() {
     frame();

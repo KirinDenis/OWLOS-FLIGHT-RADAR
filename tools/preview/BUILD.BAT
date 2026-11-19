@@ -42,6 +42,7 @@ cl /nologo /O2 /W3 /utf-8 /std:c11 /D_CRT_SECURE_NO_WARNINGS /DRADAR_DISPLAY=%NU
    /Fobuild\%DISP%\ /Febuild\%DISP%\preview.exe ^
    preview.c ..\..\core\sky.c ..\..\core\demo.c ..\..\core\gfx.c ..\..\core\font.c ^
    ..\..\core\ui.c ..\..\core\ui_scope.c ..\..\core\ui_pages.c ..\..\core\ui_wifi.c ..\..\core\ui_about.c ^
+   ..\..\core\ui_weather.c ..\..\core\wx_alert.c ..\..\core\sun.c ^
    ..\..\core\qr_site.c ..\..\core\map.c ..\..\core\png_decode.c ..\..\core\watch.c ..\..\core\light.c ^
    %FONTS%
 if errorlevel 1 exit /b 1

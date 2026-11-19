@@ -36,9 +36,9 @@ The map under them comes from OpenStreetMap.
 ## The boards
 
 - **2.8" CYD** ("cheap yellow display", ESP32-2432S028R): ESP32, 320x240, resistive touch. Sold with three
-  different screens, one build fits them all (see below).
+  different screens, one build fits them all (see below). Both cores draw the screen.
 - **3.5" CYD** (ESP32-3248S035, R or C version): ESP32, ST7796 480x320, resistive or capacitive touch. The
-  second core draws half the radar.
+  second core draws half the radar and the weather.
 - LCDWIKI's ESP32-32E boards, also sold by Elegoo: the 2.8" E32R28T takes the 2.8" CYD build and the
   3.5" E32R35T the 3.5" one, the screen and the touch are on the same pins. Only the LED's red is on
   another pin, see The LED.
@@ -143,7 +143,7 @@ smaller letters and its list of the nearest planes without their heights.
 - **Drag the rim** to turn the map: match it to the way the screen stands. Back near north it snaps to
   north up.
 - **Drag inside** to zoom: away from home in, toward home out. BOOT steps through 5, 10, 25, 50, 100 and 200.
-- **The look**, top right, goes round RADAR, MAP and CLASSIC.
+- **The look**, top right, goes round RADAR, MAP, CLASSIC and WEATHER.
 - **The three dots**, in the corner, take the panel away: the scope moves to the middle of the screen. A
   picked plane brings the panel back while it is picked, and the dots take it away again with the plane.
   Tapped once more, they bring it back to stay. The board remembers which way it was left; on the site
@@ -172,6 +172,61 @@ smaller letters and its list of the nearest planes without their heights.
 - **The three dots** slide the panel in and out. A picked plane brings it by itself.
 - **Drag** anywhere on the map to zoom.
 
+### The weather
+
+- WEATHER is the next 24 hours on the radar's dial: noon at the top, midnight at the bottom, and a hand
+  at now, as a clock has, the sun or the moon at its tip. In the middle the temperature now and the
+  home's clock. The ring is the sky as it will be each hour, with its clouds and its rain; the loop
+  inside it is the temperature in the colours of how warm, frost blue to a hot red, nearer the rim the
+  warmer, the wind an arrow on it every three hours.
+- The panel says it in words: now, how it feels, the humidity, the wind, the pressure and an arrow the
+  way it goes, the air, the UV, the radiation, the rain, and the next days. The air and the UV have a
+  little scale under them, best to worst, the step now lit: the European air quality index's six (good,
+  fair, moderate, poor, very poor, extremely poor; it is the worst of fine dust, NO2, ozone and SO2) and
+  the UV index's five (low to extreme). The air is Open-Meteo's model for the home's area, not a sensor.
+- The radiation is the background at the nearest monitoring station, in microsieverts an hour, an
+  ordinary one a tenth or two. There is no open source of it for the whole world yet: till the board has
+  one, the sun's next rise or set stands in its place.
+- **The three dots**, top right, take the panel away, as the radar's do, and the choice is kept for
+  both: the dial stands in the middle with now's numbers either side of it, a warning's number in a box
+  that breathes. The dots bring the panel back.
+- **Tap the dial** for the pressure, **tap again** for the temperature, and once more for the dial. The
+  two graphs share one time axis: 14 hours back on the left, the next day on the right, so now stands
+  at about the golden section of the width, a line up to a dot that pulses. Both are smooth lines with
+  a fill fading under them, the past thinner and fainter, the weather's pictures on the line every
+  three hours, and a half sun on the time's line where the sun rises and sets.
+- The pressure's hours that bring a change of 6 hPa or more are amber, with how much and by when.
+  Under it the pressure 12 hours ago, now, and when the change is done (else half a day on).
+- The temperature has its numbers on the line and the rain under it in bars, as much as falls in each
+  hour, the rain to come falling into them. Under it when it rains and how much, and the strongest
+  gust. The dots under the page say which of the three is up.
+- BOOT turns the pages too, the one way to them on the RPi LCD, which has no touch. On the round glass
+  a tap turns the page and brings up its row of buttons for a few seconds. A pressure warning's chip
+  opens the pressure's page.
+- The forecast, the air and the day before (its pressure, temperature, weather and rain) come from
+  Open-Meteo every half an hour, for home rounded to about 10 km.
+- SET, **UNITS**: TEMPERATURE in C or F, PRESSURE in hPa or inHg at the sea's level as forecasts give it
+  or in mmHg at home's height as a barometer there reads, WIND in km/h, m/s, mph or knots, RAIN in
+  millimetres or inches. AUTO, the first, is what home's country uses: Fahrenheit, inHg, mph and inches
+  in the US, mph in the UK, mmHg in the lands that kept it, m/s in the north and the east. The site's
+  VIEW tab has them too.
+- The site shows WEATHER as the board does, on its screen of the board and in the demo without one.
+  The page asks Open-Meteo for the same forecast itself, from the browser, and only while that look is
+  up. The board's VIEW tab there has the look, the page that is up, the warnings and the units. A page
+  turned on the board turns on the site's screen too, and the other way round.
+
+### Weather warnings
+
+- A chip under the town's name says the worst warning, amber or red, and "+1" for each one more:
+  **STORM**, gusts from 75 km/h (red from 100), or **THUNDER**; **PRESSURE**, 6 hPa up or down within
+  12 hours (red from 10); **AIR**, the European air quality index poor (red very poor); **RADIATION**,
+  over 0.3 microsievert an hour at a station near home (red over 1). The next 12 hours are looked at.
+- **Tap the chip** for WEATHER, whose panel says each one: how much, and when. On the round glass the
+  chip is over the card under home.
+- One that comes shows in the middle of the screen for a few seconds and lights the LED's WEATHER row.
+- SET, DATA: **STORM ALERT**, **PRESSURE ALERT**, **AIR ALERT**, **RADIATION ALERT** (on the round glass
+  HPA and GAMMA), each on or off. All on at first.
+
 ### LIST
 
 ![The list of flights with arrows to a row, ZOOM and BACK](shots/guide/list.png)
@@ -183,11 +238,12 @@ smaller letters and its list of the nearest planes without their heights.
 
 ![The settings page with arrows to its buttons](shots/guide/setup.png)
 
-- Tabs on the bar: **VIEW** the range, units, map up, the screen upside down, labels, colours, the look,
-  the map and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
-  planes come from, home, the WiFi and ABOUT; **RADAR** the radar look's options; **LED** the light on the
-  back (2.8" and 3.5" CYD).
-- **The gear** under the scope opens the RADAR tab. On the round glass these rows are under VIEW. All of it
+- Tabs on the bar: **VIEW** the range, map up, the screen upside down, its BACKLIGHT (100%, 50%,
+  25% or 10%) and NIGHT, a dimmer light from dusk till dawn at home (both on the boards whose light
+  turns down), labels, colours, the look, the map and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
+  planes come from, home, the WiFi, the weather's warnings and ABOUT; **UNITS** the distance, the height and the
+  weather's; **RADAR** the radar look's options; **LED** the light on the back (2.8" and 3.5" CYD).
+- **The gear** under the scope opens the RADAR tab. On the round glass these rows and the units are under VIEW. All of it
   is off until you turn it on, and all of it is for the radar look only:
   - **LOWEST** and **HIGHEST**: only planes between these two heights. The picked plane stays.
   - **DATA BLOCK**: the label says climbing or coming down, and the speed in tens of knots.
@@ -258,7 +314,8 @@ smaller letters and its list of the nearest planes without their heights.
 
 - The 2.8" and 3.5" CYD have an RGB LED on the back, the ES3C28P and the NM-CYD-C5 a WS2812. SET's LED
   tab has a row for each thing that lights it, ON or OFF: **SOS** red and blinking fast, an emergency
-  squawk (7500, 7600, 7700) round home; **IN RANGE** green, a watched plane comes; **TAKE-OFF** blue;
+  squawk (7500, 7600, 7700) round home; **WEATHER** yellow and slow, a weather warning comes;
+  **IN RANGE** green, a watched plane comes; **TAKE-OFF** blue;
   **LANDING** cyan; **ANY NEAR** white, any plane in the air within **HOW NEAR** of home (1, 2, 5 or 10 km,
   or nautical miles, or miles); **NO DATA** amber and steady, the WiFi set is not there or no answer. When
   two are lit, the first in that order shows.
@@ -363,7 +420,13 @@ and a PC preview.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site
   publishes it in `version.json` for the boards and shows the file as its history. A new version is a new
   section at the top of that file.
-- The site keeps each version's firmware (`.github/archive.sh`): the newest in `fw/<board>/`, the older
+- `(beta)` on that line makes it a beta, `## 0.16.1 (beta)`. The site keeps it beside the stable, in
+  `fw/<version>/<board>/`, and offers it as a choice when flashing; the stable stays in `fw/<board>/` and
+  is still what the site flashes unless the beta is picked. `version.json` says both: `version` is the
+  stable, which every board compares with, and `beta` the beta, which only a beta build follows. A beta
+  needs a number above the stable, a new beta replaces it, and the next stable version at the top of the
+  file ends it. A beta found good becomes the stable by taking `(beta)` off its line.
+- The site keeps each version's firmware (`.github/archive.sh`): the newest stable in `fw/<board>/`, the older
   ones in `fw/<version>/<board>/`, all of them listed in `fw/versions.json`. Each run takes the older
   ones from the site as it is and puts its own build next to them, nothing is built again. Every
   build of a version replaces that version, the older ones are never touched: to keep a build, give
@@ -409,18 +472,23 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`, `conflict`, `fl_lo`, `fl_hi`, `utc` (seconds
   since 1970, 0 not known), `led`, `led_level`, `led_hold`, `led_near`, `led_red`, `version`, `newest` (the site's, `""` not heard
   yet), `uptime` and `ran` in seconds, `reset`, `help` (counted on the map of boards: 0 never asked, 1 yes,
-  2 no), `bare` (1 the radar without its panel), and `screen` on the 2.8" boards. Never the password,
-  never the key.
+  2 no), `bare` (1 the radar and the weather without their panel), `alerts` (the weather's warnings shown), the weather's
+  units `temp_unit`, `pressure_unit`, `wind_unit`, `rain_unit` and `cc`, home's country by its two letters (`""` not known
+  yet), `backlight` and `night` where the light turns down, and `screen` on the 2.8" boards. Never the password, never the key.
 - `OWLOS SET {...}` with any of `ssid`, `pass`, `key`, `lat`, `lon`, `place`, `country`, `src` (`free` or
-  `fr24`), `up` (degrees), `flip`, `theme` (0 to 4), `look` (0 radar, 1 map, 2 classic), `map`, `ground`
+  `fr24`), `up` (degrees), `flip`, `theme` (0 to 4), `look` (0 radar, 1 map, 2 classic, 3 weather), `wxpage`
+  (the weather's page: 0 the dial, 1 the pressure, 2 the temperature; not kept), `map`, `ground`
   (1 planes on the ground shown, 0 hidden), `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`,
   `conflict` (each 1 on, 0 off), `fl_lo`, `fl_hi` (flight levels, 0 no limit), `watch`
   (`"EZY12AB, G-EUPT"`, `""` empties it), `led` (what
-  lights it, added up: 1 SOS, 2 in range, 4 take-off, 8 landing, 16 any near, 32 no data), `led_near`
+  lights it, added up: 1 SOS, 2 in range, 4 take-off, 8 landing, 16 any near, 32 no data, 64 weather), `led_near`
   (1, 2, 5 or 10 of the distance unit), `led_level` (0 low, 1 mid,
   2 high), `led_hold` (0 till touched, 1 10 s, 2 while it lasts), `led_red` (4 or 22, the red one's GPIO),
-  `led_test` (1: red, green, blue once), `help` (0, 1 or 2, as in GET), `bare` (1 the radar without its
-  panel, 0 with it),
+  `led_test` (1: red, green, blue once), `help` (0, 1 or 2, as in GET), `bare` (1 the radar and the weather
+  without their panel, 0 with it), `alerts` (the weather's warnings shown, added up: 1 storm, 2 pressure, 4 air,
+  8 radiation), the weather's units, each 0 home's country's own: `temp_unit` (1 C, 2 F), `pressure_unit` (1 hPa,
+  2 mmHg, 3 inHg), `wind_unit` (1 km/h, 2 m/s, 3 mph, 4 knots), `rain_unit` (1 mm, 2 inches),
+  `backlight` (0 100%, 1 50%, 2 25%, 3 10%), `night` (0 off, else a step as `backlight`),
   `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
   What is left out stays as it is. Answered with `OWLOS OK` or `OWLOS ERR <why>`.
 
@@ -434,4 +502,6 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
 - Planes: [adsb.lol](https://adsb.lol/) (ODbL) and [adsb.fi](https://adsb.fi/), or
   [Flightradar24](https://fr24api.flightradar24.com/) with your own key.
 - The map and the town names: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL).
+- The weather and the air: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0). The WEATHER look names it
+  in its corner. The air's index is the European Environment Agency's.
 - Flashing from the browser: [ESP Web Tools](https://esphome.github.io/esp-web-tools/).

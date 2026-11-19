@@ -25,9 +25,11 @@ volatile uint32_t g_busy;                              // TEMP (busy.h): here, a
 #include "qr_site.h"
 #include "sky.h"
 #include "store.h"
+#include "sun.h"
 #include "tiles.h"
 #include "touch.h"
 #include "ui.h"
+#include "wx_parse.h"
 #if RADAR_OVERLAY
 #include "ovl.h"
 #endif
@@ -44,7 +46,10 @@ volatile uint32_t g_busy;                              // TEMP (busy.h): here, a
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
-// FLIGHT_VERSION comes from CHANGES.md (firmware/CMakeLists.txt)
+// FLIGHT_VERSION comes from CHANGES.md (firmware/CMakeLists.txt), and FLIGHT_BETA when its line says (beta)
+#ifndef FLIGHT_BETA
+#define FLIGHT_BETA 0
+#endif
 #define DEMO_BYTES     6144            /* the demo's answer: 12 planes */
 #define FREE_EVERY_MS  5000u           /* the free networks allow a request a second */
 #define FR24_EVERY_MS  20000u          /* FR24 counts credits: slower */
@@ -508,6 +513,21 @@ static char              s_stats_url[64];  // from version.json, "": none. under
 /* the radar without its panel, the scope in the middle (its three dots, or the site): kept like help */
 static uint8_t           s_bare;           // store_load_bare. under s_lock
 static volatile int      s_bare_new;       // the site changed it: the screen takes it
+/* the WEATHER look's page from the console (the site, a test rig): not kept, the look comes on its dial */
+static uint8_t           s_wxpage;         // under s_lock
+static volatile int      s_wxpage_new;     // asked for: the screen takes it
+/* the screen's light, SET's BACKLIGHT or the site: a step of UI_BACKLIGHTS (core/ui.h), kept like help */
+static uint8_t           s_backlight;      // store_load_backlight. under s_lock
+static volatile int      s_backlight_new;  // the site changed it: the screen takes it
+/* SET's NIGHT or the site: 0 off, else the step the light goes down to while the sun is down at home */
+static uint8_t           s_night;          // store_load_night. under s_lock
+static volatile int      s_night_new;      // the site changed it: the screen takes it
+/* the weather's warnings shown, SET's ALERT rows or the site: 1 << WXA_* (core/weather.h), kept like help */
+static uint8_t           s_alerts;         // store_load_alerts. under s_lock
+static volatile int      s_alerts_new;     // the site changed it: the screen takes it
+/* the weather's units, SET's UNITS rows or the site: each 0 home's country's own (core/ui.h), kept like help */
+static wx_units_t        s_units;          // store_load_units. under s_lock
+static volatile int      s_units_new;      // the site changed them: the screen takes them
 
 static const char *board_name(void);
 
@@ -530,6 +550,85 @@ static void alive_report(void)
     ESP_LOGI(TAG, "counted on the map of boards: HTTP %d", status);
 }
 
+/* digits and dots, at least one: a version, or nothing to compare with */
+static int version_like(const char *s)
+{
+    if (!s[0]) return 0;
+    for (; *s; s++) {
+        if (!((*s >= '0' && *s <= '9') || *s == '.')) return 0;
+    }
+    return 1;
+}
+
+/* --- the weather for the WEATHER look (core/ui_weather.c): Open-Meteo's forecast and air quality round
+ * home, the point rounded to a tenth of a degree (about 10 km), every half an hour, a minute on after an
+ * answer that did not read, at once for a new home. two of them: the screen reads one while the next
+ * is filled. only asked once the planes' question went, one request at a time on this task --- */
+#define WX_EVERY_MS (30u * 60u * 1000u)
+#define WX_RETRY_MS (60u * 1000u)
+#define WX_BUF      4096                               /* the forecast's answer is about 2.6 KB */
+static weather_t s_wx[2];
+static int       s_wx_cur = -1;                        // the one the screen reads, -1: none yet. under s_lock
+
+static void wx_service(const fr_cfg_t *c)
+{
+    static uint32_t asked;
+    static int heard;
+    static float for_lat = 999, for_lon = 999;
+    const float lat = roundf(c->lat * 10.0f) / 10.0f, lon = roundf(c->lon * 10.0f) / 10.0f;
+    const uint32_t now = now_ms();
+    if (lat == for_lat && lon == for_lon && asked && now - asked < (heard ? WX_EVERY_MS : WX_RETRY_MS)) return;
+    asked = now ? now : 1;
+    heard = 0;
+    char *buf = malloc(WX_BUF);
+    if (!buf) {
+        ESP_LOGW(TAG, "weather: no memory for the answer");
+        return;
+    }
+    lock();
+    weather_t *w = &s_wx[s_wx_cur == 0 ? 1 : 0];       // the one the screen does not read
+    unlock();
+    static char url[512];
+    text_t t = { buf, 0, WX_BUF };
+    int status = 0;
+    buf[0] = 0;
+    wx_url_forecast(url, sizeof url, lat, lon);
+    const uint32_t t0 = now_ms();
+    net_get(url, NULL, to_text, &t, &status);
+    if (status == 200 && t.n < WX_BUF - 1 && wx_parse_forecast(buf, w)) {
+        const int fc_bytes = t.n;
+        t.n = 0;
+        buf[0] = 0;
+        status = 0;
+        wx_url_air(url, sizeof url, lat, lon);
+        net_get(url, NULL, to_text, &t, &status);
+        const int air = status == 200 && t.n < WX_BUF - 1 && wx_parse_air(buf, w);
+        // the day before, for the graphs. when it does not come, the last answer's, moved on by the hours since
+        t.n = 0;
+        buf[0] = 0;
+        status = 0;
+        wx_url_past(url, sizeof url, lat, lon);
+        net_get(url, NULL, to_text, &t, &status);
+        const int past = status == 200 && t.n < WX_BUF - 1 && wx_parse_past(buf, w);
+        if (!past && s_wx_cur >= 0 && s_wx[s_wx_cur].at) {   // s_wx_cur changes on this task alone
+            wx_past_from(w, &s_wx[s_wx_cur]);
+        }
+        lock();
+        s_wx_cur = w == &s_wx[0] ? 0 : 1;
+        unlock();
+        heard = 1;
+        for_lat = lat;
+        for_lon = lon;
+        ESP_LOGI(TAG, "weather: %d bytes, %d.%d C, %u hPa, wind %d km/h, air %s, past %s, in %u ms, heap %u", fc_bytes,
+                 w->now_t10 / 10, (w->now_t10 < 0 ? -w->now_t10 : w->now_t10) % 10, (unsigned)(w->now_hpa10 / 10), w->wind_kmh,
+                 air ? "read" : "not read", past ? "read" : "not read", (unsigned)(now_ms() - t0),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    } else {
+        ESP_LOGW(TAG, "weather: HTTP %d, %d bytes, not read", status, t.n);
+    }
+    free(buf);
+}
+
 static void update_check(void)
 {
     static uint32_t asked;                             // ms of the last question, 0: never
@@ -542,9 +641,17 @@ static void update_check(void)
     buf[0] = 0;
     int status = 0;
     net_get(UPDATE_URL, NULL, to_text, &t, &status);
-    heard = status == 200 && json_str(buf, "version", v, sizeof v) && v[0];
-    for (const char *p = v; heard && *p; p++) heard = (*p >= '0' && *p <= '9') || *p == '.';   // digits and dots, or it is not one
-    ESP_LOGI(TAG, "the site's version: HTTP %d, %s, this one %s", status, heard ? v : "none", FLIGHT_VERSION);
+    heard = status == 200 && json_str(buf, "version", v, sizeof v) && version_like(v);
+#if FLIGHT_BETA
+    /* a beta follows the betas: the site's beta while it has one above its stable, then the stable,
+     * which is what a beta found good becomes. a stable build never hears of a beta */
+    char b[sizeof s_newest] = "";
+    if (heard && json_str(buf, "beta", b, sizeof b) && version_like(b) && ui_version_cmp(b, v) > 0) {
+        snprintf(v, sizeof v, "%s", b);
+    }
+#endif
+    ESP_LOGI(TAG, "the site's version: HTTP %d, %s, this one %s%s", status, heard ? v : "none", FLIGHT_VERSION,
+             FLIGHT_BETA ? " beta" : "");
     if (!heard) return;
     // where boards are counted: an https address and nothing odd in it, or none. an answer that filled the
     // buffer may be cut in the middle of it: then none
@@ -632,6 +739,7 @@ static volatile uint32_t s_sky_until;                  // now_ms till which it g
 static volatile uint32_t s_pick;                       // OWLOS PICK from the page: the plane picked there
 static volatile int      s_pick_new;
 static uint32_t          s_sel_told;                   // the picked plane the page knows of
+static volatile int      s_wxpage_told = -1;           // the WEATHER look's page the page knows of, -1: tell it again (a GET)
 
 /* 0: no page. a passed time is let go here (only if no SKY ON renewed it meanwhile): left as it was,
  * 24.8 days later the 32-bit milliseconds would wrap round to it and read it as ahead again, and
@@ -908,6 +1016,7 @@ static void fetch_task(void *arg)
             s_fp = FP_ALIVE;
             alive_report();
             s_fp = FP_OTHER;
+            wx_service(&c);
         }
         lock();                                        // the LED's no data: the WiFi set is not there, or no answer
         light_hold(&s_light, LIGHT_NODATA, configured && (demo || s_sky.status >= SKY_HTTP), now_ms());
@@ -933,14 +1042,24 @@ static const char *json_esc(const char *s, char *out, int cap)
 
 static void say_cfg(void)
 {
-    char ssid[70], place[84], country[68], watch[WATCH_TEXT];
-    static char nets[NETS_KEPT * 72];                  // used under the lock: the site's line and the screen both say this
+    /* static, and used only under the lock: the site's line and the screen both say this. a GET says it on
+     * the console's task, 4 KB of stack, and this printf of fifty fields needs much of it: with these on
+     * the stack too, a GET overflowed it and the board restarted (2026-11-18, the CYD and the 3.5") */
+    static char ssid[70], place[84], country[68], watch[WATCH_TEXT], dim[40], units[112], nets[NETS_KEPT * 72];
     lock();
+    dim[0] = 0;
+#if RADAR_HAS_DIM
+    snprintf(dim, sizeof dim, ",\"backlight\":%d,\"night\":%d", s_backlight, s_night);   // only where the light turns down: the site shows them then
+#endif
+    /* the weather's units, 0 each home's country's own, and that country's two letters ("" not known yet): the site
+     * shows what AUTO is. made here, not in the printf: its arguments are what fills the console's stack */
+    snprintf(units, sizeof units, ",\"temp_unit\":%d,\"pressure_unit\":%d,\"wind_unit\":%d,\"rain_unit\":%d,\"cc\":\"%s\"",
+             s_units.temp, s_units.pres, s_units.wind, s_units.rain, s_home_cc);
     watch_text(&s_watch, watch, sizeof watch);         // letters, digits, dashes and commas: nothing to escape
     nets[0] = 0;
     for (int i = 0, at = 0; i < s_nets.count; i++)     // names only: a password goes in, never out
         at += snprintf(nets + at, sizeof nets - (size_t)at, "%s\"%s\"", i ? "," : "", json_esc(s_nets.n[i].ssid, ssid, sizeof ssid));
-    int led = 0;                                       // the LED's events as bits: 1 sos, 2 in range, 4 take-off, 8 landing, 16 near, 32 no data
+    int led = 0;                                       // the LED's events as bits: 1 sos, 2 in range, 4 take-off, 8 landing, 16 near, 32 no data, 64 weather
     for (int ev = 0; ev < LIGHT_EVENTS; ev++) led |= s_light_cfg.on[ev] ? 1 << ev : 0;
     printf("OWLOS CFG {\"ssid\":\"%s\",\"nets\":[%s],\"lat\":%.5f,\"lon\":%.5f,\"place\":\"%s\",\"country\":\"%s\",\"src\":\"%s\",\"key\":%s,"
            "\"up\":%d,\"flip\":%d,\"theme\":%d,\"look\":%d,\"map\":%d,\"ground\":%d,\"watch\":\"%s\","
@@ -948,7 +1067,7 @@ static void say_cfg(void)
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
            "\"led\":%d,\"led_level\":%d,\"led_hold\":%d,\"led_near\":%d,\"led_red\":%d,\"version\":\"%s\",\"newest\":\"%s\","
            "\"uptime\":%u,\"ran\":%u,\"reset\":\"%s\",\"screen\":%d,"
-           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d}\n",
+           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d,\"alerts\":%d%s%s}\n",
            json_esc(s_sec.ssid, ssid, sizeof ssid), nets, (double)s_cfg.lat, (double)s_cfg.lon,
            json_esc(s_cfg.place, place, sizeof place), json_esc(s_cfg.country, country, sizeof country),
            s_cfg.source == SRC_FR24 ? "fr24" : "free", s_sec.key[0] ? "true" : "false", s_cfg.up, s_cfg.flip,
@@ -957,7 +1076,7 @@ static void say_cfg(void)
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
            (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
-           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare);
+           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, dim, units);
     unlock();
 }
 
@@ -1024,7 +1143,7 @@ static void say_ready(void)
 static void on_line(const char *line)
 {
     if (!strncmp(line, "OWLOS HELLO", 11)) { say_ready(); return; }
-    if (!strncmp(line, "OWLOS GET", 9)) { say_cfg(); return; }
+    if (!strncmp(line, "OWLOS GET", 9)) { s_wxpage_told = -1; say_cfg(); return; }
     if (!strcmp(line, "OWLOS SKIP")) { s_skip_align = 1; return; }
 #if RADAR_OVERLAY
     // the test sky (see skyplay_load): bit 0 keep the sky now, bits 1.. 1 off / 2 on, 0 leave
@@ -1112,12 +1231,59 @@ static void on_line(const char *line)
         unlock();
         store_save_help((int)v);
     }
+    if (json_num(j, "wxpage", &v) && v >= 0 && v < WX_PAGES) {   // the weather's page, the dial or a graph
+        lock();
+        s_wxpage = (uint8_t)v;
+        s_wxpage_new = 1;
+        unlock();
+    }
     if (json_num(j, "bare", &v) && (v == 0 || v == 1)) {   // the radar's panel away or back, from the site
         lock();
         s_bare = (uint8_t)v;
         s_bare_new = 1;
         unlock();
         store_save_bare((int)v);
+    }
+#if RADAR_HAS_DIM
+    if (json_num(j, "backlight", &v) && v >= 0 && v < UI_BACKLIGHTS) {   // the screen's light, from the site
+        lock();
+        s_backlight = (uint8_t)v;
+        s_backlight_new = 1;
+        unlock();
+        store_save_backlight((int)v);
+    }
+    if (json_num(j, "night", &v) && v >= 0 && v < UI_BACKLIGHTS) {   // the night's light, from the site
+        lock();
+        s_night = (uint8_t)v;
+        s_night_new = 1;
+        unlock();
+        store_save_night((int)v);
+    }
+#endif
+    if (json_num(j, "alerts", &v) && v >= 0 && v <= WXA_ALL) {   // the weather's warnings shown, from the site
+        lock();
+        s_alerts = (uint8_t)v;
+        s_alerts_new = 1;
+        unlock();
+        store_save_alerts((int)v);
+    }
+    {                                                  // the weather's units from the site, 0 home's country's own
+        wx_units_t un;
+        int unit_set = 0;
+        lock();
+        un = s_units;
+        unlock();
+        if (json_num(j, "temp_unit", &v) && v >= 0 && v < TEMP_UNITS) { un.temp = (uint8_t)v; unit_set = 1; }
+        if (json_num(j, "pressure_unit", &v) && v >= 0 && v < PRES_UNITS) { un.pres = (uint8_t)v; unit_set = 1; }
+        if (json_num(j, "wind_unit", &v) && v >= 0 && v < WIND_UNITS) { un.wind = (uint8_t)v; unit_set = 1; }
+        if (json_num(j, "rain_unit", &v) && v >= 0 && v < RAIN_UNITS) { un.rain = (uint8_t)v; unit_set = 1; }
+        if (unit_set) {
+            lock();
+            s_units = un;
+            s_units_new = 1;
+            unlock();
+            store_save_units(&un);
+        }
     }
     char watch[WATCH_TEXT];
     int watched = json_str(j, "watch", watch, sizeof watch);   // "" empties it
@@ -1265,30 +1431,50 @@ static void scrolltest(uint32_t now)
 }
 #endif
 
+/* the first moments after power on the glass is not read at all, and a press it says from the start counts only
+ * once it has lifted: a panel's chip asked while the screen's bus and the touch were still settling now and then
+ * said a press that was not there (on the 3.5" a tap on the look's button: the look one on after a restart) */
+#define TOUCH_DEAF_MS 1500u
+static int s_touch_lifted;                             // the glass read lifted once after them: presses count from now on
+
 static void touch_sample(int force)
 {
     uint32_t now = now_ms();
+    if (now < TOUCH_DEAF_MS) return;
     if (s_nts >= (int)(sizeof s_ts / sizeof s_ts[0]) || (!force && now - s_ts_last < 15u)) return;
     int rx = 0, ry = 0, x = 0, y = 0;
     uint32_t t0 = now_us();
     int down = tp_read(&rx, &ry);
     s_touch_us += now_us() - t0;
+    if (!s_touch_lifted) {
+        if (down) down = 0;                            // pressed since before it was listened to: not yet a finger's
+        else s_touch_lifted = 1;
+    }
     if (down) touch_apply(&s_ui.cal, rx, ry, &x, &y);
     s_ts[s_nts++] = (tsample_t){ (uint8_t)down, (int16_t)x, (int16_t)y, (int16_t)rx, (int16_t)ry, now };
     s_ts_last = now;
 }
 
-/* --- the second core: on the 3.5" in the radar look it draws every other strip while this core
- * draws the one above it, and the two go out in one transfer. its strip, its stack and the DMA
- * buffers' second half are taken only for that look: the square map wants the memory, and there
- * the SPI is what a frame waits for anyway --- */
+/* --- the second core draws half of every frame while this core draws the rest: every view and every
+ * look, the strips only read what ui_frame set up. two ways:
+ *   pairs: every other strip is its own, in a strip of its own, packed under this core's, and the two
+ *          go out in one transfer (DMA buffers of two strips). the 3.5" and the boards with PSRAM.
+ *          on the 3.5" its strip, its stack and the DMA buffers' second half are taken for the radar
+ *          and the weather looks only: the square maps want the memory, and there the SPI is what a
+ *          frame waits for anyway
+ *   halves (DISP_HELPER_HALF): the lower half of this core's strip, in this core's own canvas, and
+ *          the strip goes out as it always did. no strip and no DMA memory of its own, only its stack:
+ *          the 2.8", which has no room for the pairs --- */
 #if DISP_HELPER
 #define HELPER_STACK 7168
 static TaskHandle_t      s_helper;
 static SemaphoreHandle_t s_help_go, s_help_done;
-static canvas_t          s_help_cv;            // the strip it draws now
+static canvas_t          s_help_cv;            // the strip it draws now, or the lower half of this core's
 static volatile int      s_help_stop;
 static uint32_t          s_help_wait_us;       // this core waiting for it, for the 10 s log
+/* halves: the row a strip is cut at, this core's rows above it. a row a frame towards who waits less:
+ * the second core shares its core with the WiFi and the fetch, and is slower by what they do */
+static int               s_half_top = DISP_STRIP / 2;
 
 static void helper_task(void *arg)
 {
@@ -1297,7 +1483,7 @@ static void helper_task(void *arg)
         xSemaphoreTake(s_help_go, portMAX_DELAY);
         if (s_help_stop) break;
         ui_strip(&s_ui, &s_help_cv);                   // the strips only read what ui_frame set up
-        disp_pack_under(&s_help_cv);                   // into the transfer, under this core's strip
+        if (!DISP_HELPER_HALF) disp_pack_under(&s_help_cv);   // into the transfer, under this core's strip
         xSemaphoreGive(s_help_done);
     }
     xSemaphoreGive(s_help_done);
@@ -1308,15 +1494,19 @@ static void helper_task(void *arg)
 static void helper_set(int on)
 {
     if (on == (s_helper != NULL)) return;
-    const size_t px = GFX_PW * DISP_STRIP * sizeof(uint32_t), dma = GFX_PW * DISP_STRIP * sizeof(uint16_t) * 2;
+    // what it takes besides its stack: a strip of its own and the DMA buffers' second half. halves: none
+    const size_t px = DISP_HELPER_HALF ? 0 : GFX_PW * DISP_STRIP * sizeof(uint32_t);
+    const size_t dma = DISP_HELPER_HALF ? 0 : GFX_PW * DISP_STRIP * sizeof(uint16_t) * 2;
     if (!on) {
         s_help_stop = 1;
         xSemaphoreGive(s_help_go);
         xSemaphoreTake(s_help_done, portMAX_DELAY);   // out of its loop, it deletes itself
         s_helper = NULL;
-        heap_caps_free(s_help_cv.px);
-        s_help_cv.px = NULL;
-        disp_rows(DISP_STRIP);
+        if (!DISP_HELPER_HALF) {
+            heap_caps_free(s_help_cv.px);
+            s_help_cv.px = NULL;
+            disp_rows(DISP_STRIP);
+        }
         ESP_LOGI(TAG, "the second core stops drawing, heap %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
         return;
     }
@@ -1325,18 +1515,23 @@ static void helper_set(int on)
         s_help_go = xSemaphoreCreateBinary();
         s_help_done = xSemaphoreCreateBinary();
     }
-    s_help_cv = (canvas_t){ heap_caps_malloc(px, MALLOC_CAP_INTERNAL), 0, DISP_STRIP, 1, 0 };
-    if (!s_help_cv.px) return;
+    if (!DISP_HELPER_HALF) {
+        s_help_cv = (canvas_t){ heap_caps_malloc(px, MALLOC_CAP_INTERNAL), 0, DISP_STRIP, 1, 0 };
+        if (!s_help_cv.px) return;
+    }
     s_help_stop = 0;
-    if (!disp_rows(2 * DISP_STRIP) ||
+    if ((!DISP_HELPER_HALF && !disp_rows(2 * DISP_STRIP)) ||
         xTaskCreatePinnedToCore(helper_task, "strips", HELPER_STACK, NULL, 4, &s_helper, 0) != pdPASS) {
         s_helper = NULL;
-        disp_rows(DISP_STRIP);
-        heap_caps_free(s_help_cv.px);
-        s_help_cv.px = NULL;
+        if (!DISP_HELPER_HALF) {
+            disp_rows(DISP_STRIP);
+            heap_caps_free(s_help_cv.px);
+            s_help_cv.px = NULL;
+        }
         return;
     }
-    ESP_LOGI(TAG, "the second core draws every other strip, heap %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    ESP_LOGI(TAG, "the second core draws %s, heap %u", DISP_HELPER_HALF ? "the lower half of every strip" : "every other strip",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
 }
 #endif
 
@@ -2346,11 +2541,16 @@ static void ui_task(void *arg)
     s_ui.opt = s_opt;
     s_ui.help = s_help;                                // counted on the site's map: SET's COUNT ME
     s_ui.bare = s_bare;                                // the radar without its panel, as it was left
+    s_ui.backlight = s_backlight;                      // the screen's light, as it was left
+    s_ui.night = s_night;                              // and at night
+    s_ui.alerts = s_alerts;                            // the weather's warnings shown
+    s_ui.units = s_units;                              // and its units
     unlock();
     led_init(light_red_gpio(&s_ui.light));
     s_ui.map = &s_map;                                 // the fetch task makes it, the scope draws it
     ui_clock_us = now_us;                              // the layers get timed, the 10 s log says where it goes
     ui_version = FLIGHT_VERSION;                       // ABOUT says it, the note compares the site's with it
+    ui_beta = FLIGHT_BETA;                             // and BETA after it
 #if LCD_PROFILES && RADAR_HAS_BUTTON
     ui_screen_name = disp_profile_name();              // the screen offers the other ones, by BOOT. none: the site does
 #endif
@@ -2380,6 +2580,8 @@ static void ui_task(void *arg)
 
     uint32_t frames = 0, t_stat = now_ms(), busy_us = 0, dirty = 0;
     int light = 0;
+    int dark = 0;                                      // the sun is down at home: SET's NIGHT light, if it is on
+    uint32_t sun_at = 0;                               // when the sun was last worked out, 0: never
 #if RADAR_OVERLAY
     /* (chipguyhere) the gaps between passes, for the 10 s log: the longest, and those over 100 ms by what
      * the fetch task was doing as the pass that made it began */
@@ -2549,21 +2751,81 @@ static void ui_task(void *arg)
             s_bare_new = 0;
             unlock();
         }
+        if (s_wxpage_new) {                            // the console's: the weather's page
+            lock();
+            s_ui.wx_page = s_wxpage;
+            s_wxpage_new = 0;
+            unlock();
+        }
         if (cmd.bare) {                                // the radar's three dots
             lock();
             s_bare = s_ui.bare;
             unlock();
             store_save_bare(s_ui.bare);
         }
+        if (s_backlight_new) {                         // the site's: the screen's light
+            lock();
+            s_ui.backlight = s_backlight;
+            s_backlight_new = 0;
+            unlock();
+        }
+        if (cmd.backlight) {                           // SET's BACKLIGHT
+            lock();
+            s_backlight = s_ui.backlight;
+            unlock();
+            store_save_backlight(s_ui.backlight);
+        }
+        if (s_night_new) {                             // the site's: the night's light
+            lock();
+            s_ui.night = s_night;
+            s_night_new = 0;
+            unlock();
+            sun_at = 0;                                // where the sun is: now, not in a minute
+        }
+        if (cmd.night) {                               // SET's NIGHT
+            lock();
+            s_night = s_ui.night;
+            unlock();
+            store_save_night(s_ui.night);
+            sun_at = 0;
+        }
+        if (s_alerts_new) {                            // the site's: the weather's warnings shown
+            lock();
+            s_ui.alerts = s_alerts;
+            s_alerts_new = 0;
+            unlock();
+        }
+        if (cmd.alerts) {                              // SET's ALERT rows
+            lock();
+            s_alerts = s_ui.alerts;
+            unlock();
+            store_save_alerts(s_ui.alerts);
+        }
+        if (s_units_new) {                             // the site's: the weather's units
+            lock();
+            s_ui.units = s_units;
+            s_units_new = 0;
+            unlock();
+        }
+        if (cmd.units) {                               // SET's UNITS rows
+            lock();
+            s_units = s_ui.units;
+            unlock();
+            store_save_units(&s_ui.units);
+        }
         if (s_pick_new) {                              // tapped on the page: picked here too
             s_pick_new = 0;
             s_ui.sel = s_sel_told = s_pick;
         }
         if (page_there()) {                            // and what a finger did here goes there
-            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare) say_cfg();
+            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare || cmd.backlight || cmd.night || cmd.alerts || cmd.units) say_cfg();
             if (s_ui.sel != s_sel_told) {
                 s_sel_told = s_ui.sel;
                 printf("OWLOS SEL %06x\n", (unsigned)s_ui.sel);
+            }
+            if (s_ui.wx_page != s_wxpage_told) {       // the weather's page, turned here or asked for: the page's twin turns too
+                s_wxpage_told = s_ui.wx_page;
+                printf("OWLOS WXPAGE %d\n", s_wxpage_told);
             }
             if ((s_ui.view == VIEW_CAL) != s_align_told) {   // its screen waits for crosses: the page says so
                 s_align_told = s_ui.view == VIEW_CAL;
@@ -2598,6 +2860,8 @@ static void ui_task(void *arg)
         n->utc = net_utc();
         s_ui.watch = s_watch;                          // SET says what the watched planes do
         memcpy(s_ui.newest, s_newest, sizeof s_ui.newest);   // and ABOUT what the site has
+        memcpy(s_ui.home_cc, s_home_cc, sizeof s_ui.home_cc);   // the weather's units, AUTO: home's country's own
+        s_ui.wx = s_wx_cur >= 0 ? &s_wx[s_wx_cur] : NULL;     // the WEATHER look's forecast, the one not being filled
         unlock();
         net_ip(n->ip, sizeof n->ip);
         int naps = 0;
@@ -2608,15 +2872,16 @@ static void ui_task(void *arg)
         unlock();
 
 #if DISP_HELPER
-#if CONFIG_SPIRAM
-        helper_set(s_ui.view == VIEW_MAIN && s_ui.cfg.look == LOOK_RADAR);
+        /* the second core draws every view and every look, the strips only read (ui_frame sets up what
+         * they share). the 3.5" (pairs, no PSRAM): the radar's and the weather's looks only, with their
+         * pages, the square maps want its memory. it is kept through those pages: taken at the radar and
+         * given back at every page, its 38 KB cut the heap into pieces the map's tiles then could not use */
+#if DISP_HELPER_HALF || CONFIG_SPIRAM
+        helper_set(1);
 #else
-        /* no PSRAM (the 3.5"): the second core is kept through the pages of the radar look and idles
-         * there. taken at the radar and given back at every page, its 38 KB cut the heap into pieces
-         * the map's tiles then could not use */
-        helper_set(s_ui.cfg.look == LOOK_RADAR);
+        helper_set(s_ui.cfg.look == LOOK_RADAR || s_ui.cfg.look == LOOK_WEATHER);
 #endif
-        const int pair = s_helper && s_ui.view == VIEW_MAIN;   // the second core draws the radar's strips only
+        const int pair = !DISP_HELPER_HALF && s_helper;  // every other strip is the second core's
         const int step = pair ? 2 * DISP_STRIP : DISP_STRIP;
 #elif !RADAR_OVERLAY
         const int step = DISP_STRIP;
@@ -2626,24 +2891,35 @@ static void ui_task(void *arg)
         frame_layered(now);
 #else
         ui_frame(&s_ui, now);
+#if DISP_HELPER
+        uint32_t waited = 0;                           // this frame's, for where the halves' strips are cut
+#endif
         for (int sy0 = 0; sy0 < GFX_PH; sy0 += step) {
             canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0, 0 };
 #if DISP_HELPER
-            const int y1 = sy0 + DISP_STRIP, two = pair && y1 < GFX_PH;
-            if (two) {                                 // the strip under it, on the other core meanwhile
+            const int y1 = sy0 + DISP_STRIP, under = pair && y1 < GFX_PH;
+            const int half = DISP_HELPER_HALF && s_helper && cv.h > 1;
+            const int top = !half ? cv.h : s_half_top < cv.h ? s_half_top : cv.h / 2;
+            if (under) {                               // the strip under it, on the other core meanwhile
                 s_help_cv.y0 = y1;
                 s_help_cv.h = y1 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - y1;
                 xSemaphoreGive(s_help_go);
+            } else if (half) {                         // the lower half of this one, into this canvas
+                s_help_cv = (canvas_t){ work + top * GFX_PW, sy0 + top, cv.h - top, 1, 0 };
+                xSemaphoreGive(s_help_go);
             }
-            ui_strip(&s_ui, &cv);
-            if (two) {
+            canvas_t mine = { work, sy0, top, 0, 0 };  // this core's: the strip, or its upper half
+            ui_strip(&s_ui, &mine);
+            if (under || half) {
                 uint32_t tw = now_us();
                 xSemaphoreTake(s_help_done, portMAX_DELAY);
-                s_help_wait_us += now_us() - tw;
+                tw = now_us() - tw;
+                s_help_wait_us += tw;
+                waited += tw;
             }
             uint32_t ts = now_us();
-            if (two) disp_strip2(&cv, s_help_cv.h);    // both in one transfer
-            else disp_strip(&cv);
+            if (under) disp_strip2(&cv, s_help_cv.h);  // both in one transfer
+            else disp_strip(&cv);                      // halves: both of them, as one strip
 #else
             ui_strip(&s_ui, &cv);
             uint32_t ts = now_us();
@@ -2653,10 +2929,61 @@ static void ui_task(void *arg)
             touch_sample(0);
         }
         disp_frame_end();
+#if DISP_HELPER
+        /* halves: the cut a row lower when this core waited for the second over 1.5 ms of the frame, a row
+         * higher when it hardly waited at all, the second core may have then. a quarter of a strip at least */
+        if (DISP_HELPER_HALF && s_helper) {
+            if (waited > 1500u && s_half_top < DISP_STRIP * 3 / 4) s_half_top++;
+            else if (waited < 300u && s_half_top > DISP_STRIP / 4) s_half_top--;
+        }
+#endif
 #endif
         busy_us += (uint32_t)(esp_timer_get_time() - t0);
         frames++;
-        if (light < 100) disp_backlight(light += 10);
+        /* the weather's warnings: one that came or got worse this frame (ui_frame worked them out) lights the
+         * LED, which stays lit as SET's HOW LONG says; "while it lasts" is while any is up */
+        if (s_ui.alert_new) {                          // what, how much and in how many hours: nothing of where
+            static const char *const KIND[WXA_KINDS] = { "storm", "pressure", "air", "radiation" };
+            const wx_alert_t *a = &s_ui.alert;
+            for (int k = 0; k < WXA_KINDS; k++) {
+                if (!(s_ui.alert_new & (1u << k))) continue;
+                char v[24];
+                if (k == WXA_STORM && a->thunder) snprintf(v, sizeof v, "thunder");
+                else if (k == WXA_STORM) snprintf(v, sizeof v, "gusts %d km/h", a->value[k]);
+                else if (k == WXA_PRESSURE) snprintf(v, sizeof v, "%+.1f hPa", (double)a->value[k] / 10.0);
+                else if (k == WXA_AIR) snprintf(v, sizeof v, "index %d", a->value[k]);
+                else snprintf(v, sizeof v, "%d nSv/h", a->value[k]);
+                ESP_LOGI(TAG, "weather warning: %s, %s, %s in %d h", KIND[k], a->level[k] >= WXA_RED ? "red" : "amber", v, a->hour[k]);
+            }
+        }
+        lock();
+        if (s_ui.alert_new) light_event(&s_light, LIGHT_WEATHER, now);
+        light_hold(&s_light, LIGHT_WEATHER, wx_alert_worst(&s_ui.alert) >= 0, now);
+        unlock();
+        /* the night: the sun 3 degrees under the horizon at home, about a quarter of an hour after sunset
+         * till as long before sunrise. worked out once a minute from the time the network gave, half a
+         * degree either way so a sun that hangs at the edge does not blink the screen. no time: day */
+        if (RADAR_HAS_DIM && s_ui.night && (!sun_at || now - sun_at >= 60000u)) {
+            sun_at = now ? now : 1;
+            const uint32_t utc = net_utc();
+            const int was = dark;
+            if (utc) {
+                const float el = sun_elevation(s_ui.cfg.lat, s_ui.cfg.lon, utc);
+                dark = dark ? el < -2.5f : el < -3.5f;
+            }
+            if (dark != was) ESP_LOGI(TAG, "the sun at home: %s", dark ? "down, the night's light" : "up, the day's light");
+        }
+        /* the light: up from dark at the start, then to SET's BACKLIGHT, or NIGHT while the sun is down
+         * if that is dimmer, when either changes, 10% a frame. where it does not turn down, full as before */
+        int light_to = ui_backlight_pct(s_ui.backlight);
+        if (dark && s_ui.night && ui_backlight_pct(s_ui.night) < light_to) light_to = ui_backlight_pct(s_ui.night);
+        if (!RADAR_HAS_DIM) light_to = 100;
+        if (light != light_to) {
+            if (light < light_to) light = light + 10 < light_to ? light + 10 : light_to;
+            else light = light - 10 > light_to ? light - 10 : light_to;
+            disp_backlight(light);
+            if (light == light_to) ESP_LOGI(TAG, "the screen's light: %d%%", light);   // once a change, when it is there
+        }
 
         if (now - t_stat >= 10000u) {
             uint32_t f = frames ? frames : 1;
@@ -2701,7 +3028,10 @@ static void ui_task(void *arg)
                      (unsigned)(pr[3] / 1000u / f), (unsigned)(pr[4] / 1000u / f), (unsigned)(pr[5] / 1000u / f),
                      (unsigned)(s_send_us / 1000u / f), (unsigned)(s_touch_us / 1000u / f));
 #if DISP_HELPER
-            if (s_helper)                              // the layers above are this core's strips only
+            if (s_helper && DISP_HELPER_HALF)          // the layers above are this core's strips only
+                ESP_LOGI(TAG, "the second core draws: waited for it %u ms a frame, its stack %u bytes free, %d rows of %d this core's",
+                         (unsigned)(s_help_wait_us / 1000u / f), (unsigned)uxTaskGetStackHighWaterMark(s_helper), s_half_top, DISP_STRIP);
+            else if (s_helper)
                 ESP_LOGI(TAG, "the second core draws: waited for it %u ms a frame, its stack %u bytes free",
                          (unsigned)(s_help_wait_us / 1000u / f), (unsigned)uxTaskGetStackHighWaterMark(s_helper));
             s_help_wait_us = 0;
@@ -2821,6 +3151,10 @@ void app_main(void)
     store_load_opt(&s_opt);
     s_help = (uint8_t)store_load_help();
     s_bare = (uint8_t)store_load_bare();
+    s_backlight = (uint8_t)store_load_backlight();
+    s_night = (uint8_t)store_load_night();
+    s_alerts = (uint8_t)store_load_alerts();
+    store_load_units(&s_units);
     s_demo_on = !s_sec.ssid[0];                         // no WiFi set: the demo from the first frame
     sky_init(&s_sky, s_cfg.lat, s_cfg.lon);
     demo_init(&s_demo, range_km(&s_cfg), esp_random());

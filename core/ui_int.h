@@ -106,12 +106,14 @@ enum {
     HIT_WIFI,                      /* the demo card's SET UP WIFI */
     HIT_NEWS,                      /* the note that the site has a newer version: ABOUT */
     HIT_GEAR,                      /* the radar's options */
+    HIT_ALERT,                     /* a weather warning's chip: the WEATHER look */
     HIT_BTN = 10,                  /* + panel button index */
     HIT_BAR = 20,                  /* + bottom bar button index */
+    HIT_WXPAGE = 30,               /* the WEATHER look's dial or graph: its next page */
     HIT_ROW = 40,                  /* + list row */
-    HIT_SDEC = 100, HIT_SINC = 140, HIT_SBTN = 180,  /* setup rows: 40 at most */
-    HIT_NET = 220,                 /* + a network on the WiFi page */
-    HIT_KEY = 240                  /* + a key of the keyboard */
+    HIT_SDEC = 100, HIT_SINC = 160, HIT_SBTN = 220,  /* setup rows: 60 at most (S_ROWS, ui_pages.c) */
+    HIT_NET = 280,                 /* + a network on the WiFi page */
+    HIT_KEY = 300                  /* + a key of the keyboard */
 };
 
 /* the WiFi page with its keyboard: square screens with touch. the round glass is too small for
@@ -134,15 +136,17 @@ extern const char *const SERVER_NAME[FREE_SERVERS];
 extern const char *const LOOK_NAME[LOOKS];
 /* the flat looks on a square screen: a map over the whole left side, north up, no compass round
  * it. the round glass keeps its disc in every look */
-static inline int square_look(const ui_t *u) { return !RADAR_ROUND && u->cfg.look != LOOK_RADAR; }
+static inline int square_look(const ui_t *u) { return !RADAR_ROUND && u->cfg.look != LOOK_RADAR && u->cfg.look != LOOK_WEATHER; }
 static inline int view_up(const ui_t *u) { return square_look(u) ? 0 : u->cfg.up; }   /* what is at the top */
 /* the square map fills the screen, home in its middle. the panel slides in over its right side
  * from the three dots, and by itself while a plane is picked. the radar has the panel beside the
  * scope; its three dots, in the panel's corner, take it away and the scope goes to the middle of
- * the screen. a picked plane brings it back for as long as it is picked */
+ * the screen. a picked plane brings it back for as long as it is picked. the weather's dots are the
+ * radar's, kept the same way: without the panel its dial stands in the middle, now's numbers round it */
 static inline int panel_shown(const ui_t *u)
 {
     if (u->t_panel) return u->t_panel - 1;          /* a finger turns or zooms: nothing moves under it till it lifts */
+    if (u->cfg.look == LOOK_WEATHER) return !RADAR_ROUND && !u->bare;
     return square_look(u) ? u->panel_open || u->sel : RADAR_ROUND || !u->bare || u->sel;
 }
 static inline int view_cx(const ui_t *u) { return square_look(u) || !panel_shown(u) ? GFX_W / 2 : SCX; }
@@ -153,7 +157,7 @@ static inline int scope_glass_cx(const ui_t *u) { return G_SCX + (GFX_Z(2 * (vie
 /* the radar's three dots: the top right of the screen, the corner of the panel or where it was */
 #define RDOTS_W (PANEL_WIDE ? DOTS_W : 18)    /* the 2.8"'s panel is narrow: its title needs the room */
 #define RDOTS_X (GFX_W - 6 - RDOTS_W)
-static inline int look_w(const ui_t *u) { return square_look(u) ? LOOK_W : LOOK_W - 10; }   /* the radar's corner is narrower */
+static inline int look_w(const ui_t *u) { return square_look(u) || u->cfg.look == LOOK_WEATHER ? LOOK_W : LOOK_W - 10; }   /* the radar's corner is narrower */
 static inline int look_x(const ui_t *u)
 {
     if (square_look(u)) return view_right(u) - 6 - DOTS_W - 4 - LOOK_W;
@@ -215,6 +219,7 @@ void main_top(ui_t *u, canvas_t *cv);
 #define LAYER_TOP 0
 #endif
 int  main_hit(const ui_t *u, int x, int y);
+void panel_dots(ui_t *u, canvas_t *cv, int x, int y, int w);   /* the three dots: the panel in and out */
 int  scope_pick(const ui_t *u, int x, int y);      /* plane index or -1 */
 void silhouette(canvas_t *cv, int kind, float x, float y, float heading, float size, uint32_t c, int a);
 
@@ -228,6 +233,17 @@ int  setup_repeats(int hit);
 void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd);
 void setup_open_radar(ui_t *u);                      /* the gear: SET at the radar's tab */
 void cal_draw(ui_t *u, canvas_t *cv);
+
+/* the WEATHER look (ui_weather.c): the next 24 hours on the dial, the pressure and the temperature behind it */
+void weather_frame(ui_t *u);                         /* each frame, before the strips: the dial just up, its tables, the frame's things */
+void weather_draw(ui_t *u, canvas_t *cv);            /* a strip: reads the tables only, on either core */
+void weather_close(void);                            /* another look: its tables go back to the heap */
+extern const char *const WX_PAGE_NAME[WX_PAGES];     /* what the toast says when a page comes */
+void next_wx_page(ui_t *u);                          /* a tap on the dial or the graph, or BOOT: the next page */
+enum { WXU_TEMP, WXU_PRES, WXU_WIND, WXU_RAIN };     /* the weather's units, SET's UNITS rows */
+int  wx_unit(const ui_t *u, int which);              /* the one in use: the setting, or home's country's (ui.h TEMP_* ...) */
+void wx_unit_text(const ui_t *u, int which, char *b, int sz);   /* SET's value: KM/H, or AUTO KM/H */
+void wx_unit_next(ui_t *u, int which);               /* SET's tap: the next one, AUTO after the last */
 
 /* the WiFi page and the keyboard (ui_wifi.c) */
 void wifi_open(ui_t *u, ui_cmd_t *cmd);            /* the networks, and look for them again */
@@ -260,6 +276,14 @@ typedef struct { int x, y, w, h; } note_box_t;
 int  update_note_box(const ui_t *u, note_box_t *b);  /* where the note is now, 0: not shown */
 void update_note(ui_t *u, canvas_t *cv);             /* the radar panel's title, else a card */
 void update_text(const ui_t *u, char *buf, int sz, int short_form);   /* NEW VERSION 0.4, short NEW 0.4 */
+
+/* the weather's warnings on every look: their words and colours (ui_weather.c), the chip in the
+ * corner the note has (ui_scope.c; the note moves under it). the WEATHER look says them in its panel */
+const char *alert_word(const wx_alert_t *a, int k);   /* STORM, THUNDER, PRESSURE, AIR, RADIATION */
+void alert_said(const wx_alert_t *a, int k, char *b, int sz);   /* what the toast says when it comes */
+uint32_t alert_colour(int level);                     /* amber, red */
+int  alert_box(const ui_t *u, note_box_t *b);         /* where the chip is now, 0: not shown */
+void alert_chip(ui_t *u, canvas_t *cv);
 
 #define CAL_POINTS 5
 extern int CAL_PT[CAL_POINTS][2];

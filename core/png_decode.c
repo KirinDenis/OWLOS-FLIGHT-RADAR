@@ -4,10 +4,11 @@
 #include <string.h>
 
 /* the window in pieces the heap always has. 4 KB was not small enough: on the 3.5" with the square
- * map a heap of 56 KB, broken up, had too few of them, every tile failed and every retry too */
-#define WIN_PIECE  1024u
+ * map a heap of 56 KB, broken up, had too few of them, every tile failed and every retry too. 1 KB
+ * was not either: 4 maps in 151 came empty, 43 KB free but the largest block 34 KB and the rest of it
+ * in bits under 1 KB (2026-11-16). 512 bytes fit in those bits */
+#define WIN_PIECE  512u
 #define WIN_PIECES (32768u / WIN_PIECE)
-#define ROW_MAX    (1 + PNG_MAX_W * 4)        /* the filter byte, then RGBA at most */
 
 /* a Huffman code the canonical way (RFC 1951): how many codes of each length, then the
  * symbols in code order. decoding walks the lengths a bit at a time */
@@ -17,7 +18,7 @@ typedef struct {
     // the file
     png_read_fn rd;
     void       *rctx;
-    uint8_t     in[1024];
+    uint8_t     in[768];                      /* a whole palette fits, the largest piece read at once */
     int         pos, len;
     uint32_t    idat_left;                    /* bytes of the IDAT chunk not read yet */
     // the inflater
@@ -30,7 +31,10 @@ typedef struct {
     png_info_t  info;
     png_row_fn  row;
     void       *ctx;
-    uint8_t     rows[2][ROW_MAX];             /* this row and the one above: filters need it */
+    /* this row and the one above, filters need it: made at IHDR as long as the tile's rows are. room
+     * for RGBA as wide as a tile was 2 KB, OSM's palette rows want a quarter of it, and on the 3.5" with
+     * the square map that was the memory the window then did not find (2026-11-18) */
+    uint8_t    *rows[2];
     int         cur, filled, rowlen, y;
     int         depth;                        /* bits a sample: 8, or 1, 2, 4 for grey and palette */
 } st_t;
@@ -106,8 +110,8 @@ static int unfilter(uint8_t *c, const uint8_t *p, int n, int bpp, int f)
 }
 
 /* 1, 2 or 4 bits a pixel, grey or palette: OSM's tiles of open sea and plain land come so, a few
- * colours in a few hundred bytes. a byte each, put after the packed row in the same buffer (ROW_MAX
- * has the room), so row() sees an 8 bit picture; grey stretched to 0..255. read as 8 bits only, every
+ * colours in a few hundred bytes. a byte each, put after the packed row in the same buffer (made with
+ * the room at IHDR), so row() sees an 8 bit picture; grey stretched to 0..255. read as 8 bits only, every
  * such tile was refused, and the map kept a hole there for good */
 static const uint8_t *widen(const st_t *s, uint8_t *c)
 {
@@ -326,6 +330,10 @@ int png_decode(png_read_fn rd, void *rctx, png_head_fn head, png_row_fn row, voi
             if (in->w < 1 || in->w > PNG_MAX_W || in->h < 1) goto done;
             in->bpp = BPP[in->type];                   // the filters' step: a byte for grey and palette, packed or not
             s->rowlen = 1 + (small ? (in->w * s->depth + 7) / 8 : in->w * in->bpp);
+            if (s->rows[0]) goto done;                 // a second IHDR
+            const size_t room = (size_t)s->rowlen + (small ? (size_t)in->w : 0);   // widen() puts its bytes after the row
+            if (!(s->rows[0] = calloc(2, room))) { res = PNG_NO_MEMORY; goto done; }   // the row above the first: 0
+            s->rows[1] = s->rows[0] + room;
             if (!skip(s, 13 + 4)) goto done;
         } else if (!strcmp(type, "PLTE")) {
             if (len > 768 || len % 3 || !need(s, (int)len)) goto done;
@@ -346,6 +354,7 @@ int png_decode(png_read_fn rd, void *rctx, png_head_fn head, png_row_fn row, voi
     }
 done:
     for (unsigned i = 0; i < WIN_PIECES; i++) free(s->win[i]);
+    free(s->rows[0]);
     free(s);
     return res;
 }

@@ -5,6 +5,7 @@
 #include "qr_site.h"
 
 const char *ui_version;
+int ui_beta;
 
 // one number of a version and the dot after it: "0.10" gives 0, then 10
 static long part(const char **s)
@@ -100,7 +101,7 @@ void about_draw(ui_t *u, canvas_t *cv)
 {
     char said[48], ver[24], site[64];
     const uint32_t said_col = site_said(u, said, sizeof said);
-    snprintf(ver, sizeof ver, "%s", ui_version && ui_version[0] ? ui_version : "?");
+    snprintf(ver, sizeof ver, "%s%s", ui_version && ui_version[0] ? ui_version : "?", ui_beta ? " BETA" : "");
     site_name(site, sizeof site);
 #if RADAR_ROUND
     // the glass: the code in the middle, the version over it, what the site said under it

@@ -33,10 +33,17 @@ idf_build_set_property(COMPILE_DEFINITIONS "RADAR_DISPLAY=${RADAR_DISPLAY}" APPE
 # publishes the same number in version.json, which the board compares its own with
 set(CHANGES "${CMAKE_CURRENT_LIST_DIR}/../CHANGES.md")
 file(STRINGS "${CHANGES}" FLIGHT_VERSION REGEX "^## [0-9]" LIMIT_COUNT 1)
+# "(beta)" on that line: a beta build. the site keeps it beside the stable, and it follows the site's
+# betas where a stable build follows only the stable (main.c update_check)
+set(FLIGHT_BETA 0)
+if(FLIGHT_VERSION MATCHES "\\(beta\\)")
+    set(FLIGHT_BETA 1)
+endif()
 string(REGEX REPLACE "^## ([0-9.]+).*" "\\1" FLIGHT_VERSION "${FLIGHT_VERSION}")
 if(NOT FLIGHT_VERSION MATCHES "^[0-9]+(\\.[0-9]+)*$")
     message(FATAL_ERROR "no version in ${CHANGES}: its first \"## \" line should be one, like ## 0.3")
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CHANGES}")   # a new version: configure again
 idf_build_set_property(COMPILE_DEFINITIONS "FLIGHT_VERSION=\"${FLIGHT_VERSION}\"" APPEND)
+idf_build_set_property(COMPILE_DEFINITIONS "FLIGHT_BETA=${FLIGHT_BETA}" APPEND)
 project(owlos-flight-radar)

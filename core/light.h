@@ -8,8 +8,9 @@
 #include <stdint.h>
 #include "sky.h"
 
-/* in the order they win when several are lit */
-enum { LIGHT_SOS, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA, LIGHT_EVENTS };
+/* in the order they are kept and sent (light_cfg_t.on, the site's "led" bits): a new one goes last.
+ * which wins when several are lit is light.c's ORDER. WEATHER: a weather warning came (core/weather.h) */
+enum { LIGHT_SOS, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA, LIGHT_WEATHER, LIGHT_EVENTS };
 enum { LIGHT_LOW, LIGHT_MID, LIGHT_HIGH, LIGHT_LEVELS };
 enum { LIGHT_TOUCH, LIGHT_10S, LIGHT_WHILE, LIGHT_HOLDS };     /* till touched (a minute at most), 10 s, while it lasts */
 #define LIGHT_NEARS 4               /* how close is near: 1, 2, 5 or 10 of the distance unit */
@@ -18,7 +19,7 @@ enum { LIGHT_TOUCH, LIGHT_10S, LIGHT_WHILE, LIGHT_HOLDS };     /* till touched (
  * picks the one that is red in the LED test */
 enum { LIGHT_RED_4, LIGHT_RED_22, LIGHT_REDS };
 
-#define LIGHT_CFG_VERSION 3
+#define LIGHT_CFG_VERSION 4         /* 4: WEATHER. firmware/main/store.c reads 3 and 2 over the defaults */
 #define LIGHT_TEST_MS 4500u         /* red, green, blue, 1.5 s each */
 
 typedef struct {

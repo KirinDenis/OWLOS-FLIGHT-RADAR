@@ -11,6 +11,10 @@ twin.c
 ../core/ui_pages.c
 ../core/ui_wifi.c
 ../core/ui_about.c
+../core/ui_weather.c
+../core/wx_parse.c
+../core/wx_alert.c
+../core/sun.c
 ../core/qr_site.c
 ../core/map.c
 ../core/png_decode.c

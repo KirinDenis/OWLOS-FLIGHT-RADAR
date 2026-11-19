@@ -100,7 +100,9 @@ static void micro_smooth(canvas_t *cv, const font_t *f, int x, int y, const char
 CORE_HOT int micro_text(canvas_t *cv, int x, int y, const char *s, uint32_t c, int a, int scale)
 {
     int x0 = x;
-    if (!gfx_touches(cv, y, y + MICRO_H * scale)) return micro_width(s, scale);   // not in this strip, just measure
+    /* not in this strip, just measure. a row more each way: on the glass the smooth font's slash stands a pixel over its
+     * capitals, and a strip ending there lost it */
+    if (!gfx_touches(cv, y - 1, y + MICRO_H * scale + 1)) return micro_width(s, scale);
 #if GFX_SCALED
     if (scale <= 2) {
         micro_smooth(cv, scale == 1 ? &FONT_TINY : &FONT_MEDIUM, x, y, s, c, a, scale);

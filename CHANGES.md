@@ -3,6 +3,89 @@
 What changed in each version of OWLOS Flight Radar, the newest first. The first `## ` line below is the
 version: the firmware is built with it, the site publishes it, and a board compares its own with it.
 The site keeps the firmware of each version: a new number here keeps the one before it as it was.
+A version marked (beta) is offered on the site beside the stable one, which stays what the site flashes
+unless the beta is picked. Only a board that runs a beta hears of a newer beta.
+
+## 0.16.1 (beta)
+
+- A fourth look, WEATHER: the next 24 hours on the radar's own dial, noon at the top and midnight at
+  the bottom, a hand at now as a clock has, and in the middle the temperature now over the home's clock.
+  Round the edge the sky as it will be each hour, by the sun's height the board works out, the night
+  with its stars; inside it the temperature as a loop in the colours of how warm, frost blue to a hot
+  red, the clouds, the rain and the wind. The day is there whole from the first moment: no beam goes
+  round it, the weather is for reading, and what moves is the weather itself, the rain, the wind, the
+  stars. The panel says it in words: now, how it feels, the humidity, the wind, the pressure and which
+  way it goes, the air, the UV, the radiation, the rain and the next days, the air and the UV each with
+  a little scale under it, best to worst, the step now lit. Its three dots are the radar's, kept for
+  both looks: without the panel the dial stands in the middle with those numbers either side of it, a
+  warning's in a box that breathes. The forecast and the air are Open-Meteo's, asked every half an hour
+  for the home rounded to about 10 km, no key needed. The radiation has no open source for the whole
+  world yet: till it has one, the sun's next rise or set stands in its place.
+- SET has a UNITS tab: the distance and the height from VIEW, and the weather's, TEMPERATURE in C or
+  F, PRESSURE in hPa or inHg at the sea's level or in mmHg at home's height as a barometer there reads,
+  WIND in km/h, m/s, mph or knots, RAIN in millimetres or inches. AUTO, the first, is home's country's
+  own: the US's Fahrenheit, inHg, mph and inches, the UK's mph, mmHg where it is kept, m/s in the north
+  and the east. The board keeps them; the site's VIEW tab and the console (`temp_unit`, `pressure_unit`,
+  `wind_unit`, `rain_unit`) set them too. On the round glass they are under VIEW.
+- The site has WEATHER too, on its screen of a board and in the demo without one, drawn by the same
+  code as on the board. The page asks Open-Meteo for the forecast itself, as the board does, and only
+  while that look is up. The board's VIEW tab there has WEATHER beside the other looks, which of its
+  pages is up, the warnings and the units. A page turned on the board turns on the site too, and the
+  other way round: the board says `OWLOS WXPAGE` and the page's number. A board before 0.16 keeps its
+  three looks there.
+- Back to 0.15 from this beta: a board left on WEATHER shows MAP there, and the LED's settings start
+  from their defaults. Everything else stays, and flashed to 0.16.1 again the board has all of it back.
+- Behind the dial two more pages, a tap on it to each, or BOOT: the pressure and the temperature as
+  graphs on one time axis, 14 hours back on the left and the next day on the right, so now stands at
+  about the golden section of the width, in the same place on both, a line up to a dot that pulses.
+  Each line is a smooth curve through the hours that never swings past the values it joins, a fill
+  fading under it, the past thinner and fainter than what is to come, the weather's pictures on it
+  every three hours (six on the round glass), and a half sun on the time's line where the sun rises and
+  sets. The pressure's hours of a coming change of 6 hPa or more are amber, with the pressure 12 hours
+  ago, now and when the change is done under it. The temperature has its numbers on the line and the
+  rain under it in bars, the rain to come falling into them, then when it rains and the strongest gust.
+  The day before is a third short question to Open-Meteo, some 2 KB: its pressure, temperature, weather
+  and rain. A pressure warning's chip opens its page. WEATHER draws at 17 to 20 frames a second on the
+  2.8", its graphs at 20 to 25; on the 3.5" at 8 to 10 and 9 to 11.
+- Weather warnings on every look, each one on at first and each one the person's to switch off (SET,
+  DATA, or the board's VIEW tab on the site): a storm, gusts from 75 km/h or thunder; the pressure 6 hPa
+  up or down within 12 hours, the change the body feels; the air poor or worse; radiation over 0.3
+  microsievert an hour near home. A chip under the town's name says the worst of them, amber or red,
+  and a tap on it opens WEATHER, where the panel says each in full. One that comes says so on the
+  screen for a few seconds and lights the LED's new WEATHER row, yellow. The radiation's waits for a
+  source of the nearest station's reading.
+- The round board draws its discs in whole numbers: its ESP32-C3 has no floating point unit, and the
+  WEATHER look's clouds took half its frame.
+- The second core draws half of every look and every page now, not of the radar's only: the weather,
+  the two maps, the list, SET and the rest, on the boards that have it: the 3.5", the 4.3", the 5" and
+  7" boards and the Tab5 (those four are not run on one here). The 2.8" CYD has it now too: there it
+  draws the lower half of each strip of the picture, which wants no memory but its own 7 KB, and the
+  radar goes from 9 to 12 frames a second, MAP from 16 to 19 and CLASSIC from 13 to 15. The 3.5" draws
+  WEATHER with both cores too, once its maps are read. Its maps stay on one core: they want the
+  memory, and their frames wait for the cable to the screen rather than for the drawing. There the
+  second core takes its memory only when there is room.
+- The screen's light can be turned down: SET, VIEW, BACKLIGHT, in four steps, 100%, 50%, 25% and 10%,
+  or from the site, on the board's VIEW tab. The board keeps it. Not on the boards whose light only
+  goes on: the round one, the RPi LCD and the CrowPanel Advance 5.0.
+- SET, VIEW, NIGHT: the light goes down to 50%, 25% or 10% from dusk till dawn, by the sun over the
+  board's home: from when it is 3 degrees under the horizon, about a quarter of an hour after sunset,
+  till as long before sunrise. The board works the sun out itself, with the time from the network, so
+  no time zone is needed. It never makes the screen brighter than BACKLIGHT. Off at first.
+- Fixed: on the 3.5" the square map now and then came up empty for 15 seconds. There was memory
+  enough, but in pieces too small for the tile reader, which now takes smaller ones, and 2 KB less of
+  it: it keeps a tile's last two rows as long as that tile's rows are, not as long as the widest
+  picture's could be. And the 3.5" draws its picture in strips of 6 rows instead of 8, which leaves
+  the maps 7 KB more: in 20 minutes of looks and ranges changed every 5 seconds, 153 maps of 153
+  came whole. MAP and CLASSIC draw a little slower for it there, 10 and 9 frames a second instead of
+  12 and 11.
+- Fixed: the 2.8" and 3.5" CYD's touch now and then took one noisy read of its chip for a tap. Now and
+  then after a restart the 3.5" went on to the next look by itself, as if its look button had been
+  touched. Sometimes it also stopped trusting its pen interrupt and read the chip every frame from then on.
+  Now a press counts once two reads in a row say it, 15 ms later than before. On every board the glass
+  is not read in the first second and a half after power on, and a press held from then on counts only
+  once it has lifted.
+- Fixed: on the 5", 7" and 10" boards and the Tab5 a slash in the small capitals lost its top pixel
+  where a strip of the picture began just under it: there the slash stands a pixel over the capitals.
 
 ## 0.15
 

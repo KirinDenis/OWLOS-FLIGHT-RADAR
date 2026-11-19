@@ -1,6 +1,6 @@
 /* png_decode - a PNG read row by row, for the map's tiles. the picture is never whole in memory:
  * two of its rows and the inflater's 32 KB look-back window are all it takes, and the window is
- * eight pieces of 4 KB. the ESP32 has an inflater in ROM (miniz's tinfl), but it wants the 32 KB
+ * 64 pieces of 512 bytes (png_decode.c). the ESP32 has an inflater in ROM (miniz's tinfl), but it wants the 32 KB
  * in one piece, and after the WiFi starts the heap has nothing that big. so this one is our own,
  * after Mark Adler's puff: plain, a bit at a time.
  * 8 bit palette, grey, grey+alpha, RGB, RGBA, and 1, 2, 4 bit palette and grey (OSM's tiles of sea
@@ -26,6 +26,6 @@ typedef void (*png_row_fn)(void *ctx, const png_info_t *info, int y, const uint8
 enum { PNG_OK = 1, PNG_BAD = 0, PNG_NO_MEMORY = -1 };
 
 /* rd(rctx) gives the file, head(ctx) and row(ctx) take the picture. PNG_OK: every row went to
- * row(). PNG_BAD: not a PNG this reads, broken, or head() said no. it takes about 39 KB while it
- * runs, the largest piece 5 KB, and gives it all back */
+ * row(). PNG_BAD: not a PNG this reads, broken, or head() said no. it takes about 37 KB while it
+ * runs (OSM's 8 bit palette tiles), the largest piece 3 KB, and gives it all back */
 int png_decode(png_read_fn rd, void *rctx, png_head_fn head, png_row_fn row, void *ctx);

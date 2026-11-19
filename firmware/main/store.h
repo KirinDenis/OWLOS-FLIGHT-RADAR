@@ -34,6 +34,18 @@ void store_save_help(int help);
 /* the radar without its panel (its three dots): 1, or 0 with the panel. kept by itself like help */
 int  store_load_bare(void);
 void store_save_bare(int bare);
+/* the screen's light, SET's BACKLIGHT: a step of UI_BACKLIGHTS (core/ui.h), 0 the brightest. kept by itself */
+int  store_load_backlight(void);
+void store_save_backlight(int step);
+/* SET's NIGHT: 0 off, else the step the light goes down to while the sun is down at home. kept by itself */
+int  store_load_night(void);
+void store_save_night(int step);
+/* the weather's warnings shown, 1 << WXA_* (core/weather.h), SET's ALERT rows: all of them till set. kept by itself */
+int  store_load_alerts(void);
+void store_save_alerts(int mask);
+/* the weather's units, SET's UNITS rows (core/ui.h wx_units_t): each 0, home's country's own, till set. kept by itself */
+void store_load_units(wx_units_t *w);
+void store_save_units(const wx_units_t *w);
 /* how long this run has lasted, s, saved once a minute: the next start says how long the run
  * before it was, whatever ended it (a reset by the USB line or a power cut too) */
 uint32_t store_load_ran(void);

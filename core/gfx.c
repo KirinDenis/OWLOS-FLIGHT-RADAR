@@ -258,6 +258,27 @@ CORE_HOT void gfx_disc(canvas_t *cv, float cx, float cy, float r, uint32_t c, in
     float ro = r + 1.0f;
     int ya = (int)floorf(cy - ro), yb = (int)ceilf(cy + ro);
     if (!clip_rows(cv, &ya, &yb)) return;
+#if GFX_SOFT_FLOAT
+    /* the C3: in whole numbers, 1/16 px, as the glow. the coverage r + 0.5 - d is whole inside r - 0.5
+     * and none outside r + 0.5, which squares tell apart; only the pixels of the edge take a root.
+     * a float a pixel there made the clouds of the WEATHER look half its frame */
+    const int32_t cx16 = (int32_t)lroundf(cx * 16.0f), cy16 = (int32_t)lroundf(cy * 16.0f), r16 = (int32_t)lroundf(r * 16.0f);
+    const int32_t out = r16 + 8, in = r16 - 8, out2 = out * out, in2 = in > 0 ? in * in : -1;
+    if (out <= 0) return;                              // under -0.5 px: nothing, as the floats find
+    const int xa = imax((int)floorf(cx - ro), 0), xb = imin((int)ceilf(cx + ro), GFX_PW - 1);
+    for (int y = ya; y <= yb; y++) {
+        const int32_t dy = y * 16 - cy16, dy2 = dy * dy;
+        if (dy2 >= out2) continue;
+        uint32_t *row = gfx_row(cv, y);
+        for (int x = xa; x <= xb; x++) {
+            const int32_t dx = x * 16 - cx16, d2 = dx * dx + dy2;
+            if (d2 >= out2) continue;
+            if (d2 <= in2) { plot(row, x, c, a); continue; }
+            const int32_t cov = out - (int32_t)gfx_isqrt((uint32_t)d2);   // 1 .. 16
+            plot(row, x, c, cov >= 16 ? a : (a * cov) >> 4);
+        }
+    }
+#else
     for (int y = ya; y <= yb; y++) {
         float dy = (float)y - cy;
         int xa = imax((int)floorf(cx - ro), 0), xb = imin((int)ceilf(cx + ro), GFX_PW - 1);
@@ -270,6 +291,7 @@ CORE_HOT void gfx_disc(canvas_t *cv, float cx, float cy, float r, uint32_t c, in
             plot(row, x, c, (int)(a * cov));
         }
     }
+#endif
 }
 
 // soft additive glow, (1 - d^2/r^2)^2 so no sqrt needed. in 1/16 px, whole numbers

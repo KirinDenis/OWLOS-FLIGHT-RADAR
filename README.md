@@ -105,6 +105,9 @@ The map under them comes from OpenStreetMap.
    to pick an older one, and the same buttons flash it; `?v=0.3` after the site's address picks one
    from a link. An older version may not read all the settings a newer one saved: the WiFi stays,
    the rest may need sending again.
+8. A beta, when the site has one: a new board picks STABLE or BETA as it is flashed. A board already on
+   the site picks it in its window, SETTINGS, BOARD, Version, and FLASH: its settings stay. The same
+   two buttons take a board on the beta back to the stable.
 
 ## WiFi and home
 
@@ -421,7 +424,7 @@ and a PC preview.
   publishes it in `version.json` for the boards and shows the file as its history. A new version is a new
   section at the top of that file.
 - `(beta)` on that line makes it a beta, `## 0.16.1 (beta)`. The site keeps it beside the stable, in
-  `fw/<version>/<board>/`, and offers it as a choice when flashing; the stable stays in `fw/<board>/` and
+  `fw/<version>/<board>/`, and offers it as a choice when flashing, and in a connected board's BOARD tab; the stable stays in `fw/<board>/` and
   is still what the site flashes unless the beta is picked. `version.json` says both: `version` is the
   stable, which every board compares with, and `beta` the beta, which only a beta build follows. A beta
   needs a number above the stable, a new beta replaces it, and the next stable version at the top of the

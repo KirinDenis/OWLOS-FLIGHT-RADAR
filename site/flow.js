@@ -408,7 +408,14 @@ function addUnit({ mac, name, build, online = false, zoom = 1, usb = null }) {
 const screenNow = () => (app.cur ? app.cur.screen : hero);
 const here = () => app.units.filter((u) => u.online);
 const byMac = (mac) => app.units.find((u) => u.mac === mac);
-const short = (u) => u.name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}.-]/gu, '');
+const slug = (u) => u.name.toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}.-]/gu, '');
+/* a board's name in the console, and in the commands a board's window runs: its name, and the end of its MAC
+ * when this page knows another board of that name (two 2.8" CYDs). by the name alone such a command went to
+ * the first of them, often one not on the cable, and nothing happened */
+const short = (u) => {
+  const s = slug(u);
+  return app.units.some((v) => v !== u && slug(v) === s) ? `${s}-${u.mac.slice(-4)}` : s;
+};
 
 const usbName = (port) => ({ 0x1a86: 'CH340', 0x10c4: 'CP210X', 0x303a: 'USB' }[port?.getInfo?.().usbVendorId] ?? 'USB');
 
@@ -1321,7 +1328,9 @@ async function flashNew(ver) {
   }
 }
 
-async function update(u) {
+/* ver: the version to flash, the one the board follows unless its BOARD tab picked the other (a beta board gets
+ * the beta again). no erase: the settings stay */
+async function update(u, ver = follows(u)) {
   if (!u.link) {
     throw new Error(`${u.name} is not connected`);
   }
@@ -1332,13 +1341,14 @@ async function update(u) {
   u.link = null;
   u.online = false;
   await link.close();
-  await flashing(port, u.build, u.name, false, here().length, follows(u));   // a beta board gets the beta again
+  await flashing(port, u.build, u.name, false, here().length, ver);
+  u.pick = null;                                       // flashed: from now on it follows what it runs
   return (await afterFlash(port)) ?? u;
 }
 
-async function updateThen(u) {
+async function updateThen(u, ver = follows(u)) {
   try {
-    showLive(await update(u), { top: true });
+    showLive(await update(u, ver), { top: true });
   } catch (e) {
     console.warn(e);
     trouble('Flashing stopped', e.message);
@@ -1549,9 +1559,42 @@ function panePart(u, tab) {
     });
     slider.addEventListener('change', () => apply('range', RANGES[slider.value]));
   } else {
+    /* the version, where the site has a beta for this board: the stable or the beta, the one it runs pressed. the
+     * other picked, a button flashes it, settings kept. the bar's UPDATE and FLASH AGAIN go on following what it runs */
+    const canPick = Boolean(u?.online && u.version && beta && betaBoards.includes(u.build));
+    const runs = u && canPick ? follows(u) : '';
+    const ver = u?.pick === 'beta' ? beta : u?.pick === 'stable' ? newest : runs;
+    const toBeta = ver === beta && runs !== beta;
+    const channel = canPick ? `<div class="field channel"><span>Version</span><div class="chips">
+        <button class="chip" data-channel="stable" aria-pressed="${ver === newest}">STABLE ${newest}</button>
+        <button class="chip" data-channel="beta" aria-pressed="${ver === beta}">BETA ${beta}</button></div>
+        ${ver !== runs ? `<p class="note">${toBeta ? `A beta brings the new things first, and it may still go wrong. ${newest} is one flash away. The board keeps its WiFi, home and settings.`
+          : `Back to ${newest}: an older version may not read all the settings a newer one saved. The WiFi and the home stay.`}</p>
+        <div class="row"><button class="btn flashto">FLASH ${ver}</button></div>` : ''}</div>` : '';
     pane.innerHTML = `${u ? `<label>Name<input type="text" class="rename" autocomplete="off" value="${esc(u.name)}"></label>` : ''}
-      <dl class="facts">${facts(u).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      <dl class="facts">${facts(u).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${channel}
       ${u ? '<button class="plain forget">Forget this board</button><small class="forgetnote" hidden>Only this page forgets it: the firmware and its settings stay on the board, and + ADD A BOARD brings it back. Click again to forget it.</small>' : ''}`;
+    pane.querySelectorAll('[data-channel]').forEach((el) => {
+      el.addEventListener('click', () => {
+        u.pick = el.dataset.channel;
+        panePart(u, tab);
+      });
+    });
+    const flashTo = pane.querySelector('.flashto');
+    flashTo?.addEventListener('click', () => {         // as FLASH AGAIN: the first click only asks
+      if (flashTo.classList.contains('armed')) {
+        clearTimeout(flashTo.calm);
+        say(`flash ${ver} --board ${short(u)}`, 'cmd');
+        updateThen(u, ver);
+        return;
+      }
+      flashTo.classList.add('armed');
+      flashTo.textContent = 'SURE? CLICK AGAIN';
+      flashTo.calm = setTimeout(() => {
+        flashTo.classList.remove('armed');
+        flashTo.textContent = `FLASH ${ver}`;
+      }, 4000);
+    });
     pane.querySelector('.rename')?.addEventListener('change', (e) => {
       u.name = e.target.value.trim() || u.name;
       w.setTitle(u.name);

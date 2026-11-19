@@ -86,6 +86,13 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   once it has lifted.
 - Fixed: on the 5", 7" and 10" boards and the Tab5 a slash in the small capitals lost its top pixel
   where a strip of the picture began just under it: there the slash stands a pixel over the capitals.
+- Fixed: when the site knew two boards of one kind, two 2.8" CYDs say, a button in one's window could
+  go to the other, often one not on the cable, and nothing happened: its settings, a network to forget,
+  its screen, the touch's crosses. The console names such boards with the end of their MAC now, like
+  2.8-cyd-1a2b, and every window's buttons reach their own board.
+- A board already on the site picks its version too: in its window SETTINGS, BOARD, Version, STABLE or
+  BETA, then FLASH, its settings kept. Before, only a new board could pick the beta as it was flashed,
+  and a board on the beta had no button back to the stable.
 
 ## 0.15
 

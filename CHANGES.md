@@ -60,6 +60,9 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   into a blot: the soft edge was as bright as the letter. Now it is dimmer, and SET, VIEW, **MAP NAMES**
   says how much: SOFT, half as bright (what a board starts with), THIN, a quarter, or BOLD, as bright. The site's console
   says it as `names`. The classic look is as it was.
+- The height legend in the corner of the map and the radar says the height's unit: in metres (SET, UNITS)
+  it reads <3KM and <7.6KM, where it read <10K and <25K whatever was set. The colours stay where they
+  were, at 10 000 and 25 000 ft.
 - The plain greys of a town were taken for an airport's apron and lit up as runways: they are a town now.
 - The small roads are quieter the wider the range: from 25 km out the tiles have every lane in the
   country, and whole they were a net over the map.

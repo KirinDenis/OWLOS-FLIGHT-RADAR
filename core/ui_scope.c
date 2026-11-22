@@ -496,6 +496,14 @@ static const char *plane_name(const plane_t *p) { return p->flight[0] ? p->fligh
 // what the top left corner calls home
 static inline const char *home_name(const ui_t *u) { return u->net.demo ? "DEMO SKY" : u->cfg.place[0] ? u->cfg.place : "HOME"; }
 
+// the height legend in the height's unit. the colours stay at 10 000 and 25 000 ft, in metres 3 and 7.6 km
+static inline const char *const *height_legend(const ui_t *u)
+{
+    static const char *const FT[4] = { "GND", "<10K", "<25K", "HIGH" };
+    static const char *const M[4] = { "GND", "<3KM", "<7.6KM", "HIGH" };
+    return u->cfg.alt_unit == ALT_M ? M : FT;
+}
+
 // the numbers on the rings: quarters of the range, as short as they can be written
 static void ring_value(float v, char *buf, int sz)
 {
@@ -1226,7 +1234,7 @@ static void sq_chrome(ui_t *u, canvas_t *cv)
     }
     if (gfx_touches(cv, GFX_H - 40, GFX_H)) {
         // bottom left: the height legend. on paper each dot has a dark edge: the light colours vanish otherwise
-        static const char *const L[4] = { "GND", "<10K", "<25K", "HIGH" };
+        const char *const *L = height_legend(u);
         const uint32_t C[4] = { C_DIM, C_LOW, C_PRIM, C_FOCUS };
         int x = 9;
         sq_card(u, cv, 2, GFX_H - 21, sq_box(u, 2).w - 4, 19);
@@ -1543,7 +1551,7 @@ static void corners(ui_t *u, canvas_t *cv)
     }
 #endif
     if (gfx_touches(cv, GFX_H - 31, GFX_H)) {             // the height legend, and how the fingers work the scope
-        static const char *const L[4] = { "GND", "<10K", "<25K", "HIGH" };
+        const char *const *L = height_legend(u);
         const uint32_t C[4] = { C_DIM, C_LOW, C_PRIM, C_FOCUS };
         int x = 9;
         for (int i = 0; i < 4; i++) {

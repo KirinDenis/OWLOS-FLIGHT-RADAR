@@ -183,8 +183,8 @@ smaller letters and its list of the nearest planes without their heights.
   Tapped once more, they bring it back to stay. The board remembers which way it was left; on the site
   the dots of the board's screen do the same.
 - **HUE** changes the colours, **LIST** shows every flight, **SET** has the settings.
-- **Colour is height**: grey on the ground, warm under 10 000 ft, the theme's colour up to 25 000, white
-  above. Emergency squawks blink.
+- **Colour is height**: grey on the ground, warm under 10 000 ft (3 km), the theme's colour up to 25 000
+  (7.6 km), white above. The legend in a corner says it in the height's unit. Emergency squawks blink.
 - **The planes glide**: the free networks give a plane's position every 5 seconds, Flightradar24 every 20.
   In between the board flies it on along its track, round its curve in a turn, and when the next position
   comes the plane slides onto it, never faster than it flies. One the board lost and found again jumps.

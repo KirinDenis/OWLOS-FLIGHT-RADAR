@@ -289,8 +289,16 @@ static void map_service(const fr_cfg_t *c)
 typedef struct { char *b; int n, cap; } text_t;
 
 /* Nominatim's question and answer, for geocode() and the home search: both run on the fetch task,
- * one at a time. the ESP32's RAM is short, one pair is kept */
-static CORE_BIG char s_osm_url[420], s_osm[2048];
+ * one at a time. the ESP32's RAM is short, one pair is kept. and the same bytes are map.c's working
+ * rows while map_service reads a tile, on the same task, never at the same time: from the heap, beside
+ * the PNG's 32 KB window, they cost the 2.8" a third of its maps (map_scratch, core/map.h) */
+static CORE_BIG union {
+    struct { char url[420], body[2048]; } osm;
+    uint8_t  map[MAP_SCRATCH];
+    uint32_t align;                                    // the map's rows hold 16 bit words
+} s_fetch_buf;
+#define s_osm_url s_fetch_buf.osm.url
+#define s_osm     s_fetch_buf.osm.body
 
 static void to_text(void *ctx, const char *data, int len)
 {
@@ -528,6 +536,9 @@ static volatile int      s_alerts_new;     // the site changed it: the screen ta
 /* the weather's units, SET's UNITS rows or the site: each 0 home's country's own (core/ui.h), kept like help */
 static wx_units_t        s_units;          // store_load_units. under s_lock
 static volatile int      s_units_new;      // the site changed them: the screen takes them
+/* the map's names on the dark looks, SET's MAP NAMES or the site: NAMES_* (core/ui.h), kept like help */
+static uint8_t           s_names;          // store_load_names. under s_lock
+static volatile int      s_names_new;      // the site changed it: the screen takes it
 
 static const char *board_name(void);
 
@@ -836,6 +847,8 @@ static void skyplay_show(void)
     for (int i = 0; i < s_sky.n; i++) {
         plane_t *p = &s_sky.p[i];
         p->gs = 0.0f;                                  // still: nothing to move it on
+        p->turn = 0;                                   // nor to turn it, nor a slide it was in when it was kept
+        p->gx = p->gy = 0;
         p->seen = p->heard = now;
         p->first = now - 600000u;                      // long seen: no ring opening round it
     }
@@ -1067,7 +1080,7 @@ static void say_cfg(void)
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
            "\"led\":%d,\"led_level\":%d,\"led_hold\":%d,\"led_near\":%d,\"led_red\":%d,\"version\":\"%s\",\"newest\":\"%s\","
            "\"uptime\":%u,\"ran\":%u,\"reset\":\"%s\",\"screen\":%d,"
-           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d,\"alerts\":%d%s%s}\n",
+           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d,\"alerts\":%d,\"names\":%d%s%s}\n",
            json_esc(s_sec.ssid, ssid, sizeof ssid), nets, (double)s_cfg.lat, (double)s_cfg.lon,
            json_esc(s_cfg.place, place, sizeof place), json_esc(s_cfg.country, country, sizeof country),
            s_cfg.source == SRC_FR24 ? "fr24" : "free", s_sec.key[0] ? "true" : "false", s_cfg.up, s_cfg.flip,
@@ -1076,7 +1089,7 @@ static void say_cfg(void)
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
            (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
-           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, dim, units);
+           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, s_names, dim, units);
     unlock();
 }
 
@@ -1266,6 +1279,18 @@ static void on_line(const char *line)
         s_alerts_new = 1;
         unlock();
         store_save_alerts((int)v);
+    }
+    /* the map's names on the dark looks, from the site. its screen says them in every SET it sends: saved only
+     * when they change, the flash is written no more than it was */
+    if (json_num(j, "names", &v) && v >= 0 && v < NAMES_STYLES) {
+        lock();
+        const int changed = s_names != (uint8_t)v;
+        s_names = (uint8_t)v;
+        s_names_new = 1;
+        unlock();
+        if (changed) {
+            store_save_names((int)v);
+        }
     }
     {                                                  // the weather's units from the site, 0 home's country's own
         wx_units_t un;
@@ -2545,6 +2570,7 @@ static void ui_task(void *arg)
     s_ui.night = s_night;                              // and at night
     s_ui.alerts = s_alerts;                            // the weather's warnings shown
     s_ui.units = s_units;                              // and its units
+    s_ui.names = s_names;                              // the map's names on the dark looks
     unlock();
     led_init(light_red_gpio(&s_ui.light));
     s_ui.map = &s_map;                                 // the fetch task makes it, the scope draws it
@@ -2813,12 +2839,25 @@ static void ui_task(void *arg)
             unlock();
             store_save_units(&s_ui.units);
         }
+        if (s_names_new) {                             // the site's: the map's names
+            lock();
+            s_ui.names = s_names;
+            s_names_new = 0;
+            unlock();
+        }
+        if (cmd.names) {                               // SET's MAP NAMES
+            lock();
+            s_names = s_ui.names;
+            unlock();
+            store_save_names(s_ui.names);
+        }
         if (s_pick_new) {                              // tapped on the page: picked here too
             s_pick_new = 0;
             s_ui.sel = s_sel_told = s_pick;
         }
         if (page_there()) {                            // and what a finger did here goes there
-            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare || cmd.backlight || cmd.night || cmd.alerts || cmd.units) say_cfg();
+            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare || cmd.backlight || cmd.night || cmd.alerts || cmd.units || cmd.names)
+                say_cfg();
             if (s_ui.sel != s_sel_told) {
                 s_sel_told = s_ui.sel;
                 printf("OWLOS SEL %06x\n", (unsigned)s_ui.sel);
@@ -3155,11 +3194,13 @@ void app_main(void)
     s_night = (uint8_t)store_load_night();
     s_alerts = (uint8_t)store_load_alerts();
     store_load_units(&s_units);
+    s_names = (uint8_t)store_load_names();
     s_demo_on = !s_sec.ssid[0];                         // no WiFi set: the demo from the first frame
     sky_init(&s_sky, s_cfg.lat, s_cfg.lon);
     demo_init(&s_demo, range_km(&s_cfg), esp_random());
     tiles_init();
     map_mem = iram_first;
+    map_scratch = s_fetch_buf.map;                     // the fetch task's own buffer while it reads a tile
 #if DISP_LCD_DSI
     disp_board_up();                                   // the Tab5: the radio's power switch, before the WiFi asks for it
 #endif

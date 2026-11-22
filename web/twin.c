@@ -91,7 +91,7 @@ EMSCRIPTEN_KEEPALIVE uint8_t *twin_frame(uint32_t now, uint32_t utc, int down, i
     memset(&cmd, 0, sizeof cmd);
     s_ui.snap = s_sky;
     ui_touch(&s_ui, down, x * GFX_W / GFX_PW, y * GFX_H / GFX_PH, 0, 0, now, &cmd);
-    if (cmd.cfg || cmd.opt || cmd.bare) {
+    if (cmd.cfg || cmd.opt || cmd.bare || cmd.names) {
         s_changed |= TWIN_CFG;
     }
     if (s_ui.wx_page != s_page_told) {                 // a tap on the dial or the graph turned the page: the board too
@@ -175,10 +175,17 @@ EMSCRIPTEN_KEEPALIVE const char *twin_set_json(void)
     const scope_opt_t *o = &s_ui.opt;
     snprintf(b, sizeof b, "{\"up\":%d,\"theme\":%d,\"look\":%d,\"map\":%d,\"ground\":%d,\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,"
                           "\"labels\":%d,\"vectors\":%d,\"beam_step\":%d,\"clock\":%d,\"block\":%d,\"autopilot\":%d,\"lost\":%d,"
-                          "\"conflict\":%d,\"fl_lo\":%d,\"fl_hi\":%d,\"bare\":%d}",
+                          "\"conflict\":%d,\"fl_lo\":%d,\"fl_hi\":%d,\"bare\":%d,\"names\":%d}",
              c->up, c->theme, c->look, c->map, c->ground, (double)c->range, c->dist_unit, c->alt_unit, c->labels,
-             o->vectors, o->beam_step, o->clock, o->block, o->autopilot, o->lost, o->conflict, o->fl_lo, o->fl_hi, s_ui.bare);
+             o->vectors, o->beam_step, o->clock, o->block, o->autopilot, o->lost, o->conflict, o->fl_lo, o->fl_hi, s_ui.bare,
+             s_ui.names);
     return b;
+}
+
+// the map's names on the dark looks, NAMES_* (core/ui.h), as the board keeps them: SET's MAP NAMES, the console
+EMSCRIPTEN_KEEPALIVE void twin_names(int style)
+{
+    s_ui.names = (uint8_t)(style >= 0 && style < NAMES_STYLES ? style : NAMES_SOFT);
 }
 
 // the radar and the weather without their panel (the three dots), as the board keeps it. a finger on the page wins, as above
@@ -277,6 +284,9 @@ EMSCRIPTEN_KEEPALIVE void twin_sky_begin(uint32_t now, const char *server)
     static const char HEAD[] = "{\"ac\":[";
     say_where(server);
     sky_read_begin(&s_rd, &s_sky, 0, now);
+    /* the board's planes come in the free networks' words, from FR24 too: what it says its server is
+     * tells their pace, so the planes here are flown on as long as on the board */
+    s_rd.fr24_pace = !strcmp(server, "FLIGHTRADAR24");
     sky_read(&s_rd, HEAD, (int)sizeof HEAD - 1);
     s_planes = 0;
 }

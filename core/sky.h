@@ -14,6 +14,12 @@
 #define SKY_MAX    48
 #define TRAIL_N    16            /* old positions kept for the trail */
 #define SKY_FORGET 30000u        /* ms without a word about it, then it is gone */
+#define SKY_GUESS  20000u        /* ms a position is flown on by a guess: the free networks answer every 5 s */
+/* FR24's answers come 20 s apart, it counts credits, and one that fails puts the next 20 s further
+ * off: its planes are flown on and kept for longer, or they would stop and go before it comes */
+#define SKY_GUESS_FR24  60000u
+#define SKY_FORGET_FR24 60000u
+#define SKY_GLIDE  2000u         /* ms a plane takes at least to slide onto a new position instead of jumping */
 
 /* what kind of aircraft, from the ADS-B emitter category (or guessed from the type) */
 enum { KIND_JET, KIND_LIGHT, KIND_BIZJET, KIND_HEAVY, KIND_FAST, KIND_HELI, KIND_GLIDER,
@@ -41,6 +47,8 @@ typedef struct {
     uint16_t mach;               /* thousandths */
     uint16_t wind_dir;           /* where the wind comes from, 1..360 */
     uint8_t  wind_kt;
+    int8_t   gh;                 /* the nose's slide, as gx gy are the place's: degrees from where it pointed when
+                                  * this position came to where this one points it. in what was padding */
     uint32_t seen;               /* our ms clock at this position */
     uint32_t heard;              /* our ms clock at the last answer that had it */
     uint32_t first;              /* our ms clock when it first showed up, for the ring it gets */
@@ -48,6 +56,13 @@ typedef struct {
     float    dist, brg;          /* km and degrees from home */
     int16_t  tx[TRAIL_N], ty[TRAIL_N];   /* trail, 10 m units, oldest first */
     uint8_t  tn;
+    /* the guess between two answers, in what was padding after tn (three copies of 48 of these live
+     * in the classic ESP32's RAM: sky.c checks the size did not grow) */
+    int8_t   turn;               /* how fast its track turns, tenths of a degree a second, + to the right.
+                                  * from its last two positions: the guess flies the curve */
+    int8_t   gx, gy;             /* where the guess had it when this position came, less where this
+                                  * one puts it, 25 m units: it slides over SKY_GLIDE ms from `heard`.
+                                  * 0 0: no slide, a new plane or one further off than this holds */
 } plane_t;
 
 enum { SKY_WAIT, SKY_OK, SKY_NO_SETUP, SKY_NO_WIFI, SKY_CONNECTING, SKY_HTTP, SKY_PARSE };
@@ -61,6 +76,12 @@ typedef struct {
     char     note[48];           /* what went wrong, for the screen */
     int      total;              /* how many the last answer had, before the cap */
     uint8_t  hide_ground;        /* planes on the ground left out, sky_hide_ground */
+    uint8_t  fr24;               /* the last answer came at FR24's pace: SKY_GUESS_FR24, SKY_FORGET_FR24 */
+    /* the server's own clock: each answer says when it was made (the free networks' "now", FR24's newest
+     * position), and its positions are placed at that moment, not at when the question went out. the
+     * answer is made somewhere in a question of 2.5 to 4 s, never at the same point of it */
+    uint8_t  clk_have;
+    uint32_t clk;                /* our ms clock less the server's ms, the least an answer took to come */
 } sky_t;
 
 void sky_init(sky_t *s, float lat, float lon);
@@ -75,10 +96,18 @@ void sky_hide_ground(sky_t *s, int hide);
  * download) */
 #define SKY_OBJ 2048             /* the longest object kept, ADS-B Exchange writes ~1 KB */
 typedef struct {
-    int      fr24;
+    int      fr24;                /* FR24's own words */
+    int      fr24_pace;           /* answers 20 s apart, as FR24's: its own, or a board's relaying them to the
+                                   * site's twin. sky_read_begin sets it as fr24, the twin over that */
     float    home_lat, home_lon;
     int      hide_ground;
-    uint32_t now;
+    uint32_t now;                /* the positions' time while it reads, when it came for the merge */
+    uint32_t asked;              /* our ms clock when the request went out */
+    uint32_t fix0;               /* FR24: the time of the answer's first position, s since 2000. 0: none */
+    uint32_t made;               /* the free networks: the answer's "now", the server's ms (low 32 bits) */
+    int      made_have;
+    char     num[24];            /* "now"'s digits as they come: adsb.fi writes it after the list */
+    int      numn;
     int      state;              /* 0 looking for the list, 1 in it, 2 past it */
     int      depth, in_str, esc, keyn;
     char     key[12];            /* the last string at the top level: the name of what follows */
@@ -96,9 +125,13 @@ int  sky_parse_adsbx(sky_t *s, const char *json, int len, uint32_t now);
 int  sky_parse_fr24(sky_t *s, const char *json, int len, uint32_t now);
 void sky_forget(sky_t *s, uint32_t now);          /* drops the ones not heard for SKY_FORGET */
 
-/* where a plane is at `now`, dead-reckoned from its last position along its track: km from home.
+/* where a plane is at `now`, km from home: its last position flown on along its track, round the
+ * curve when it is turning, and slid there from where the guess had it before that position came.
  * `now` may be a few seconds back too: the radar's beam asks where it was when it went over it */
-void plane_now(const plane_t *p, uint32_t now, float *x, float *y);
+void plane_now(const sky_t *s, const plane_t *p, uint32_t now, float *x, float *y);
+/* its track at `now`, degrees: with the turn the guess flies, and turned there over SKY_GLIDE from where
+ * it pointed before that position came */
+float plane_track(const sky_t *s, const plane_t *p, uint32_t now);
 /* km east and north of (lat0, lon0). flat earth, good to a fraction of a percent at 300 km */
 void geo_offset(float lat0, float lon0, float lat, float lon, float *east, float *north);
 const char *kind_name(int kind);

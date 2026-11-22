@@ -294,6 +294,9 @@ class Link {
     if (c.alerts !== undefined) {                      // the weather's warnings it shows: a board before 0.16 does not say
       this.m._twin_alerts(c.alerts);
     }
+    if (c.names !== undefined) {                       // the map's names on the dark looks: a board before 0.16.2 does not say
+      this.m._twin_names(c.names);
+    }
     if (c.temp_unit !== undefined) {                   // its units, and home's country for the AUTO ones
       this.call(this.m._twin_units, c.temp_unit, c.pressure_unit ?? 0, c.wind_unit ?? 0, c.rain_unit ?? 0, c.cc || '');
     }

@@ -25,6 +25,10 @@ enum { LOOK_RADAR, LOOK_MAP, LOOK_CLASSIC, LOOK_WEATHER, LOOKS };
 /* the WEATHER look's pages, a tap on the dial or the graph (or BOOT) to the next: the day on the dial, the
  * pressure a day back and a day on, the temperature and the rain by the hour */
 enum { WXP_DIAL, WXP_PRESSURE, WXP_TEMP, WX_PAGES };
+/* the map's names on the dark looks: a letter's soft edge (map.h M_SOFT) at half the letter's light, at a
+ * quarter, or as bright as the letter. light on dark reads fatter than dark on light, and the tiles' names
+ * and the screens differ: what reads best is the eye's to say. the classic look draws them as the tiles do */
+enum { NAMES_SOFT, NAMES_THIN, NAMES_BOLD, NAMES_STYLES };
 /* the weather's units, SET's UNITS tab: 0 each the home country's own (the US's Fahrenheit, inches and mph,
  * the millimetres of mercury east of Poland...), else one of these. the pressure in hPa and inHg is at the
  * sea's level as forecasts give it, in mmHg at home's height as a barometer there reads */
@@ -128,6 +132,7 @@ typedef struct {
     uint8_t night;         /* ui_t.night changed: use it, keep it */
     uint8_t alerts;        /* ui_t.alerts changed: keep it */
     uint8_t units;         /* ui_t.units changed: keep it */
+    uint8_t names;         /* ui_t.names changed: keep it */
 } ui_cmd_t;
 
 #define TRAIL_GAP INT16_MIN       /* a trail point off the scope: the trail breaks there */
@@ -207,6 +212,7 @@ typedef struct {
     uint8_t  alerts;      /* the weather's warnings shown on every look, 1 << WXA_* (weather.h): SET's DATA tab,
                               all of them at first. the firmware keeps it */
     wx_units_t units;      /* the weather's units, SET's UNITS tab: 0 each home's country's own. the firmware keeps it */
+    uint8_t  names;        /* NAMES_*: the map's names on the dark looks, SET's MAP NAMES. the firmware keeps it */
     char     home_cc[3];   /* home's country, its two small letters, "" not known: the firmware copies it in like net */
     wx_alert_t alert;      /* the warnings now: ui_frame works them out of wx each frame */
     uint8_t  alert_was[WXA_KINDS];   /* their levels the frame before */

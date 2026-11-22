@@ -46,6 +46,9 @@ void store_save_alerts(int mask);
 /* the weather's units, SET's UNITS rows (core/ui.h wx_units_t): each 0, home's country's own, till set. kept by itself */
 void store_load_units(wx_units_t *w);
 void store_save_units(const wx_units_t *w);
+/* SET's MAP NAMES (core/ui.h NAMES_*): how bright a letter's soft edge is on the dark maps, SOFT till set. kept by itself */
+int  store_load_names(void);
+void store_save_names(int style);
 /* how long this run has lasted, s, saved once a minute: the next start says how long the run
  * before it was, whatever ended it (a reset by the USB line or a power cut too) */
 uint32_t store_load_ran(void);

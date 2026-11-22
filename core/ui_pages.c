@@ -79,7 +79,7 @@ void list_draw(ui_t *u, canvas_t *cv)
  * BACK the last --- */
 
 enum { S_RANGE, S_GROUND, S_WATCH, S_DIST, S_ALT, S_TEMP, S_PRES, S_WIND, S_RAIN,   /* the weather's units in WXU_* order */
-       S_UP, S_FLIP, S_BACKLIGHT, S_NIGHT, S_LABELS, S_THEME, S_LOOK, S_MAP,
+       S_UP, S_FLIP, S_BACKLIGHT, S_NIGHT, S_LABELS, S_THEME, S_LOOK, S_MAP, S_NAMES,
        S_FL_LO, S_FL_HI, S_BLOCK, S_AUTOPILOT, S_VECTORS, S_BEAM, S_CLOCK, S_LOST, S_CONFLICT,
        S_SOURCE, S_SERVER, S_HOME, S_WIFI, S_HELP,
        S_WX_STORM, S_WX_PRESSURE, S_WX_AIR, S_WX_RADIATION,   /* in the order of WXA_* (weather.h) */
@@ -125,6 +125,7 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "COLOURS",     "five colour themes",           K_BTN, T_VIEW },
     { "LOOK",        "radar, two maps, the weather", K_BTN, T_VIEW },
     { "MAP",         "OpenStreetMap under the scope", K_BTN, T_VIEW },
+    { "MAP NAMES",   "town names on the dark maps",  K_BTN, T_VIEW },   /* ui.h NAMES_* */
     { "LOWEST",      "planes under this are hidden", K_NUM, T_RADAR },
     { "HIGHEST",     "planes over this are hidden",  K_NUM, T_RADAR },
     { "DATA BLOCK",  "labels: climbing and speed",   K_BTN, T_RADAR },
@@ -240,6 +241,11 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_THEME:  snprintf(b, (size_t)sz, "%s", UI_THEME[u->theme].name); break;
     case S_LOOK:   snprintf(b, (size_t)sz, "%s", LOOK_NAME[c->look < LOOKS ? c->look : 0]); break;
     case S_MAP:    snprintf(b, (size_t)sz, c->map ? "ON" : "OFF"); break;
+    case S_NAMES: {
+        static const char *const NAME[NAMES_STYLES] = { "SOFT", "THIN", "BOLD" };
+        snprintf(b, (size_t)sz, "%s", NAME[u->names < NAMES_STYLES ? u->names : 0]);
+        break;
+    }
     case S_FL_LO:
     case S_FL_HI: {
         int fl = i == S_FL_LO ? u->opt.fl_lo : u->opt.fl_hi;
@@ -448,6 +454,10 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
         break;
     case S_LOOK:   c->look = (uint8_t)((c->look + 1) % LOOKS); u->wx_page = WXP_DIAL; cmd->refetch = 1; break;
     case S_MAP:    c->map ^= 1; break;
+    case S_NAMES:                                      // the next one, SOFT after BOLD: its own setting, not fr_cfg_t
+        u->names = (uint8_t)((u->names + 1) % NAMES_STYLES);
+        cmd->names = 1;
+        return;
     case S_FL_LO:                                      // the two never cross
         u->opt.fl_lo = fl_step(u->opt.fl_lo, dir, 0);
         if (u->opt.fl_hi && u->opt.fl_lo > u->opt.fl_hi) u->opt.fl_lo = u->opt.fl_hi;

@@ -173,23 +173,46 @@ static const map_t *ground(const ui_t *u)
     return m->w == w && m->h == h ? m : NULL;          // the look just changed: its map is still being made
 }
 
-// a colour and a strength for each kind of ground. strength 0..255 of the colour, added to the glass
+/* a colour and a strength for each kind of ground, and for it on an outline (map_rim): GROUND_N of
+ * them, a kind and MAP_RIM more. strength 0..255 of the colour, added to the glass */
+#define GROUND_N (2 * MAP_RIM)
 static void ground_paint(const ui_t *u, uint32_t *col, uint8_t *lev)
 {
     static const uint8_t CLASSIC[M_CLASSES][3] = {
         { 242, 239, 233 }, { 170, 211, 223 }, { 173, 209, 158 }, { 205, 235, 176 }, { 224, 223, 223 },
         { 217, 208, 201 }, { 255, 255, 255 }, { 252, 214, 164 }, { 232, 146, 162 }, { 112, 112, 112 },
-        { 172, 70, 172 },  { 40, 40, 40 },    { 187, 187, 204 },
+        { 172, 70, 172 },  { 40, 40, 40 },    { 187, 187, 204 }, { 246, 245, 241 },   // the halo as the tiles have it
+        { 40, 40, 40 },                                                               // a letter's edge: the letter
     };
     /* the land a whisper, water darker than it, the towns and roads brighter, motorways and
-     * runways in the colour of what you read first. names are painted as the land: gone */
-    static const uint8_t LEV[M_CLASSES] = { 14, 0, 34, 24, 46, 62, 66, 100, 120, 110, 95, 14, 140 };
+     * runways in the colour of what you read first. the steps are even to the eye, not in the
+     * numbers: the screen shows little of its first few steps above black, where the land and the
+     * woods were (14 and 34). a name near white, its halo the glass itself: the tiles' dark letters
+     * in a light halo were a hole with a glow round it here. a letter's soft edge as SET's MAP NAMES
+     * says (ui.h NAMES_*): half the letter's light, a quarter, or all of it */
+    static const uint8_t LEV[M_CLASSES] = { 26, 0, 44, 34, 56, 66, 76, 112, 125, 106, 100, 215, 140, 0, 110 };
+    static const uint8_t SOFT[NAMES_STYLES] = { 110, 60, 215 };
+    /* the outlines, inside water and a town: a coast or a river the brighter. not round a wood:
+     * the country is woods in pieces, and every piece outlined was a ripple over the whole map. the
+     * classic map has its own colours to tell them apart: only the water's edge, a deeper blue */
+    static const uint8_t RIM[M_CLASSES] = { [M_WATER] = 110, [M_URBAN] = 96, [M_BUILDING] = 100 };
+    for (int i = 0; i < GROUND_N; i++) {
+        col[i] = 0;
+        lev[i] = 0;
+    }
+    /* the small roads quieter the wider the range: from 25 km on the tiles have every lane in the
+     * country, and whole they were a net over the map. 76 at 25 km and in, 44 from 150 km out */
+    const float km = range_km(&u->cfg);
+    const int road = km <= 25.0f ? 76 : km >= 150.0f ? 44 : 76 - (int)((km - 25.0f) * 32.0f / 125.0f);
     for (int i = 0; i < M_CLASSES; i++) {
         if (u->cfg.look == LOOK_CLASSIC) {
             col[i] = RGB(CLASSIC[i][0], CLASSIC[i][1], CLASSIC[i][2]);
+            col[i | MAP_RIM] = i == M_WATER ? RGB(110, 160, 196) : col[i];
         } else {
-            col[i] = i == M_MOTOR || i == M_AERO ? C_FOCUS : i == M_RAIL ? C_QUIET : i == M_BORDER ? C_LOW : C_PRIM;
-            lev[i] = LEV[i];
+            col[i] = col[i | MAP_RIM] = i == M_MOTOR || i == M_AERO || i == M_TEXT || i == M_SOFT ? C_FOCUS
+                                      : i == M_RAIL ? C_QUIET : i == M_BORDER ? C_LOW : C_PRIM;
+            lev[i] = i == M_ROAD ? (uint8_t)road : i == M_SOFT ? SOFT[u->names < NAMES_STYLES ? u->names : 0] : LEV[i];
+            lev[i | MAP_RIM] = RIM[i] ? RIM[i] : lev[i];
         }
     }
 }
@@ -214,8 +237,8 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
     if (ya > yb) return;
     /* which texel lies under a pixel: the map is north up and a texel a pixel at the range it
      * was made for, the scope turns and stretches it. 1/65536 texel, a step per pixel along x */
-    uint32_t gcol[M_CLASSES], gpaint[M_CLASSES];   // gpaint: what a texel adds, or is (classic), off the beam's trail
-    uint8_t  glev[M_CLASSES], echo_lut[257];
+    uint32_t gcol[GROUND_N], gpaint[GROUND_N];     // gpaint: what a texel adds, or is (classic), off the beam's trail
+    uint8_t  glev[GROUND_N], echo_lut[257];
     float    gk = 0, gcu = 1, gsu = 0;
     int32_t  gdu = 0, gdv = 0, gmu = 0, gmv = 0;
     if (m) {
@@ -227,7 +250,7 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
         gmu = m->w * 32768;                          // home: the middle of the map
         gmv = m->h * 32768;
         ground_paint(u, gcol, glev);
-        for (int i = 0; i < M_CLASSES; i++)
+        for (int i = 0; i < GROUND_N; i++)
             gpaint[i] = classic ? gcol[i] : gfx_scale(gcol[i], radar ? glev[i] * 110u >> 8 : glev[i]);
         for (int i = 0; i <= 256; i++) {               // the radar's ground: lit by the beam, then fading
             int f = 256 - i;
@@ -296,7 +319,7 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
             for (int x = ga; x <= gb; x++, gu += gdu, gv += gdv) {
                 uint32_t iu = (uint32_t)(gu >> 16), iv = (uint32_t)(gv >> 16);
                 if (iu < mw && iv < mh) {
-                    ground_row[x - xa] = (uint8_t)((m->row[iv][iu >> 3] >> ((iu & 7) * 4)) & 15);
+                    ground_row[x - xa] = (uint8_t)map_rim(m, (int)iu, (int)iv);
                 }
             }
         } else if (m) {
@@ -537,6 +560,7 @@ static inline int scope_edge(const ui_t *u) { return panel_shown(u) ? PX : GFX_W
 #define GEAR_X(u) (scope_edge(u) - 9 - GEAR_W)
 #define GEAR_Y (GFX_H - 28 - GEAR_W)
 #define LOST_MS 12000                                  /* a position older than this is a guess */
+#define LOST_FR24_MS (LOST_MS + 20000)                 /* FR24 answers every 20 s: a position that old is not lost */
 /* a conflict: both over the floor, closer than 3 NM and 1000 ft within two minutes. under the floor
  * planes queue for a runway close together on purpose, and a real scope is told where not to warn */
 #define ALERT_KM    5.556f
@@ -555,7 +579,8 @@ static int in_band(const ui_t *u, const plane_t *p)
 
 static int plane_lost(const ui_t *u, const plane_t *p)
 {
-    return u->opt.lost && u->cfg.look == LOOK_RADAR && !p->ground && (int32_t)(u->now - p->seen) > LOST_MS;
+    int32_t lost = u->snap.fr24 ? LOST_FR24_MS : LOST_MS;
+    return u->opt.lost && u->cfg.look == LOOK_RADAR && !p->ground && (int32_t)(u->now - p->seen) > lost;
 }
 
 static int can_conflict(const plane_t *p, const spot_t *sp)
@@ -583,9 +608,10 @@ static void conflicts(ui_t *u)
         const plane_t *p = &s->p[i];
         float km_s = p->gs * 1.852f / 3600.0f;
         u->spot[i].alert = 0;
-        plane_now(p, u->now, &px[i], &py[i]);
-        vx[i] = km_s * sinf(p->track * D2R);
-        vy[i] = km_s * cosf(p->track * D2R);
+        float trk = plane_track(s, p, u->now) * D2R;
+        plane_now(s, p, u->now, &px[i], &py[i]);
+        vx[i] = km_s * sinf(trk);
+        vy[i] = km_s * cosf(trk);
     }
     for (int i = 0; i < s->n; i++) {
         const plane_t *a = &s->p[i];
@@ -633,11 +659,11 @@ void scope_frame(ui_t *u)
         const plane_t *p = &s->p[i];
         spot_t *sp = &u->spot[i];
         float x, y, sx, sy;
-        plane_now(p, u->now, &x, &y);
+        plane_now(s, p, u->now, &x, &y);
         to_screen(u, x, y, &sx, &sy);
         if (radar && u->opt.beam_step) {               // shown where the beam last saw it, till the next turn
             float since = wrap360(u->beam - atan2f(sx - (float)view_cx(u), (float)SCY - sy) / D2R);
-            plane_now(p, u->now - (uint32_t)(since * (BEAM_TURN_MS / 360.0f)), &x, &y);
+            plane_now(s, p, u->now - (uint32_t)(since * (BEAM_TURN_MS / 360.0f)), &x, &y);
             to_screen(u, x, y, &sx, &sy);
         }
         float d = sqrtf(x * x + y * y);
@@ -662,7 +688,7 @@ void scope_frame(ui_t *u)
         sp->x = sp->vx = (int16_t)lroundf(sx);
         sp->y = sp->vy = (int16_t)lroundf(sy);
         if (radar && u->opt.vectors && sp->vis == 1 && p->has_spd && !p->ground) {
-            float a = screen_ang(u, p->track) * D2R, len = p->gs * VECTOR_PX;
+            float a = screen_ang(u, plane_track(s, p, u->now)) * D2R, len = p->gs * VECTOR_PX;
             float ax = sx, ay = sy, bx = sx + len * sinf(a), by = sy - len * cosf(a);
             if (clip_circle((float)view_cx(u), &ax, &ay, &bx, &by, (float)PR)) {   // it stops at the range ring
                 sp->vx = (int16_t)lroundf(bx);
@@ -818,11 +844,15 @@ static void ring_numbers(ui_t *u, canvas_t *cv)
 {
     char buf[12];
     float range = u->cfg.range;
+    const int on_map = ground(u) != NULL, classic = u->cfg.look == LOOK_CLASSIC;
     for (int k = u->cfg.look == LOOK_RADAR ? 1 : 4; k <= 4; k++) {   // the maps: only the ring, the grid tells the rest
         int x, y;
         ring_label_at(u, k, &x, &y);
-        if (!gfx_touches(cv, y - 1, y + 7)) continue;
+        if (!gfx_touches(cv, y - 2, y + 7)) continue;
         ring_value(range * (float)k / 4.0f, buf, sizeof buf);
+        if (on_map) {                                  // a solid card, as every name on the map has: no map through the digits
+            gfx_fill(cv, x - 2, y - 2, micro_width(buf, 1) + 4, 9, classic ? RGB(242, 239, 233) : C_BG0, 255);
+        }
         micro_text(cv, x, y, buf, k == 4 ? C_PRIM : C_DIM, 220, 1);
     }
 }
@@ -1009,7 +1039,7 @@ static void attribution(ui_t *u, canvas_t *cv)
     if (!gfx_touches(cv, y, y + 10)) return;
     const int w = font_width(&FONT_SMALL, s), cx = view_cx(u);
     int classic = u->cfg.look == LOOK_CLASSIC;
-    gfx_fill(cv, cx - w / 2 - 2, y, w + 4, 10, classic ? RGB(242, 239, 233) : C_BG0, classic ? 170 : 110);
+    gfx_fill(cv, cx - w / 2 - 2, y, w + 4, 10, classic ? RGB(242, 239, 233) : C_BG0, 255);   // nothing of the map through the letters
     font_text(cv, &FONT_SMALL, cx - w / 2, y, s, classic ? RGB(60, 60, 60) : C_DIM, 220);
 }
 
@@ -1036,13 +1066,15 @@ static void sq_ground(ui_t *u, canvas_t *cv)
     const map_t *m = ground(u);
     const int classic = u->cfg.look == LOOK_CLASSIC, cx = GFX_Z(view_cx(u));
     const uint32_t base = classic ? RGB(236, 233, 226) : gfx_mix(C_BG0, C_GLASS, 150);   // where no map is (yet)
-    uint32_t lut[16], col[M_CLASSES];
-    uint8_t lev[M_CLASSES];
-    for (int i = 0; i < 16; i++) lut[i] = base;
+    uint32_t lut[GROUND_N], col[GROUND_N];
+    uint8_t lev[GROUND_N];
+    for (int i = 0; i < GROUND_N; i++) lut[i] = base;
     float s = 1.0f;
     if (m) {
         ground_paint(u, col, lev);
-        for (int i = 0; i < M_CLASSES; i++) lut[i] = classic ? col[i] : gfx_add(base, gfx_scale(col[i], lev[i]));
+        for (int i = 0; i < GROUND_N; i++) {
+            if (i != M_NONE && i != (M_NONE | MAP_RIM)) lut[i] = classic ? col[i] : gfx_add(base, gfx_scale(col[i], lev[i]));
+        }
         s = m->kpx / k_glass(u);                       // texels a pixel: 1 unless a finger is zooming
     }
     const int32_t du = (int32_t)lroundf(s * 65536.0f);
@@ -1053,12 +1085,11 @@ static void sq_ground(ui_t *u, canvas_t *cv)
             for (int x = 0; x < GFX_PW; x++) row[x] = base;
             continue;
         }
-        const uint32_t *tr = m->row[iv];
         const uint32_t mw = (uint32_t)m->w;
         int32_t gu = (int32_t)lroundf(((0.5f - cx) * s + m->w * 0.5f) * 65536.0f);
         for (int x = 0; x < GFX_PW; x++, gu += du) {
             uint32_t iu = (uint32_t)(gu >> 16);
-            row[x] = lut[iu < mw ? (tr[iu >> 3] >> ((iu & 7) * 4)) & 15 : M_NONE];
+            row[x] = lut[iu < mw ? map_rim(m, (int)iu, iv) : M_NONE];
         }
     }
 }
@@ -1068,7 +1099,7 @@ static void sq_card(const ui_t *u, canvas_t *cv, int x, int y, int w, int h)
 {
     if (!gfx_touches(cv, y, y + h)) return;
     if (u->cfg.look == LOOK_CLASSIC) paper_card(cv, x, y, w, h);
-    else gfx_fill(cv, x, y, w, h, C_BG0, 200);
+    else gfx_fill(cv, x, y, w, h, C_BG0, 255);   // solid: the map showed through the letters
 }
 
 static uint32_t sq_ink(const ui_t *u) { return u->cfg.look == LOOK_CLASSIC ? CL_INK : C_FOCUS; }   // what you read first
@@ -1233,7 +1264,7 @@ static void grid_draw(ui_t *u, canvas_t *cv)
         }
         if (!g->lw || !gfx_touches(cv, g->ly, g->ly + 11 + FONT_LINE_H(&FONT_SMALL))) continue;
 #if RADAR_ROUND
-        gfx_fill(cv, g->lx, g->ly, g->lw, 11, classic ? RGB(242, 239, 233) : C_BG0, classic ? 190 : 150);
+        gfx_fill(cv, g->lx, g->ly, g->lw, 11, classic ? RGB(242, 239, 233) : C_BG0, 255);
         font_text(cv, &FONT_SMALL, g->lx + 2, g->ly, g->t, classic ? RGB(50, 55, 70) : C_DIM, 240);
 #else
         sq_card(u, cv, g->lx, g->ly, g->lw, 11);
@@ -1292,7 +1323,7 @@ static void planes(ui_t *u, canvas_t *cv)
         }
         if (drawn) gfx_line(cv, px8 * 0.125f, py8 * 0.125f, sp->x, sp->y, 1.0f, tc, 80);
         int picked = p->icao == u->sel;
-        float head = screen_ang(u, p->track);
+        float head = screen_ang(u, plane_track(s, p, u->now));   // turning, the shape turns with the curve it flies
         int speed_line = sp->vx != sp->x || sp->vy != sp->y;
         if (picked) {                                    // where it will be in a minute
             float km = p->gs * 1.852f / 60.0f, a = head * D2R;
@@ -1333,7 +1364,7 @@ static void planes(ui_t *u, canvas_t *cv)
         if (!gfx_touches(cv, ta - 2, tb + 2)) continue;  // the card and its line to the plane
         uint32_t col = spot_colour(u, p, sp);
         int picked = p->icao == u->sel;
-        gfx_fill(cv, sp->lx, sp->ly, sp->lw, LABEL_H, C_BG0, 150);
+        gfx_fill(cv, sp->lx, sp->ly, sp->lw, LABEL_H, C_BG0, 255);   // solid: the map showed through the letters
         gfx_vline(cv, sp->lx, sp->ly, sp->ly + LABEL_H - 1, col, 230);
         font_text_clip(cv, &FONT_SMALL, sp->lx + 3, sp->ly, plane_name(p), picked ? C_FOCUS : gfx_mix(col, C_FOCUS, 90), 255, LABEL_W);
         data_line(u, cv, sp->lx + 3, sp->ly + 11, p, col);
@@ -1362,7 +1393,7 @@ static void gesture(ui_t *u, canvas_t *cv)
         fmt_dist(u, range_km(&u->cfg) * r / PR, d, sizeof d);
         int w = micro_width(d, 1);
         int x = u->t_x - w / 2, y = u->t_y - 26;
-        gfx_fill(cv, x - 3, y - 2, w + 6, 9, C_BG0, 190);
+        gfx_fill(cv, x - 3, y - 2, w + 6, 9, C_BG0, 255);
         micro_text(cv, x, y, d, C_FOCUS, 255, 1);
     }
 }
@@ -1866,7 +1897,7 @@ static void round_note(ui_t *u, canvas_t *cv)
         micro_text(cv, SCX - wl / 2, y + 23, low, bad ? CL_ALARM : CL_DIM, 235, 1);
         return;
     }
-    gfx_fill(cv, SCX - w / 2, y, w, h, C_BG0, 170);
+    gfx_fill(cv, SCX - w / 2, y, w, h, C_BG0, 255);
     gfx_hline(cv, SCX - w / 2, SCX + w / 2 - 1, y, bad ? C_ALARM : C_QUIET, 160);
     font_text(cv, &FONT_SMALL, SCX - wt / 2, y + 2, top, C_FOCUS, 255);
     micro_text(cv, SCX - wm / 2, y + 15, mid, C_PRIM, 235, 1);

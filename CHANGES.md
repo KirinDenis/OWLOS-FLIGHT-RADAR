@@ -6,6 +6,75 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 A version marked (beta) is offered on the site beside the stable one, which stays what the site flashes
 unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
+## 0.16.2 (beta)
+
+- The planes move smoothly. The board hears where each plane is every 5 seconds from the free networks
+  and every 20 from FR24, and flies it on by itself in between; when the next position came, a plane
+  that had gone a little wrong jumped to it. Now it slides there, eased at both ends, in two seconds, or
+  longer where two would be faster than the plane itself flies: a light one circling does not swim half
+  a kilometre sideways. Its nose turns to the new heading as smoothly, where it snapped round. One that
+  stood still on the screen, unheard for longer than a guess goes, still jumps to where it is, and so
+  does one more than 3 km from where the board had it.
+- Each position is placed at the moment the server made its answer. The free networks write that moment
+  in each answer, and the board took the moment it asked instead: an answer is made somewhere in a
+  question of 2.5 to 4 seconds, never at the same point of it, so each new position came a hundred
+  metres or so ahead or behind, and a plane sped up and slowed down with every answer. FR24's positions
+  are placed by their own times.
+- A plane in a turn flies on round its curve for 5 seconds, and its shape turns with it: how fast it
+  turns comes from its last two positions. Then straight on: a turn is often over by the time two
+  positions show it, and one flown on further turned the noses more than the planes turned.
+- On FR24 the planes stood still for a moment before each answer and then jumped ahead: a guess went 20
+  seconds at most, and FR24's answers come 20 seconds apart and a little more. Now they fly on till the
+  next one comes, and through one that does not come, 60 seconds, where they went and came back. The
+  RADAR look's LOST greys a plane on FR24 after 32 seconds, not 12: it greyed them all between two
+  answers.
+- Measured on 12 minutes of real sky round a busy airport, replayed through the board's own code as the
+  free networks give it: a plane steps back a pixel 0.6 times a minute where 0.16.1 did 6.6 times, no
+  frame moves it more than 17 m off the way it flew where 0.16.1 jumped up to 600 m, and it is drawn 54 m
+  from where it is on average, 289 m before. At FR24's pace 0.16.1 jumped up to 2.3 km; now 17 m.
+- The map is easier to see on the dark looks. On these screens the land was one or two steps of 32 above
+  black and the woods three, where the glass shows next to nothing, least of all from the side: the
+  steps of its kinds are now even to the eye, the land and the woods lifted, the water left dark. Water
+  and towns have a bright edge inside them, so a coast, a river, a lake and a town stand out by their
+  outline: the eye reads where things end more than what fills them. The woods have none, the country is
+  woods in pieces and every piece outlined rippled over the whole map. The classic look keeps its own
+  colours and outlines only the water, a deeper blue.
+- A road, a river or a stream one pixel wide on the map's tiles came out dashed: a point of the map is up
+  to 1.4 pixels of a tile and was read at one of them. Now it keeps whichever of its pixels would be lost,
+  the road and not the field beside it, and the lines run whole. The names on the classic look no longer
+  lose letters the same way.
+- The map's own names, the towns and villages, read on the dark looks. The tiles write them dark in a
+  light halo, made for a light map, and here they were a dark hole with a glow round it: now the letters
+  are near white and the halo dark. They are found by their colours, which OpenStreetMap keeps the same:
+  a grey under 100 is a letter, a lighter grey within three pixels of one is its soft edge; read one
+  pixel at a time they went to a town, a road or a rail, and a name came out eaten. A letter comes before
+  anything else under it, as it does on the tiles.
+- Each name is copied word by word, pixel for pixel, as the tiles write it; only where it stands is
+  scaled. The tiles write a town's name some 9 pixels high for their own scale, and stretched or shrunk to
+  the screen's a stroke came out one pixel here and two there: "Trenčín" read "Trenć'n", its háček an
+  accent and its í gone. The thin stem of an í, a lighter grey with no dark pixel of its own, is now part
+  of its word, and a name split between two tiles meets itself again. The classic look gets the same.
+  The words are gathered in a buffer the board already had for asking OpenStreetMap a town's name, now
+  1.1 KB bigger; taken from the free memory beside the tile's own, they cost the 2.8" a third of its maps.
+- Light letters on the dark glass looked fatter than the same letters dark on paper, and a small name ran
+  into a blot: the soft edge was as bright as the letter. Now it is dimmer, and SET, VIEW, **MAP NAMES**
+  says how much: SOFT, half as bright (what a board starts with), THIN, a quarter, or BOLD, as bright. The site's console
+  says it as `names`. The classic look is as it was.
+- The plain greys of a town were taken for an airport's apron and lit up as runways: they are a town now.
+- The small roads are quieter the wider the range: from 25 km out the tiles have every lane in the
+  country, and whole they were a net over the map.
+- The cards under the writing on the map, the planes' names, the degrees, the ring's numbers on the
+  radar, the place on the round glass, are solid: the map showed through the letters, more so now it is
+  brighter.
+- The outlines take some 5 ms a frame on the 3.5" in the MAP and CLASSIC looks, 10 frames a second to 9,
+  and nothing to speak of in RADAR; on the round glass a few ms of a frame of 250 or more.
+- The site's console writes a board's config as it reads it: each line NAME=VALUE goes to the live board as
+  `set` sends it. `echo theme=amber > config` sets one thing, and `cat /boards/a/config > /boards/b/config`
+  gives one board all another one has. A line a board does not take, a light that does not dim, is said and
+  left; the rest are set. The other files of a board, its info, wifi and log, only show what it says.
+- The console's `set` takes as many settings as are given: `set look=radar theme=amber backlight=25 --all`.
+  An alias of it is a whole setup in one word.
+
 ## 0.16.1 (beta)
 
 - A fourth look, WEATHER: the next 24 hours on the radar's own dial, noon at the top and midnight at

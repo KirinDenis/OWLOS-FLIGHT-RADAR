@@ -13,10 +13,26 @@ way it flies, coloured by its height, with a trail behind it. Tap one for its ca
 speed. The planes come from the free community ADS-B networks, or from Flightradar24 if you have a key.
 The map under them comes from OpenStreetMap.
 
+**Contents:** [What it does](#what-it-does) · [The boards](#the-boards) · [Flash it](#flash-it) ·
+[Stable or beta](#stable-or-beta) · [WiFi and home](#wifi-and-home) · [Where to tap](#where-to-tap):
+[the radar](#the-radar), [a plane picked](#a-plane-picked), [the map](#the-map), [the weather](#the-weather),
+[weather warnings](#weather-warnings), [LIST](#list), [SET](#set), [the demo](#no-wifi-yet-the-demo),
+[the networks](#the-networks), [the password](#the-password), [home](#home), [watch](#watch),
+[the LED](#the-led), [ABOUT and a new version](#about-and-a-new-version),
+[the 2.8" CYD's screens](#the-28-cyd-which-screen), [the round glass](#the-round-glass) ·
+[If it ever stands still](#if-it-ever-stands-still) · [The moving layer](#the-moving-layer) ·
+[Build it yourself](#build-it-yourself) · [The site's console](#the-sites-console) ·
+[The USB console](#the-usb-console) · [Data and licences](#data-and-licences)
+
 ## What it does
 
 - A radar scope with a sweeping beam over the map, or a plain square map, or the same map in
-  OpenStreetMap's own colours. One button switches between the three.
+  OpenStreetMap's own colours, or the next 24 hours of the weather on the radar's dial. One button goes
+  round them.
+- The planes glide. Between two positions the board flies each plane on by itself, round its curve in a
+  turn, and slides it onto the next position instead of jumping, its nose turning with it.
+- A map made to be read on a small screen: water and towns have a light edge, every road and stream runs
+  whole, and the names of towns and villages are light on the dark looks.
 - Real distances and bearings round your home. Drag the rim to turn the map the way the screen stands,
   drag inside to zoom from 2 to 250 km (or nautical miles, or miles).
 - The nearest planes in a panel, every flight in a list, the picked one with all it is known about it.
@@ -30,6 +46,8 @@ The map under them comes from OpenStreetMap.
   on the touch screen itself, or from the site over the USB cable.
 - It knows its version and finds out by itself when the site has a newer one: a small note on the
   screen opens ABOUT, with a QR code to the site. What changed in each version: [CHANGES.md](CHANGES.md).
+- The site runs your boards over the USB cable: each board's screen live in the page, every setting, and
+  a console where one line sets a look, a home or the light on all of them at once.
 - The map pictures are downloaded once and kept in the board's flash: a range it has shown comes back
   at once, even without WiFi.
 
@@ -105,9 +123,22 @@ The map under them comes from OpenStreetMap.
    to pick an older one, and the same buttons flash it; `?v=0.3` after the site's address picks one
    from a link. An older version may not read all the settings a newer one saved: the WiFi stays,
    the rest may need sending again.
-8. A beta, when the site has one: a new board picks STABLE or BETA as it is flashed. A board already on
-   the site picks it in its window, SETTINGS, BOARD, Version, and FLASH: its settings stay. The same
-   two buttons take a board on the beta back to the stable.
+8. A beta, when the site has one: see the next part.
+
+### Stable or beta
+
+The site keeps the stable version and, when there is one, a beta beside it: the new things first, and it
+may still go wrong. A board on the stable never hears of a beta by itself. You pick it, and you can go back.
+
+- **A new board**: CONNECT & FLASH under it, STABLE or BETA in the Version row, and yes to erase.
+- **A board already flashed**, with any version: plug it in, and in its window on the site SETTINGS, BOARD,
+  Version, BETA, then FLASH. Its WiFi, home and settings stay. CONNECT & FLASH does the same with BETA
+  picked and no to erase.
+- **On the beta** the board sees the next beta by itself and shows NEW VERSION, as a board on the stable
+  does for the next stable.
+- **Back to the stable**: the same row, STABLE, then FLASH. Your settings stay.
+- **From the console**: `flash` writes the version the board follows, `flash --board NAME` one board of
+  several.
 
 ## WiFi and home
 
@@ -154,6 +185,9 @@ smaller letters and its list of the nearest planes without their heights.
 - **HUE** changes the colours, **LIST** shows every flight, **SET** has the settings.
 - **Colour is height**: grey on the ground, warm under 10 000 ft, the theme's colour up to 25 000, white
   above. Emergency squawks blink.
+- **The planes glide**: the free networks give a plane's position every 5 seconds, Flightradar24 every 20.
+  In between the board flies it on along its track, round its curve in a turn, and when the next position
+  comes the plane slides onto it, never faster than it flies. One the board lost and found again jumps.
 
 ### A plane picked
 
@@ -171,6 +205,15 @@ smaller letters and its list of the nearest planes without their heights.
 
 - MAP is a map over the whole screen, north up, home in the middle. CLASSIC is the same map in
   OpenStreetMap's own colours.
+- Made to be read on these screens: on the dark looks the land and the woods sit a step above the glass,
+  the water stays dark and the towns are brighter, and water and towns have a light edge inside them, so a
+  coast, a river, a lake and a town show by their outline. The names of towns and villages are light with
+  a dark edge, each word the size OpenStreetMap writes it, pixel for pixel: the map is scaled to the
+  screen, the words are not, so a háček stays a háček. Light letters on a dark glass look bolder than dark ones on paper, so the letters' soft edge
+  is dimmer than the letters: SET, VIEW, **MAP NAMES** says how much, SOFT (half as bright), THIN (a
+  quarter) or BOLD (as bright). Pick the one that reads best on your screen. Every road and stream runs
+  whole, the small roads quieter the wider the range. CLASSIC keeps OpenStreetMap's colours, its rivers with
+  a deeper blue edge.
 - The grid's lines are whole degrees or minutes, named at the edges. The scale is in the corner.
 - **The three dots** slide the panel in and out. A picked plane brings it by itself.
 - **Drag** anywhere on the map to zoom.
@@ -243,7 +286,7 @@ smaller letters and its list of the nearest planes without their heights.
 
 - Tabs on the bar: **VIEW** the range, map up, the screen upside down, its BACKLIGHT (100%, 50%,
   25% or 10%) and NIGHT, a dimmer light from dusk till dawn at home (both on the boards whose light
-  turns down), labels, colours, the look, the map and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
+  turns down), labels, colours, the look, the map, the map's names and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
   planes come from, home, the WiFi, the weather's warnings and ABOUT; **UNITS** the distance, the height and the
   weather's; **RADAR** the radar look's options; **LED** the light on the back (2.8" and 3.5" CYD).
 - **The gear** under the scope opens the RADAR tab. On the round glass these rows and the units are under VIEW. All of it
@@ -464,6 +507,32 @@ What is where:
   the settings in NVS, the USB console.
 - `site/`: the page that flashes the boards and sends them their settings.
 
+## The site's console
+
+The site has a console: CONSOLE at the top right, or Ctrl+`. It works on the boards on the page's cable
+the way a shell works on files, and a line typed there acts on the live board at once.
+
+- `help` lists the commands, `man NAME` says more of one.
+- `boards` lists your boards, connected or not. Each has a name, `2.8-cyd`, `1.28-round`, with the end of its
+  MAC when two are alike. `use NAME` shows one, `use all` all of them.
+- `set NAME=VALUE ...` on the board on show, `--board NAME` on another, `--all` on every one: theme, look,
+  range, vectors, clock, block, conflict, flip, backlight, night, alerts, names, temp, pressure, wind, rain,
+  wxpage. As many at once as you like: `set look=radar theme=amber backlight=25 --all`.
+- `home PLACE` moves a board's home to a town, a postcode or a point: `home Leuven`.
+- `wifi` lists the networks a board keeps, `wifi add NETWORK` asks for the password, `wifi forget NETWORK`.
+- `screen V2` (or V1, V3, RGB, BGR) says which screen a board was sold with.
+- `log` shows what the board said, `log on` as it says it, `--all` every board's.
+- `send LINE` sends one line as it is, `send OWLOS GET`; the lines are in The USB console below. One with
+  JSON goes in single quotes, as a shell wants: `send 'OWLOS SET {"led_test":1}'`.
+- `flash` writes the version the board follows, stable or beta. Its settings stay.
+- Each board is a folder, `/boards/NAME`, with the files `info`, `config`, `wifi` and `log`. `cat config`
+  reads its settings as `NAME=VALUE` lines, and writing the file sets them on the live board:
+  `echo theme=amber > config`, or `cat /boards/2.8-cyd/config > /boards/1.28-round/config` to give one board
+  all another one has. A line a board does not take, a light that does not dim, is said and left.
+- It is a shell: `|` into `grep`, `sort`, `head`, `tail` and `wc`, `history` for what you typed (never a
+  password), and `alias` for a word of your own:
+  `alias evening='set look=radar theme=amber backlight=25 --all'`, then `evening`.
+
 ## The USB console
 
 The site talks to the board over the USB cable at 115200 baud, a line each way. Scripts can do the same.
@@ -475,7 +544,8 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`, `conflict`, `fl_lo`, `fl_hi`, `utc` (seconds
   since 1970, 0 not known), `led`, `led_level`, `led_hold`, `led_near`, `led_red`, `version`, `newest` (the site's, `""` not heard
   yet), `uptime` and `ran` in seconds, `reset`, `help` (counted on the map of boards: 0 never asked, 1 yes,
-  2 no), `bare` (1 the radar and the weather without their panel), `alerts` (the weather's warnings shown), the weather's
+  2 no), `bare` (1 the radar and the weather without their panel), `alerts` (the weather's warnings shown), `names`
+  (the map's names on the dark looks), the weather's
   units `temp_unit`, `pressure_unit`, `wind_unit`, `rain_unit` and `cc`, home's country by its two letters (`""` not known
   yet), `backlight` and `night` where the light turns down, and `screen` on the 2.8" boards. Never the password, never the key.
 - `OWLOS SET {...}` with any of `ssid`, `pass`, `key`, `lat`, `lon`, `place`, `country`, `src` (`free` or
@@ -489,7 +559,8 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   2 high), `led_hold` (0 till touched, 1 10 s, 2 while it lasts), `led_red` (4 or 22, the red one's GPIO),
   `led_test` (1: red, green, blue once), `help` (0, 1 or 2, as in GET), `bare` (1 the radar and the weather
   without their panel, 0 with it), `alerts` (the weather's warnings shown, added up: 1 storm, 2 pressure, 4 air,
-  8 radiation), the weather's units, each 0 home's country's own: `temp_unit` (1 C, 2 F), `pressure_unit` (1 hPa,
+  8 radiation), `names` (the map's names on the dark looks: 0 soft, 1 thin, 2 bold), the weather's units, each 0
+  home's country's own: `temp_unit` (1 C, 2 F), `pressure_unit` (1 hPa,
   2 mmHg, 3 inHg), `wind_unit` (1 km/h, 2 m/s, 3 mph, 4 knots), `rain_unit` (1 mm, 2 inches),
   `backlight` (0 100%, 1 50%, 2 25%, 3 10%), `night` (0 off, else a step as `backlight`),
   `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).

@@ -45,7 +45,7 @@ export class BoardPaths {
       return this.api.units().map((u) => ({ name: this.api.short(u), dir: true, info: `${this.api.kind(u)}${u.online ? '' : ', not connected'}` }));
     }
     if (at.unit && !at.file) {
-      return Object.keys(this.api.files).map((name) => ({ name, dir: false }));
+      return Object.keys(this.api.files).map((name) => ({ name, dir: false, info: name === 'config' ? 'its settings: cat it, or write it' : '' }));
     }
     throw new Error(`${path}: no such folder`);
   }
@@ -64,8 +64,26 @@ export class BoardPaths {
     return !!(at.root || at.boards || (at.unit && !at.file));
   }
 
-  async write(path) {
-    throw new Error(`${path}: these files only show what a board says, use set`);
+  /* a board's config is written as it reads: each line NAME=VALUE goes to the board as set sends it, there and
+   * then. so `cat /boards/a/config > /boards/b/config` gives b what a has, `echo theme=amber > config` one
+   * setting. a line the board does not take (a light that does not dim, a word set does not know) is said and
+   * left, the rest are set. the other files only show what a board says */
+  async write(path, text) {
+    const at = this.where(path);
+    if (!at.unit || at.file !== 'config') {
+      throw new Error(`${path}: only a board's config is written, its other files show what it says`);
+    }
+    const lines = String(text).split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    const left = lines.filter((l) => {
+      const eq = l.indexOf('=');
+      return eq <= 0 || !this.api.set(at.unit, l.slice(0, eq).trim(), l.slice(eq + 1).trim());
+    });
+    if (left.length === lines.length) {
+      throw new Error(`${path}: nothing set, a line is NAME=VALUE as cat shows them`);
+    }
+    if (left.length) {
+      this.shell.write(`\x1b[2m${this.api.short(at.unit)}: ${lines.length - left.length} set, not taken: ${left.join(' ')}\x1b[0m\r\n`);
+    }
   }
 
   async complete(word) {
@@ -136,19 +154,28 @@ export function boardCommands(api) {
       },
     },
     {
-      name: 'set', group: 'boards', summary: 'a setting: theme, look, range, vectors, clock, block, conflict, flip, backlight, night, alerts, temp, pressure, wind, rain, wxpage', usage: 'set NAME=VALUE [--all] [--board NAME]', where: 'here',
-      options: on, valued: ['board'], effect: 'writes', data: '{ name, value, boards }',
+      name: 'set', group: 'boards', summary: 'settings: theme, look, range, vectors, clock, block, conflict, flip, backlight, night, alerts, names, temp, pressure, wind, rain, wxpage', usage: 'set NAME=VALUE [NAME=VALUE...] [--all] [--board NAME]', where: 'here',
+      options: on, valued: ['board'], effect: 'writes', data: '[{ name, value, boards }]',
       complete: (word) => api.settings.filter((s) => s.startsWith(word)),
       run(ctx) {
-        const [name, value] = (ctx.args[0] ?? '').split('=');
-        const done = chosen(ctx).filter((u) => api.set(u, name, value));
-        if (!done.length) {
-          ctx.err('set takes one of: theme=amber look=map range=50 vectors=on');
+        // as many as are given, each on its own: set look=radar theme=amber backlight=25 --all is an evening in one line
+        if (!ctx.args.length) {
+          ctx.err('set takes NAME=VALUE: theme=amber look=map range=50 vectors=on');
           return 1;
         }
-        ctx.out(`${name} is ${value} on ${done.map(api.short).join(', ')}`, 'good');
-        ctx.data({ name, value, boards: done.map(api.short) });
-        return 0;
+        let code = 0;
+        for (const arg of ctx.args) {
+          const [name, value] = arg.split('=');
+          const done = chosen(ctx).filter((u) => api.set(u, name, value));
+          if (!done.length) {
+            ctx.err(`${arg}: no board took it. set takes NAME=VALUE: theme=amber look=map range=50 vectors=on`);
+            code = 1;
+            continue;
+          }
+          ctx.out(`${name} is ${value} on ${done.map(api.short).join(', ')}`, 'good');
+          ctx.data({ name, value, boards: done.map(api.short) });
+        }
+        return code;
       },
     },
     {

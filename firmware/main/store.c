@@ -276,6 +276,18 @@ void store_save_units(const wx_units_t *w)
     save_blob("units", w, sizeof *w);
 }
 
+int store_load_names(void)
+{
+    uint8_t v = NAMES_SOFT;                            // never set: soft, as a fresh board has them
+    return load_blob(NS, "names", &v, sizeof v) && v < NAMES_STYLES ? v : NAMES_SOFT;
+}
+
+void store_save_names(int style)
+{
+    uint8_t v = (uint8_t)style;
+    save_blob("names", &v, sizeof v);
+}
+
 uint32_t store_load_ran(void)
 {
     nvs_handle_t h;

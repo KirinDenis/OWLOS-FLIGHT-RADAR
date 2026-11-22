@@ -18,7 +18,13 @@
 
 enum {
     M_LAND, M_WATER, M_WOOD, M_GREEN, M_URBAN, M_BUILDING, M_ROAD, M_MAJOR, M_MOTOR, M_RAIL,
-    M_BORDER, M_TEXT, M_AERO, M_CLASSES,
+    M_BORDER, M_TEXT, M_AERO,
+    M_HALO,                            /* not in the tiles: map_end's, round the letters of a name. the
+                                        * tiles have a light halo there; the dark looks paint it dark */
+    M_SOFT,                            /* not in the tiles' colours: a letter's soft edge (map.c's letter_mark).
+                                        * the classic look paints it as the letter, the dark ones dimmer
+                                        * (ui.h NAMES_*): there light strokes as fat as the dark ones ran */
+    M_CLASSES,
     M_NONE = 15                        /* nothing known there (yet) */
 };
 
@@ -55,6 +61,11 @@ typedef struct {
 
 /* where the pieces come from: NULL = malloc. the firmware points it at the word-only IRAM first */
 extern void *(*map_mem)(size_t bytes);
+/* map_tile's working rows while a tile is read (the names, word by word): MAP_SCRATCH bytes lent, or
+ * NULL: malloc. the heap is shortest just then, the PNG's window takes 32 KB of it, so the firmware
+ * lends a buffer of its own that nothing uses while the map is read */
+#define MAP_SCRATCH 3584
+extern void  *map_scratch;
 
 /* the zoom whose tile pixels come nearest a texel: 2 .. 17 */
 int  map_zoom(float lat, float kpx);
@@ -65,13 +76,40 @@ int  map_url(const tile_id_t *t, char *buf, int cap);    /* the tile's address o
 
 int  map_alloc(map_t *m, int w, int h, int disc);        /* 0 = no memory, then it holds none */
 void map_begin(map_t *m);                               /* not ready, every texel M_NONE */
-/* read tile k of the plan into the texels: png_decode's PNG_OK, PNG_BAD or PNG_NO_MEMORY */
+/* read tile k of the plan into the texels: png_decode's PNG_OK, PNG_BAD or PNG_NO_MEMORY. a texel
+ * that covers more than one pixel of the tile keeps the kind that would be lost: the road, not the
+ * field beside it. the names go word by word, pixel for pixel, only their places scaled (map.c) */
 int  map_tile(map_t *m, const map_plan_t *p, int k, png_read_fn rd, void *rctx);
-void map_end(map_t *m, const map_plan_t *p);            /* ready, for the plan's home and scale */
+/* ready, for the plan's home and scale. every texel beside a letter of a name becomes M_HALO first */
+void map_end(map_t *m, const map_plan_t *p);
 
 int  map_class(int r, int g, int b);                    /* an OpenStreetMap colour -> M_* */
 
 static inline int map_at(const map_t *m, int u, int v)
 {
     return (int)(m->row[v][u >> 3] >> ((u & 7) * 4)) & 15;
+}
+
+/* the outlines: where water meets land, a town the country, a wood the fields. the eye reads where
+ * things end more than what fills them, and on these screens a fill is a step or two above black.
+ * a texel of a town or of water is on an outline's inside when one beside it (left, right, up,
+ * down) is lower: the open country 1, a wood 2, a town 3, water 4. roads, rails, borders, runways
+ * and names are 0: lines of their own, and a name's white halo would be outlined. a wood has none:
+ * the country is woods in pieces, every piece outlined was a ripple over the whole map, and asking
+ * its four neighbours cost a forest's every texel. map_rim says the kind, MAP_RIM more on an
+ * outline. worked out as the screen asks: nothing kept, so the classic look can leave them out */
+#define MAP_RIM 16
+static inline int map_rim(const map_t *m, int u, int v)
+{
+    static const uint8_t UP[16] = { [M_LAND] = 1, [M_GREEN] = 1, [M_WOOD] = 2, [M_URBAN] = 3, [M_BUILDING] = 3, [M_WATER] = 4 };
+    const int k = map_at(m, u, v), up = UP[k];
+    if (up < 3) {
+        return k;
+    }
+    int n;
+    if (u > 0 && (n = UP[map_at(m, u - 1, v)]) && n < up) return k | MAP_RIM;
+    if (u + 1 < m->w && (n = UP[map_at(m, u + 1, v)]) && n < up) return k | MAP_RIM;
+    if (v > 0 && (n = UP[map_at(m, u, v - 1)]) && n < up) return k | MAP_RIM;
+    if (v + 1 < m->h && (n = UP[map_at(m, u, v + 1)]) && n < up) return k | MAP_RIM;
+    return k;
 }

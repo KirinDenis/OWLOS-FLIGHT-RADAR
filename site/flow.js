@@ -51,6 +51,7 @@ const RANGES = [2, 5, 10, 25, 50, 100, 250];
 const SWITCHES = { vectors: 'Vectors', clock: 'UTC clock', block: 'Data block', conflict: 'Conflict' };
 const BACKLIGHTS = [100, 50, 25, 10];                  // the board's BACKLIGHT steps, % as core/ui.h has them
 const ALERTS = ['storm', 'pressure', 'air', 'radiation'];   // the board's weather warnings: bit k is WXA_* k (core/weather.h)
+const NAMES = ['soft', 'thin', 'bold'];                // the map's names on the dark looks, core/ui.h NAMES_*, in its order
 /* the board's weather units: the console's words, in the order core/ui.h numbers them, 0 auto (home's country's own),
  * and what a chip says */
 const UNITS = {
@@ -200,6 +201,9 @@ class Screen {
     } else if (name in SWITCHES && ['on', 'off'].includes(value)) {
       this.opts[name] = value === 'on' ? 1 : 0;
       this.setOpts();
+    } else if (name === 'names' && NAMES.includes(value) && this.m._twin_names) {
+      this.m._twin_names(NAMES.indexOf(value));
+      this.told = this.cfg();
     } else {
       return false;
     }
@@ -214,6 +218,9 @@ class Screen {
   fromBoard(c) {
     this.home = { lat: c.lat, lon: c.lon, place: c.place, country: c.country };
     this.m._twin_board(1);
+    if (c.names !== undefined) {                       // the map's names as it draws them: before apply, which notes what was told
+      this.m._twin_names?.(c.names);
+    }
     // a board before 0.16 (no alerts) has three looks. one flashed back from a beta can keep WEATHER's 3, which it draws as MAP
     const look = c.alerts === undefined && c.look >= LOOKS.indexOf('weather') ? LOOKS.indexOf('map') : c.look;
     this.apply({ range: c.range, up: c.up, theme: c.theme, look, map: c.map, ground: c.ground, dist_unit: c.dist_unit, alt_unit: c.alt_unit, labels: c.labels });
@@ -325,7 +332,7 @@ class Screen {
     }
     if (what & 1) {
       const now = this.cfg();
-      for (const [key, word] of [['theme', THEMES], ['look', LOOKS]]) {
+      for (const [key, word] of [['theme', THEMES], ['look', LOOKS], ['names', NAMES]]) {
         if (this.told && now[key] !== this.told[key]) {
           say(`set ${key}=${word[now[key]]}`, 'cmd');
         }
@@ -683,6 +690,9 @@ function setOne(u, name, value) {
     u.link.send(`OWLOS SET ${JSON.stringify({ night: step })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
     return true;
   }
+  if (name === 'names' && u && u.cfg?.names === undefined) {   // the map's names: a board before 0.16.2 draws them one way only
+    return false;
+  }
   if (name === 'alerts') {                             // the weather's warnings on every look: a board that says none has none
     const mask = alertMask(value);
     if (!u?.link || mask < 0 || u.cfg?.alerts === undefined) {
@@ -718,6 +728,7 @@ const FILES = {
       ...(u.cfg?.backlight !== undefined ? [`backlight=${BACKLIGHTS[u.cfg.backlight]}`] : []),
       ...(u.cfg?.night !== undefined ? [`night=${u.cfg.night ? BACKLIGHTS[u.cfg.night] : 'off'}`] : []),
       ...(u.cfg?.alerts !== undefined ? [`alerts=${alertWords(u.cfg.alerts)}`] : []),
+      ...(u.cfg?.names !== undefined ? [`names=${NAMES[c.names] ?? NAMES[0]}`] : []),
       ...Object.entries(UNITS).filter(([, n]) => u.cfg?.[n.key] !== undefined).map(([name, n]) => `${name}=${n.words[u.cfg[n.key]] ?? 'auto'}`),
       ...Object.keys(SWITCHES).map((k) => `${k}=${u.screen.opts[k] ? 'on' : 'off'}`)];
   },
@@ -736,7 +747,7 @@ const boardApi = {
   files: FILES,
   settings: [...THEMES.map((v) => `theme=${v}`), ...LOOKS.map((v) => `look=${v}`), ...RANGES.map((v) => `range=${v}`), ...Object.keys(SWITCHES).flatMap((k) => [`${k}=on`, `${k}=off`]), 'flip=on', 'flip=off',
     ...BACKLIGHTS.map((p) => `backlight=${p}`), 'night=off', ...BACKLIGHTS.slice(1).map((p) => `night=${p}`),
-    'alerts=all', 'alerts=none', ...ALERTS.map((a) => `alerts=${a}`),
+    'alerts=all', 'alerts=none', ...ALERTS.map((a) => `alerts=${a}`), ...NAMES.map((v) => `names=${v}`),
     ...Object.entries(UNITS).flatMap(([name, n]) => n.words.map((w) => `${name}=${w}`)), ...WX_PAGES.map((p) => `wxpage=${p}`)],
   set: setOne,
   async send(u, line) {
@@ -1533,6 +1544,7 @@ function panePart(u, tab) {
     pane.innerHTML = `<div class="field"><span>Look</span><div class="chips">${looks.map((l, i) => `<button class="chip" data-set="look=${l}" aria-pressed="${c.look === i}">${l.toUpperCase()}</button>`).join('')}</div></div>
       ${c.look === LOOKS.indexOf('weather') ? `<div class="field"><span>Weather page</span><div class="chips">${WX_PAGES.map((p, i) => `<button class="chip" data-set="wxpage=${p}" aria-pressed="${s.wxPage() === i}">${p.toUpperCase()}</button>`).join('')}</div></div>` : ''}
       <div class="field"><span>Colours</span><div class="chips">${THEMES.map((t, i) => `<button class="chip" data-set="theme=${t}" aria-pressed="${c.theme === i}">${t.toUpperCase()}</button>`).join('')}</div></div>
+      ${!u || u.cfg?.names !== undefined ? `<div class="field"><span>Names on the dark maps</span><div class="chips">${NAMES.map((n, i) => `<button class="chip" data-set="names=${n}" aria-pressed="${c.names === i}">${n.toUpperCase()}</button>`).join('')}</div></div>` : ''}
       <label>Range: <b class="rangeword">${Math.round(c.range)}</b> km<input type="range" class="range" min="0" max="${RANGES.length - 1}" value="${range}"></label>
       <div class="field"><span>On the radar</span><div class="chips">${Object.entries(SWITCHES).map(([k, v]) => `<button class="chip" data-set="${k}=${s.opts[k] ? 'off' : 'on'}" aria-pressed="${!!s.opts[k]}">${v.toUpperCase()}</button>`).join('')}</div></div>
       ${u ? `<div class="field"><span>The board's screen</span><div class="chips"><button class="chip" data-set="flip=${u.cfg?.flip ? 'off' : 'on'}" aria-pressed="${!!u.cfg?.flip}">UPSIDE DOWN</button></div></div>` : ''}

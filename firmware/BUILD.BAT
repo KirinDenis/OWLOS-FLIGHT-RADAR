@@ -7,6 +7,7 @@ rem   BUILD.BAT st7796 COM4       same, and flash it
 rem displays: ili9341 (2.8" CYD, all three revisions, the default)  st7796 (3.5" CYD)
 rem           ili9486 (RPi LCD on OWLOSAirQuality)  gc9a01 (round 1.28", ESP32-C3)
 rem           es3c28p (LCDWIKI ES3C28P 2.8", ESP32-S3)  nmcydc5 (NM-CYD-C5 2.8", ESP32-C5)
+rem           zlx2 (ZLX-ESP32-2 2.8", ESP32-C5)
 rem           crowadv28 (Elecrow CrowPanel Advance 2.8", ESP32-S3)
 rem           crowadv50 (Elecrow CrowPanel Advance 5.0", ESP32-S3)  jc8048w550 (Guition 5", ESP32-S3)
 rem           tab5 (M5Stack Tab5 5", ESP32-P4)  esp4827s043 (ESP32-4827S043C 4.3", ESP32-S3)
@@ -33,6 +34,7 @@ if /i "%DISP%"=="epd400"  (set NUM=5& set TARGET=esp32s3)
 if /i "%DISP%"=="epd792"  (set NUM=6& set TARGET=esp32s3)
 if /i "%DISP%"=="es3c28p" (set NUM=7& set TARGET=esp32s3)
 if /i "%DISP%"=="nmcydc5" (set NUM=8& set TARGET=esp32c5)
+if /i "%DISP%"=="zlx2" (set NUM=19& set TARGET=esp32c5)
 if /i "%DISP%"=="crowadv28" (set NUM=9& set TARGET=esp32s3)
 if /i "%DISP%"=="crowadv50" (set NUM=10& set TARGET=esp32s3)
 if /i "%DISP%"=="jc8048w550" (set NUM=11& set TARGET=esp32s3)
@@ -44,7 +46,7 @@ if /i "%DISP%"=="wave7" (set NUM=15& set TARGET=esp32s3)
 if /i "%DISP%"=="wave7b" (set NUM=16& set TARGET=esp32s3)
 if /i "%DISP%"=="jc8012" (set NUM=17& set TARGET=esp32p4)
 if "%NUM%"=="" (
-  echo unknown display %DISP%, pick one of: ili9341 st7796 ili9486 gc9a01 es3c28p nmcydc5 crowadv28 crowadv50 crow50 jc8048w550 tab5 esp4827s043 crow70 wave7 wave7b jc8012 epd400 epd792
+  echo unknown display %DISP%, pick one of: ili9341 st7796 ili9486 gc9a01 es3c28p nmcydc5 zlx2 crowadv28 crowadv50 crow50 jc8048w550 tab5 esp4827s043 crow70 wave7 wave7b jc8012 epd400 epd792
   exit /b 1
 )
 rem the CYD keeps the plain build folder and sdkconfig it always had

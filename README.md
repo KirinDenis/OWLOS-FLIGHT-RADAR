@@ -64,6 +64,10 @@ The map under them comes from OpenStreetMap.
   own. New, not run on one here yet: the pins come from LCDWIKI's schematic.
 - **2.8" NM-CYD-C5**: the CYD's form on an ESP32-C5, ST7789 320x240, resistive touch, two USB-C ports
   (either works). New, not run on one here yet: the pins come from its maker's schematic.
+- **2.8" ZLX-ESP32-2**: an ESP32-C5 board with a socket for an outside antenna, ST7789 320x240, resistive
+  touch, one USB-C. Experimental, never run on one here: the pins come from its maker's pin list and
+  factory test. Not the NM-CYD-C5's pins: that build leaves its screen dark. Its speaker and its green
+  LED are not used.
 - **2.8" Elecrow CrowPanel Advance** (the 2.8" HMI ESP32 AI display): ESP32-S3, ST7789 320x240 IPS,
   capacitive touch (FT6336), two USB-C ports (either works). New, not run on one here yet: the pins
   come from Elecrow's examples and schematic.
@@ -137,6 +141,8 @@ may still go wrong. A board on the stable never hears of a beta by itself. You p
 - **On the beta** the board sees the next beta by itself and shows NEW VERSION, as a board on the stable
   does for the next stable.
 - **Back to the stable**: the same row, STABLE, then FLASH. Your settings stay.
+- **A board new in the beta** has no stable version yet: the site flashes it the beta, with no row to
+  pick, and it follows the betas till the stable has it too.
 - **From the console**: `flash` writes the version the board follows, `flash --board NAME` one board of
   several.
 
@@ -394,7 +400,7 @@ smaller letters and its list of the nearest planes without their heights.
   Wrong colours or a mirrored picture: press **BOOT** in the first seconds after power on. It goes v2,
   v1 (micro USB), v3 (ST7789) and keeps the one you stop at.
 - The ES3C28P has the same three and starts as v2 too. The NM-CYD-C5 has two: RGB first, then BGR, for
-  red and blue swapped. The CrowPanel Advance has the same two, BGR first. The 5" boards have them too,
+  red and blue swapped. The CrowPanel Advance and the ZLX-ESP32-2 have the same two, BGR first. The 5" boards have them too,
   RGB first.
 
 ### The round glass
@@ -457,7 +463,7 @@ and a PC preview.
 
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
   `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
-  `es3c28p`, `nmcydc5`, `crowadv28`, `crowadv50`, `crow50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
+  `es3c28p`, `nmcydc5`, `zlx2`, `crowadv28`, `crowadv50`, `crow50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
   `wave7`, `wave7b`, `jc8012`. Each screen has its own build folder and sdkconfig.
 - `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012`,
   `crow70` and `crow50`.
@@ -563,7 +569,7 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   home's country's own: `temp_unit` (1 C, 2 F), `pressure_unit` (1 hPa,
   2 mmHg, 3 inHg), `wind_unit` (1 km/h, 2 m/s, 3 mph, 4 knots), `rain_unit` (1 mm, 2 inches),
   `backlight` (0 100%, 1 50%, 2 25%, 3 10%), `night` (0 off, else a step as `backlight`),
-  `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
+  `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the ZLX-ESP32-2, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
   What is left out stays as it is. Answered with `OWLOS OK` or `OWLOS ERR <why>`.
 
 ## Data and licences

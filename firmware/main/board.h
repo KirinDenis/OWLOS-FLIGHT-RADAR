@@ -201,6 +201,41 @@
 #define PIN_BUTTON    28        // BOOT
 #define PIN_LED_WS2812 27       // one WS2812C behind a level shifter, green red blue (Bruce's order)
 
+#elif RADAR_DISPLAY == DISPLAY_ZLX2_320x240
+/* ZLX-ESP32-2, 2.8": ESP32-C5-WROOM-1U N8R8 (a socket for an outside antenna), ST7789 240x320,
+ * XPT2046 resistive. pins from its maker's pin list and factory test (qmaakdfq/ESP32-C5-Series-
+ * Development-Board: GPIO_Pinout_CN_EN.md, pins.h, config.h), the same in GitHub issue #13. NOT run
+ * on one here: a viewer asked for it and has one. not the NM-CYD-C5: the same chips on other pins.
+ * one USB-C, through a USB to serial chip on UART0: the C5's own USB pins are the backlight and the
+ * screen's DC here. the screen and the SD card share one SPI bus, the touch has pins of its own */
+#define DISP_LCD_SPI   1
+#define LCD_CHIP_ST7789 1
+#define PIN_LCD_SCLK   6
+#define PIN_LCD_MOSI   7
+#define PIN_LCD_MISO  (-1)      // its 2 is wired, but only the SD card answers there
+#define PIN_LCD_DC    14
+#define PIN_LCD_CS    10
+#define PIN_LCD_RST   (-1)      // on the chip's own reset
+#define PIN_LCD_BL    13        // high = lit
+#define PIN_SD_CS     27        // the SD slot on the same bus: held up, so a card in it keeps quiet
+#define NO_CHIP_USB    1        // its pins, 13 and 14, are the backlight and the DC
+#define LCD_SPI_HZ    (40 * 1000 * 1000)   // what the maker's factory test runs
+/* the maker's landscape: TFT_eSPI's rotation 1, MX|MV. the other one is the screen turned over */
+#define LCD_MADCTL    0x60
+#define DISP_STRIP    12        // as the NM-CYD-C5, the same chip: 24 left no RAM for the AES
+/* no inversion; BGR in the maker's setup, so BGR first, RGB behind BOOT in case */
+#define LCD_PROFILES   2
+#define LCD_ORDER      { 1, 0 }
+#define TOUCH_XPT_BITBANG 1
+#define PIN_T_CLK      4
+#define PIN_T_MOSI     5
+#define PIN_T_MISO     3
+#define PIN_T_CS      23
+#define PIN_T_IRQ     25
+#define PIN_T_IRQ_PULLUP 1      // the maker's test turns the chip's pull-up on: none on the board
+#define PIN_BUTTON    28        // BOOT
+#define PIN_AMP_EN    24        // the speaker's amplifier (SC8002B), high = on: held off, the radar is silent
+
 #elif RADAR_DISPLAY == DISPLAY_CROWADV28_320x240
 /* Elecrow CrowPanel Advance 2.8" HMI, ESP32-S3-WROOM-1 N16R8, ST7789 240x320 IPS, FT6336U
  * capacitive touch. pins from Elecrow's repository (Elecrow-RD/CrowPanel-Advance-2.8-HMI-ESP32-AI-

@@ -77,6 +77,10 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   left; the rest are set. The other files of a board, its info, wifi and log, only show what it says.
 - The console's `set` takes as many settings as are given: `set look=radar theme=amber backlight=25 --all`.
   An alias of it is a whole setup in one word.
+- A build for the ZLX-ESP32-2 (`zlx2`): an ESP32-C5 board, ST7789 320x240, resistive touch. Experimental:
+  the pins come from its maker's pin list and factory test, and it has not run on one yet. Its speaker's
+  amplifier is held off. The stable has no build for it, so the site flashes it the beta, with no row to
+  pick the stable.
 
 ## 0.16.1 (beta)
 

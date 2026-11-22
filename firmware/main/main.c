@@ -33,6 +33,9 @@ volatile uint32_t g_busy;                              // TEMP (busy.h): here, a
 #if RADAR_OVERLAY
 #include "ovl.h"
 #endif
+#ifdef PIN_AMP_EN
+#include "driver/gpio.h"
+#endif
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -1116,6 +1119,8 @@ static const char *board_name(void)
     return "es3c28p";
 #elif RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240
     return "nmcydc5";
+#elif RADAR_DISPLAY == DISPLAY_ZLX2_320x240
+    return "zlx2";
 #elif RADAR_DISPLAY == DISPLAY_CROWADV28_320x240
     return "crowadv28";
 #elif RADAR_DISPLAY == DISPLAY_CROWADV50_800x480
@@ -3163,6 +3168,12 @@ static void ui_task(void *arg)
 
 void app_main(void)
 {
+#ifdef PIN_AMP_EN
+    // a speaker's amplifier on the board: off from the start, its enable left floating may hum
+    gpio_set_level(PIN_AMP_EN, 0);
+    gpio_config_t amp = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT };
+    gpio_config(&amp);
+#endif
 #if RADAR_OVERLAY
     logbuf_start();                                    // (chipguyhere) the log no longer waits for the UART
 #endif

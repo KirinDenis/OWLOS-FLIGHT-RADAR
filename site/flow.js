@@ -25,6 +25,7 @@ const BOARDS = {
   ili9486: { name: '3.5" RPi LCD', spec: 'on OWLOSAirQuality, no touch', chip: 'esp32', w: 480, h: 320, inch: 3.5, touch: 'none', twin: 'Twin2', shot: 'ili9486/03-picked-heavy.png' },
   gc9a01: { name: '1.28" round', spec: 'Elecrow CrowPanel, ESP32-C3', chip: 'c3', w: 240, h: 240, inch: 1.28, touch: 'capacitive', round: true, twin: 'Twin4', shot: 'gc9a01/03-picked-heavy.png' },
   nmcydc5: { name: '2.8" NM-CYD-C5', spec: 'ESP32-C5, 320x240, resistive touch', chip: 'c5', w: 320, h: 240, inch: 2.8, touch: 'resistive', twin: 'Twin1', shot: '02-live.png', screens: 'two' },
+  zlx2: { name: '2.8" ZLX-ESP32-2', spec: 'ESP32-C5, 320x240, resistive touch, experimental', chip: 'c5', w: 320, h: 240, inch: 2.8, touch: 'resistive', twin: 'Twin1', shot: '02-live.png', screens: 'two' },
   es3c28p: { name: '2.8" LCDWIKI ES3C28P', spec: 'ESP32-S3, 320x240, capacitive touch', chip: 's3', w: 320, h: 240, inch: 2.8, touch: 'capacitive', twin: 'Twin1', shot: '02-live.png', screens: 'three' },
   crowadv28: { name: '2.8" CrowPanel Advance', spec: 'ESP32-S3, 320x240 IPS, capacitive touch', chip: 's3', w: 320, h: 240, inch: 2.8, touch: 'capacitive', twin: 'Twin1', shot: '02-live.png', screens: 'two' },
   crowadv50: { name: '5" CrowPanel Advance', spec: 'ESP32-S3, 800x480 IPS, capacitive touch', chip: 's3', w: 800, h: 480, inch: 5, touch: 'capacitive', twin: 'Twin', shot: 'crowadv50/02-live.png', screens: 'two' },
@@ -89,13 +90,17 @@ function alertMask(value) {
 let newest = '0';                                      // the stable: what version.json says every board
 let beta = '';                                         // the beta beside it, '' when there is none
 let betaBoards = [];                                   // the boards the beta was built for (fw/versions.json)
+let stableBoards = null;                               // and the stable, read with them. null: every board
 
 const older = (a, b) => a.localeCompare(b, 'en', { numeric: true }) < 0;
+// a board new in the beta has no stable build: the beta is the only version for it
+const inStable = (build) => !stableBoards || stableBoards.includes(build);
 
 /* the version a board goes to: one above the stable runs a beta and follows the betas, or the stable a
- * beta became. every other board follows the stable */
+ * beta became. so does a board the stable has no build for. every other board follows the stable */
 function follows(u) {
-  return beta && u.version && older(newest, u.version) && betaBoards.includes(u.build) ? beta : newest;
+  const ahead = u.version && (older(newest, u.version) || !inStable(u.build));
+  return beta && ahead && betaBoards.includes(u.build) ? beta : newest;
 }
 
 /* where a version of a board's firmware is on the site: the stable in fw/<board>, a beta in its own folder */
@@ -1239,8 +1244,12 @@ function showBoards(all = false, oldVersion = null) {
   const name = app.kind ? BOARDS[app.kind].name : null;
   // the stable, or the beta when there is one for this board and the person picked it
   const canBeta = Boolean(beta && app.kind && betaBoards.includes(app.kind));
-  const ver = canBeta && app.wantsBeta ? beta : newest;
-  const channel = canBeta ? `<div class="field channel"><span>Version</span><div class="chips">
+  const onlyBeta = canBeta && !inStable(app.kind);
+  const ver = canBeta && (app.wantsBeta || onlyBeta) ? beta : newest;
+  const channel = onlyBeta ? `<div class="field channel"><span>Version</span><div class="chips">
+      <button class="chip" aria-pressed="true">BETA ${beta}</button></div>
+      <p class="note">This board is new in the beta: there is no stable version for it yet.</p></div>`
+    : canBeta ? `<div class="field channel"><span>Version</span><div class="chips">
       <button class="chip" data-beta="0" aria-pressed="${ver === newest}">STABLE ${newest}</button>
       <button class="chip" data-beta="1" aria-pressed="${ver === beta}">BETA ${beta}</button></div>
       ${ver === beta ? `<p class="note">A beta brings the new things first, and it may still go wrong. ${newest} is one flash away.</p>` : ''}</div>` : '';
@@ -1573,7 +1582,7 @@ function panePart(u, tab) {
   } else {
     /* the version, where the site has a beta for this board: the stable or the beta, the one it runs pressed. the
      * other picked, a button flashes it, settings kept. the bar's UPDATE and FLASH AGAIN go on following what it runs */
-    const canPick = Boolean(u?.online && u.version && beta && betaBoards.includes(u.build));
+    const canPick = Boolean(u?.online && u.version && beta && betaBoards.includes(u.build) && inStable(u.build));
     const runs = u && canPick ? follows(u) : '';
     const ver = u?.pick === 'beta' ? beta : u?.pick === 'stable' ? newest : runs;
     const toBeta = ver === beta && runs !== beta;
@@ -2024,6 +2033,8 @@ fetch('version.json').then((r) => r.json()).then(async (v) => {
     const j = await (await fetch('fw/versions.json', { cache: 'no-cache' })).json();
     if (j?.beta?.version === b && Array.isArray(j.beta.boards)) {
       betaBoards = j.beta.boards;
+      const st = Array.isArray(j.versions) ? j.versions.find((x) => x.version === newest) : null;
+      stableBoards = Array.isArray(st?.boards) ? st.boards : null;
       beta = b;
       renderBar();
     }

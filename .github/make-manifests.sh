@@ -16,6 +16,7 @@ for dir in "$FW"/*/; do
     gc9a01)  name='1.28" round (GC9A01 240x240)';              family='ESP32-C3' ;;
     es3c28p) name='2.8" LCDWIKI ES3C28P (ESP32-S3, ILI9341V)'; family='ESP32-S3' ;;
     nmcydc5) name='2.8" NM-CYD-C5 (ESP32-C5, ST7789)';          family='ESP32-C5' ;;
+    zlx2)    name='2.8" ZLX-ESP32-2 (ESP32-C5, ST7789, experimental)'; family='ESP32-C5' ;;
     crowadv28) name='2.8" Elecrow CrowPanel Advance (ESP32-S3, ST7789)'; family='ESP32-S3' ;;
     crowadv50) name='5" Elecrow CrowPanel Advance (ESP32-S3, 800x480, experimental)'; family='ESP32-S3' ;;
     jc8048w550) name='5" Guition JC8048W550 (ESP32-S3, 800x480, experimental)'; family='ESP32-S3' ;;

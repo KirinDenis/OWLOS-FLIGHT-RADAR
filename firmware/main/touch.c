@@ -98,9 +98,14 @@ static void chip_select(int on);
  * missed. then every sample asks the chip, as before */
 static int s_irq;
 
+#ifndef PIN_T_IRQ_PULLUP
+#define PIN_T_IRQ_PULLUP 0      // the CYDs pull it up on the board (36 has no pull-up of its own)
+#endif
+
 static void irq_init(void)
 {
-    gpio_config_t in = { .pin_bit_mask = 1ULL << PIN_T_IRQ, .mode = GPIO_MODE_INPUT };
+    gpio_config_t in = { .pin_bit_mask = 1ULL << PIN_T_IRQ, .mode = GPIO_MODE_INPUT,
+                         .pull_up_en = PIN_T_IRQ_PULLUP ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE };
     gpio_config(&in);
     chip_select(1);
     xfer(0xD0);                                      // power down, pen interrupt on

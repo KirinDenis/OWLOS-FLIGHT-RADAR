@@ -35,9 +35,11 @@ on the site; none of the built ones here has been run on that board yet unless i
 - The one who asked has the board and offered to test a build. To learn from it: RGB or BGR, which
   landscape is upright, whether the touch's pen interrupt is there, whether 30 MHz stays clean.
 
-## ZLX-ESP32-2: asked 2026-11-19 (GitHub issue #13), not built
+## ZLX-ESP32-2: asked 2026-11-19 (GitHub issue #13), built 2026-11-22 as `zlx2`, not run on one yet
 
-- Asked in issue #13, with the pins from the maker's manual. No word yet about testing a build.
+- Asked in issue #13, with the pins from the maker's manual. The asker offered to test a build: the
+  screen's orientation, its colours, the touch after the 5 cross alignment, the planes over WiFi. Their
+  photo shows the board in its case lying down, on a firmware of its own.
 - An ESP32-C5 board: ESP32-C5-WROOM-1U-N8R8 (8 MB flash, 8 MB PSRAM, a socket for an outside antenna),
   ST7789 2.8" 240x320, XPT2046 resistive touch, a TF slot, a speaker amplifier (SC8002B), a socket for a
   GT-U7 GPS, a green LED, a battery input. The maker's repository:
@@ -56,12 +58,15 @@ on the site; none of the built ones here has been run on that board yet unless i
   ways. The 5 cross alignment finds the touch's axes anyway.
 - The C5's own USB pins (13, 14) are the backlight and the DC here, so its USB goes through a USB to
   serial chip on UART0 (11, 12, left out of the maker's list). Which chip is not said.
-- A build would be pins only, with chips the firmware has: the NM-CYD-C5's ST7789 and C5 settings
-  (strips of 12 rows, TLS in the PSRAM), the 2.8" CYD's bit-banged XPT2046, the 4 MB layout on its 8 MB
-  of flash. New for it: the amplifier held off (24 low), the SD card's select held up, and a one-colour
-  LED if the light events are to show on it.
-- Missing: someone with the board to try a build. To learn: which landscape is upright, BGR as the
-  maker says, the pen interrupt, whether 40 MHz is clean.
+- The build (board.h DISPLAY_ZLX2_320x240) is pins only, with chips the firmware has: the NM-CYD-C5's
+  ST7789 and C5 settings (strips of 12 rows, TLS in the PSRAM), the 2.8" CYD's bit-banged XPT2046, the
+  4 MB layout on its 8 MB of flash. New for it: the amplifier held off (24 low from the start of
+  app_main), the pen interrupt's pull-up on (PIN_T_IRQ_PULLUP), the C5's own USB left alone
+  (NO_CHIP_USB). The SD card's select is held up as on the NM-CYD-C5. MADCTL 0x60, BGR first and RGB
+  behind BOOT, 40 MHz, no inversion. The green LED is not used.
+- New in the beta 0.16.2, so the site flashes it the beta only (flow.js inStable).
+- To learn from the tester: which landscape is upright (SET's FLIP turns it over), BGR as the maker
+  says, the pen interrupt, whether 40 MHz is clean.
 
 ## LCDWIKI ES3C28P: built 2026-11-03, not run on one yet
 

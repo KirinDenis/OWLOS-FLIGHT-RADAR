@@ -1,0 +1,83 @@
+# Builds the example firmware for every ESP32 chip and publishes it on GitHub Pages, next to the
+# page that flashes it. Runs on every push to main, and by hand from the Actions tab.
+#
+# Needs once: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+
+name: Build and publish
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  CORE: esp32:esp32@3.3.5          # the ESP32 Arduino core, a fixed version: the same build every time
+  CORE_URL: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0               # the whole history: the build number is the count of commits
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install the ESP32 core
+        run: arduino-cli core install "$CORE" --additional-urls "$CORE_URL"
+
+      - name: Name the build
+        # the board says it on its serial port and the page shows it: you see the new one arrived
+        run: |
+          VERSION="build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "#define FW_VERSION \"$VERSION\"" > firmware/version.h
+
+      - name: Build for every chip
+        # four files a chip, flashed at the addresses in site/manifest.json. boot_app0.bin is the
+        # same for all: it says "start the first app", it comes with the core
+        run: |
+          APP0=$(ls ~/.arduino15/packages/esp32/hardware/esp32/*/tools/partitions/boot_app0.bin)
+          for chip in esp32 esp32s2 esp32s3 esp32c3 esp32c6; do
+            fqbn=esp32:esp32:$chip
+            if [ "$chip" != esp32 ]; then
+              fqbn="$fqbn:CDCOnBoot=cdc"     # these have their own USB: Serial goes there too
+            fi
+            arduino-cli compile --fqbn "$fqbn" --build-path "build/$chip" firmware
+            mkdir -p "public/fw/$chip"
+            cp "build/$chip/firmware.ino.bootloader.bin" "public/fw/$chip/bootloader.bin"
+            cp "build/$chip/firmware.ino.partitions.bin" "public/fw/$chip/partitions.bin"
+            cp "build/$chip/firmware.ino.bin" "public/fw/$chip/firmware.bin"
+            cp "$APP0" "public/fw/$chip/boot_app0.bin"
+          done
+
+      - name: Put the page together
+        run: |
+          cp site/* public/
+          sed -i "s|@VERSION@|$VERSION|g" public/index.html public/manifest.json
+          find public -type f | sort
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

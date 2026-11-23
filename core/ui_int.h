@@ -252,8 +252,10 @@ extern const char *const WX_PAGE_NAME[WX_PAGES];     /* what the toast says when
 void next_wx_page(ui_t *u);                          /* a tap on the dial or the graph, or BOOT: the next page */
 void step_wx_page(ui_t *u, int d);                   /* the page after (d 1) or before (d -1): the paper's dial */
 /* the colour dial with the printed dial's column beside it in place of the panel (ui_weather.c wx_hud): the 480x320
- * screens first */
-#define WX_HUD (RADAR_DISPLAY == DISPLAY_ST7796_480x320 || RADAR_DISPLAY == DISPLAY_ILI9486_480x320)
+ * and the 320x240 screens */
+#define WX_HUD (RADAR_DISPLAY == DISPLAY_ST7796_480x320 || RADAR_DISPLAY == DISPLAY_ILI9486_480x320 || \
+                RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ES3C28P_320x240 || \
+                RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240 || RADAR_DISPLAY == DISPLAY_CROWADV28_320x240)
 #if RADAR_EPAPER
 int  weather_sheet_up(const ui_t *u);                /* the weather's first page is the printed dial (paper_style 1) */
 int  weather_paper_page(const ui_t *u);              /* the weather is the paper's own, all three pages (the 4.2"'s) */

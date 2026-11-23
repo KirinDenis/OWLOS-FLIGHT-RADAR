@@ -1,0 +1,52 @@
+{
+  "name": "ESP32 Web Flasher example",
+  "version": "@VERSION@",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "fw/esp32/bootloader.bin", "offset": 4096 },
+        { "path": "fw/esp32/partitions.bin", "offset": 32768 },
+        { "path": "fw/esp32/boot_app0.bin", "offset": 57344 },
+        { "path": "fw/esp32/firmware.bin", "offset": 65536 }
+      ]
+    },
+    {
+      "chipFamily": "ESP32-S2",
+      "parts": [
+        { "path": "fw/esp32s2/bootloader.bin", "offset": 4096 },
+        { "path": "fw/esp32s2/partitions.bin", "offset": 32768 },
+        { "path": "fw/esp32s2/boot_app0.bin", "offset": 57344 },
+        { "path": "fw/esp32s2/firmware.bin", "offset": 65536 }
+      ]
+    },
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "fw/esp32s3/bootloader.bin", "offset": 0 },
+        { "path": "fw/esp32s3/partitions.bin", "offset": 32768 },
+        { "path": "fw/esp32s3/boot_app0.bin", "offset": 57344 },
+        { "path": "fw/esp32s3/firmware.bin", "offset": 65536 }
+      ]
+    },
+    {
+      "chipFamily": "ESP32-C3",
+      "parts": [
+        { "path": "fw/esp32c3/bootloader.bin", "offset": 0 },
+        { "path": "fw/esp32c3/partitions.bin", "offset": 32768 },
+        { "path": "fw/esp32c3/boot_app0.bin", "offset": 57344 },
+        { "path": "fw/esp32c3/firmware.bin", "offset": 65536 }
+      ]
+    },
+    {
+      "chipFamily": "ESP32-C6",
+      "parts": [
+        { "path": "fw/esp32c6/bootloader.bin", "offset": 0 },
+        { "path": "fw/esp32c6/partitions.bin", "offset": 32768 },
+        { "path": "fw/esp32c6/boot_app0.bin", "offset": 57344 },
+        { "path": "fw/esp32c6/firmware.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}

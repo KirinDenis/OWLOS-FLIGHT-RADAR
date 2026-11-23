@@ -751,8 +751,8 @@ static void plan_marks(const ui_t *u, const weather_t *w, wtab_t *T, float t)
         if (hr->cloud >= 15) {
             const float sway = 2.0f * sinf(t * 0.3f + (float)i * 1.7f);
             blob_t *c = &T->cloud[T->n_cloud++];
-            at_deg(deg + sway, W_MID + (i % 2 ? 1.5f : -1.0f) + 1.2f * sinf(t * 0.45f + (float)i), &c->x, &c->y);
-            c->w = band * (0.45f + 0.75f * (float)hr->cloud / 100.0f);
+            at_deg(deg + sway, W_MID - 1.5f + (i % 2 ? 1.0f : -1.0f) + 1.0f * sinf(t * 0.45f + (float)i), &c->x, &c->y);
+            c->w = band * (0.45f + 0.62f * (float)hr->cloud / 100.0f);   // an overcast's still inside the rim
             c->c = hr->rain10 ? (night ? RGB(62, 72, 96) : RGB(168, 178, 196)) : night ? RGB(74, 86, 114) : RGB(244, 248, 253);
             c->a = 255;                                // whole: puffs over puffs would darken where they meet
         }
@@ -1175,7 +1175,7 @@ static int hud_row(canvas_t *cv, int y, const char *key, const char *val, uint32
         font_text(cv, &FONT_SMALL, hud_x(y, y + lh), y, key, C_DIM, 255);
         font_text(cv, &FONT_SMALL, GFX_W - 8 - font_width(&FONT_SMALL, val), y, val, c, 255);
     }
-    return y + lh + 3;
+    return y + lh + (GFX_H < 300 ? 2 : 3);              // the 2.8"'s rows closer
 }
 
 // the barometer's colour at f of its scale, in the theme's own ("сбалансируй палитру"): a storm's end dim, a fair day's bright
@@ -1226,7 +1226,7 @@ static int hud_baro(canvas_t *cv, const weather_t *w, float xc, int y, float r)
             gfx_line(cv, xc + cosf(an) * (r - l), yc - sinf(an) * (r - l), xc + cosf(an) * r, yc - sinf(an) * r, k % 5 ? 1.0f : 1.4f, C_DIM, 230);
         }
         char v[12];
-        for (int i = 0; i < 2; i++) {                  // the scale's ends inside it by the hub
+        for (int i = 0; i < 2 && r >= 26.0f; i++) {   // the scale's ends inside it by the hub, where there is room
             if (W.pu == PRES_INHG) snprintf(v, sizeof v, "%.1f", (double)(i ? lo + span : lo));
             else fmt_p(v, sizeof v, i ? lo + span : lo, 0);
             const int lw = micro_width(v, 1);
@@ -1317,36 +1317,49 @@ static void hud_rose(canvas_t *cv, const weather_t *w, float cx, float base, flo
 static void wx_hud(ui_t *u, canvas_t *cv, const weather_t *w)
 {
     char v[40], k[16];
+    const int small = GFX_H < 300;                     // the 2.8": half the room, the same table with less in it
     const int x1 = GFX_W - 8, ca = look_x(u) + look_w(u) + 6, cb = RDOTS_X - 6;
     clock_now(u, w, v, sizeof v);
-    if (gfx_touches(cv, 0, FONT_LINE_H(&FONT_LARGE))) font_text(cv, &FONT_LARGE, (ca + cb - font_width(&FONT_LARGE, v)) / 2, 0, v, C_FOCUS, 255);
-    int y = FONT_LINE_H(&FONT_LARGE) + 2;
+    const font_t *cf = font_width(&FONT_LARGE, v) <= cb - ca ? &FONT_LARGE : &FONT_MEDIUM;
+    if (gfx_touches(cv, 0, FONT_LINE_H(cf))) font_text(cv, cf, (ca + cb - font_width(cf, v)) / 2, 0, v, C_FOCUS, 255);
+    int y = FONT_LINE_H(cf) + 2;
+    if (y < LOOK_Y + LOOK_H + 2) y = LOOK_Y + LOOK_H + 2;   // the date under the buttons' row: it runs under the dots
     if (u->net.utc && gfx_touches(cv, y, y + FONT_LINE_H(&FONT_SMALL))) {
         const int64_t s = (int64_t)u->net.utc + (int64_t)w->utc_min * 60, days = s / 86400;
         int yy, mm, dd;
         civil_date(days, &yy, &mm, &dd);
         snprintf(v, sizeof v, "%s %d %s %d", WDAY_FULL[(days + 3) % 7], dd, MONTH[(mm + 11) % 12], yy);
+        if (font_width(&FONT_SMALL, v) > x1 - hud_x(y, y + FONT_LINE_H(&FONT_SMALL))) {   // as short as the room asks
+            snprintf(v, sizeof v, "%.3s %d %.3s %d", WDAY_FULL[(days + 3) % 7], dd, MONTH[(mm + 11) % 12], yy);
+        }
         font_text(cv, &FONT_SMALL, x1 - font_width(&FONT_SMALL, v), y, v, C_FOCUS, 255);
     }
-    y += FONT_LINE_H(&FONT_SMALL) + 4;
+    y += FONT_LINE_H(&FONT_SMALL) + (small ? 3 : 4);
     const char *kind = KIND_NAME[w->now_kind < WX_KINDS ? w->now_kind : 0];
     const int kx = hud_x(y, y + FONT_LINE_H(&FONT_MEDIUM));
     if (gfx_touches(cv, y, y + FONT_LINE_H(&FONT_MEDIUM))) font_text_clip(cv, &FONT_MEDIUM, kx, y, kind, C_FOCUS, 255, x1 - kx);
     y += FONT_LINE_H(&FONT_MEDIUM) + 2;
     fmt_t(v, sizeof v, w->feels10);
-    y = hud_row(cv, y, "FEELS LIKE", v, C_FOCUS);       // the theme's colours; the warnings' the one accent
+    y = hud_row(cv, y, small ? "FEELS" : "FEELS LIKE", v, C_FOCUS);   // the theme's colours; the warnings' the one accent
     snprintf(v, sizeof v, "%d%%", w->humidity);
     y = hud_row(cv, y, "HUMIDITY", v, C_FOCUS);
+    if (small) {                                       // no room for the rose: the wind a row
+        snprintf(k, sizeof k, "WIND %s", compass8((float)w->wind_from));
+        if (w->gust_kmh >= w->wind_kmh + 10) snprintf(v, sizeof v, "%d-%d", w_of(w->wind_kmh), w_of(w->gust_kmh));
+        else snprintf(v, sizeof v, "%d", w_of(w->wind_kmh));
+        y = hud_row(cv, y, k, v, w->gust_kmh >= 75 ? C_LOW : C_FOCUS);
+    }
     if (w->aqi != WX_NONE) {
-        snprintf(v, sizeof v, "%s %d.%d", aqi_word(w->aqi), w->pm25_10 / 10, w->pm25_10 % 10);
-        y = hud_row(cv, y, "AIR PM2.5", v, w->aqi >= 60 ? alert_colour(w->aqi >= 80 ? WXA_RED : WXA_AMBER) : C_FOCUS);
+        if (small) snprintf(v, sizeof v, "%s", aqi_word(w->aqi));
+        else snprintf(v, sizeof v, "%s %d.%d", aqi_word(w->aqi), w->pm25_10 / 10, w->pm25_10 % 10);
+        y = hud_row(cv, y, small ? "AIR" : "AIR PM2.5", v, w->aqi >= 60 ? alert_colour(w->aqi >= 80 ? WXA_RED : WXA_AMBER) : C_FOCUS);
     } else if (w->uv10 >= 30) {
         snprintf(v, sizeof v, "%d %s", (w->uv10 + 5) / 10, uv_word(w->uv10));
         y = hud_row(cv, y, "UV", v, w->uv10 >= 80 ? C_LOW : C_FOCUS);
     }
     if (w->gamma_nsv) {
-        snprintf(v, sizeof v, "%d.%02d \xC2\xB5SV/H", w->gamma_nsv / 1000, w->gamma_nsv % 1000 / 10);
-        y = hud_row(cv, y, "RADIATION", v, w->gamma_nsv >= 1000 ? C_ALARM : w->gamma_nsv >= 300 ? C_LOW : C_FOCUS);
+        snprintf(v, sizeof v, small ? "%d.%02d" : "%d.%02d \xC2\xB5SV/H", w->gamma_nsv / 1000, w->gamma_nsv % 1000 / 10);
+        y = hud_row(cv, y, small ? "\xC2\xB5SV/H" : "RADIATION", v, w->gamma_nsv >= 1000 ? C_ALARM : w->gamma_nsv >= 300 ? C_LOW : C_FOCUS);
     } else if (sun_next(w, k, sizeof k, v, sizeof v)) {
         y = hud_row(cv, y, k, v, C_FOCUS);
     }
@@ -1354,7 +1367,7 @@ static void wx_hud(ui_t *u, canvas_t *cv, const weather_t *w)
         if (!u->alert.level[i] || i == WXA_PRESSURE) continue;   // the pressure's is the barometer's
         char head[24];
         alert_said(&u->alert, i, head, sizeof head);
-        alert_detail(w, &u->alert, i, v, sizeof v, 1);
+        alert_detail(w, &u->alert, i, v, sizeof v, !small);
         const uint32_t c = alert_colour(u->alert.level[i]);
         const int lh = FONT_LINE_H(&FONT_SMALL);
         if (gfx_touches(cv, y, y + 2 * lh)) {
@@ -1364,16 +1377,20 @@ static void wx_hud(ui_t *u, canvas_t *cv, const weather_t *w)
         y += 2 * lh + 3;
     }
     /* the next days at the foot over the buttons, as low as they go: their rows first worked out from there up. the
-     * indicators get what is between */
+     * indicators get what is between. the 2.8"'s foot has no room for them: as its panel, it goes without */
     const int dh = 16, dstep = 16, dtop = BTN_Y - 4 - (WX_DAYS - 1) * dstep - dh;
     // the barometer and the rose side by side, in the room between, their pictures standing on one line
-    const int r = 30, top = y + 9, base = top + r + 7, hx = hud_x(top - 8, base + 34);   // base: hud_baro's hub
-    hud_rose(cv, w, (float)(x1 - 30), (float)base, 20.0f);
-    hud_baro(cv, w, (float)(hx + r + 10), top, (float)r);
+    const int r = small ? 20 : 30, top = y + (small ? 4 : 9), base = top + r + 7, hx = hud_x(top - 8, base + 34);   // base: hud_baro's hub
+    if (small) {
+        hud_baro(cv, w, (float)(hx + x1) * 0.5f, top, (float)r);   // the barometer alone, in the column's middle
+    } else {
+        hud_rose(cv, w, (float)(x1 - 30), (float)base, 20.0f);
+        hud_baro(cv, w, (float)(hx + r + 10), top, (float)r);
+    }
     // the days: the day against the circle, its sky and its warmest in columns, its coldest against the right edge
     const int xi = x1 - 104, xh = x1 - 48;
     y = dtop > base + 38 ? dtop : base + 38;
-    for (int j = 0; j < WX_DAYS; j++, y += dstep) {
+    for (int j = 0; j < WX_DAYS && y + dh <= BTN_Y - 2 && xi - 10 > hud_x(y, y + dh); j++, y += dstep) {
         const wx_day_t *d = &w->day[j];
         if (!gfx_touches(cv, y - 2, y + dh)) continue;
         font_text(cv, &FONT_SMALL, hud_x(y, y + dh - 2), y + 3, WDAY[d->wday % 7], C_DIM, 255);

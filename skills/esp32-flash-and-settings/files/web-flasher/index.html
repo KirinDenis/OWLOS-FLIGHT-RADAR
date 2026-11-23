@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Web Flasher</title>
+<meta name="description" content="Flash an ESP32 from the browser, talk to it in a terminal, send it your WiFi. The firmware is built by GitHub Actions and published by GitHub Pages.">
+<!-- ESP Web Tools: the flash button. inside it esptool-js talks to the chip's own boot ROM over Web Serial -->
+<script type="module" src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js?module"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f24; --dim: #5a6472; --line: #d8dde3;
+    --accent: #0a66c2; --on-accent: #ffffff; --term: #0f1419; --term-ink: #d6e2ee; --good: #1a7f37; --bad: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1419; --card: #171d24; --ink: #e6edf3; --dim: #9aa6b2; --line: #2d3742;
+      --accent: #4fa3ff; --on-accent: #0f1419; --term: #0a0e12; --term-ink: #d6e2ee; --good: #56d364; --bad: #ff7b72;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0 0 6px; font-size: 30px; }
+  h2 { margin: 0 0 10px; font-size: 20px; }
+  h2 span { color: var(--accent); }
+  p { margin: 0 0 10px; }
+  .dim { color: var(--dim); }
+  section { margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  ul { margin: 8px 0 0; padding-left: 20px; color: var(--dim); }
+  li { margin: 3px 0; }
+  button, .flash button {
+    padding: 10px 16px; border: 1px solid var(--accent); border-radius: 8px; cursor: pointer;
+    font: 600 15px system-ui, sans-serif; color: var(--on-accent); background: var(--accent);
+  }
+  button.quiet { color: var(--accent); background: transparent; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .nope { color: var(--bad); }
+  pre#out {
+    height: 260px; margin: 12px 0 10px; padding: 10px 12px; overflow: auto; border-radius: 8px;
+    background: var(--term); color: var(--term-ink); font: 14px/1.45 Consolas, "Cascadia Mono", monospace;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  pre#out .note { color: #8fb2d2; }
+  pre#out .bad { color: #ff7b72; }
+  input {
+    flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--ink); font: 15px Consolas, "Cascadia Mono", monospace;
+  }
+  #wifi { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--dim); }
+  code { font: 14px Consolas, "Cascadia Mono", monospace; }
+  footer { margin-top: 24px; font-size: 14px; color: var(--dim); }
+  a { color: var(--accent); }
+  @media (max-width: 600px) { #wifi { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ESP32 Web Flasher</h1>
+  <p class="dim">Flash an ESP32 from this page, talk to it in a terminal, send it your WiFi. The firmware is built
+     by GitHub Actions from <a href="https://github.com/KirinDenis/ESP32-WEB-FLASHER">its repository</a> on every
+     push and published here by GitHub Pages, with this page. The repository says how to make your own.</p>
+  <p class="dim">It needs <b>Chrome or Edge on a computer</b>: they have Web Serial, the way for a page to reach a
+     USB port. Phones, Firefox and Safari don't.</p>
+
+  <section>
+    <h2><span>1</span> Flash it</h2>
+    <p>Plug the board in, press the button, pick its port. The page asks the chip what it is and takes the build
+       for it: ESP32, ESP32-S2, S3, C3 or C6.</p>
+    <div class="row">
+      <esp-web-install-button class="flash" manifest="manifest.json">
+        <button slot="activate">CONNECT AND FLASH</button>
+        <span slot="unsupported" class="nope">This browser can't flash: use Chrome or Edge on a computer.</span>
+        <span slot="not-allowed" class="nope">Flashing needs the page over https.</span>
+      </esp-web-install-button>
+      <span class="dim">Firmware @VERSION@</span>
+    </div>
+    <ul>
+      <li>No port in the list? The cable may only charge, or the USB chip's driver is missing (CH340, CP210x).</li>
+      <li>Won't connect? Hold <b>BOOT</b> while you plug it in, or hold BOOT and press RST.</li>
+      <li>Erase asks whether to wipe the whole flash. Say yes the first time, no for an update: the WiFi it
+          was given stays.</li>
+      <li>Close the flasher's window when it's done: one port, one program at a time.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span>2</span> Talk to it</h2>
+    <p>A serial terminal in the page. It says what the board says, and what you type goes to the board.
+       Try <code>help</code> and <code>status</code>.</p>
+    <div class="row">
+      <button id="connect">CONNECT</button>
+      <button id="restart" class="quiet" disabled>RESTART THE BOARD</button>
+      <button id="disconnect" class="quiet" disabled>DISCONNECT</button>
+    </div>
+    <pre id="out" aria-live="polite"></pre>
+    <form id="line" class="row" autocomplete="off">
+      <input id="typed" placeholder="type a line, Enter sends it" spellcheck="false" disabled>
+      <button id="send" disabled>SEND</button>
+    </form>
+  </section>
+
+  <section>
+    <h2><span>3</span> Give it your WiFi</h2>
+    <p>The same as typing <code>ssid</code>, <code>pass</code> and <code>join</code> in the terminal. It goes over
+       the cable into the board's flash and nowhere else, the board never says the password back.</p>
+    <form id="wifi" autocomplete="off">
+      <label>Network name <input id="ssid" maxlength="32" spellcheck="false" placeholder="2.4 GHz only"></label>
+      <label>Password <input id="pass" type="password" maxlength="64"></label>
+      <button>SEND TO THE BOARD</button>
+    </form>
+    <p class="dim" style="margin-top:10px">Once it joins, the terminal shows its address: open it in a browser on
+       the same network and the board answers.</p>
+  </section>
+
+  <footer>
+    The code is MIT licensed, on <a href="https://github.com/KirinDenis/ESP32-WEB-FLASHER">GitHub</a>. Flashing:
+    <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>.
+  </footer>
+</div>
+
+<script>
+// the terminal: Web Serial in a few lines. the port is the one the person picks, nothing opens without them
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let port = null;        // the open serial port
+let reader = null;      // its reader while the read loop runs
+let reading = null;     // the read loop itself, to wait for on disconnect
+
+function show(text, cls) {
+  const out = $('out');
+  const span = document.createElement('span');
+  if (cls) {
+    span.className = cls;
+  }
+  span.textContent = text.replace(/\r/g, '');
+  out.appendChild(span);
+  while (out.childNodes.length > 2000) {        // a board that talks all day: keep the last of it
+    out.removeChild(out.firstChild);
+  }
+  out.scrollTop = out.scrollHeight;
+}
+
+function connected(yes) {
+  $('connect').disabled = yes;
+  for (const id of ['restart', 'disconnect', 'typed', 'send']) {
+    $(id).disabled = !yes;
+  }
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    show('This browser has no Web Serial: use Chrome or Edge on a computer.\n', 'bad');
+    return false;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) {
+    show((e.name === 'NotFoundError' ? 'No port picked.' : 'Can\'t open it: ' + e.message +
+         ' Is the flasher or another program still holding it?') + '\n', 'bad');
+    port = null;
+    return false;
+  }
+  connected(true);
+  show('Connected.\n', 'note');
+  reading = readLoop();
+  await send('status');       // a board on its own USB said hello before the port was open: ask again
+  return true;
+}
+
+async function readLoop() {
+  const decoder = new TextDecoder();
+  try {
+    while (port && port.readable) {
+      reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) {
+            return;
+          }
+          show(decoder.decode(value, { stream: true }));
+        }
+      } finally {
+        reader.releaseLock();
+        reader = null;
+      }
+    }
+  } catch (e) {
+    // a board on the chip's own USB vanishes from the computer for a moment when it restarts
+    show('\nThe port went away (' + e.message + '). Press CONNECT again.\n', 'bad');
+    if (port) {
+      await port.close().catch(() => {});
+      port = null;
+    }
+    connected(false);
+  }
+}
+
+async function send(line) {
+  const writer = port.writable.getWriter();
+  try {
+    await writer.write(new TextEncoder().encode(line + '\n'));
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+// the auto-reset wiring of ESP32 boards: RTS low pulls EN, the reset, while DTR leaves GPIO0 alone
+async function restart() {
+  await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+  await sleep(100);
+  await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+}
+
+async function disconnect() {
+  if (reader) {
+    await reader.cancel();
+  }
+  await reading;
+  await port.close().catch(() => {});
+  port = null;
+  connected(false);
+  show('Disconnected.\n', 'note');
+}
+
+$('connect').onclick = connect;
+$('restart').onclick = () => restart().catch(e => show(e.message + '\n', 'bad'));
+$('disconnect').onclick = disconnect;
+$('line').onsubmit = async e => {
+  e.preventDefault();
+  const line = $('typed').value;
+  $('typed').value = '';
+  await send(line);
+};
+$('wifi').onsubmit = async e => {
+  e.preventDefault();
+  const ssid = $('ssid').value.trim();
+  if (!ssid) {
+    show('The network name first.\n', 'bad');
+    $('ssid').focus();
+    return;
+  }
+  if (!port && !(await connect())) {
+    return;
+  }
+  await send('ssid ' + ssid);
+  await sleep(150);
+  await send('pass ' + $('pass').value);
+  await sleep(150);
+  await send('join');
+  $('pass').value = '';         // the page keeps nothing
+};
+navigator.serial?.addEventListener('disconnect', ev => {
+  if (port && ev.target === port) {
+    show('\nThe board was unplugged.\n', 'bad');
+    port = null;
+    connected(false);
+  }
+});
+</script>
+</body>
+</html>

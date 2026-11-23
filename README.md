@@ -13,6 +13,12 @@ way it flies, coloured by its height, with a trail behind it. Tap one for its ca
 speed. The planes come from the free community ADS-B networks, or from Flightradar24 if you have a key.
 The map under them comes from OpenStreetMap.
 
+**An Open Skills project.** Next to the code we give away the skills that built it, in [`skills/`](skills/):
+the chips and every board, one file each, the panels, buses and touch chips, the graphics, the memory and
+the watchdogs, flashing and settings, the web services. Every fact says how sure it is: measured on a real
+board, built, read from docs, or reasoned. Bring your own AI agent: [`AGENTS.md`](AGENTS.md) tells it where
+to start, and it starts where we stopped.
+
 **Contents:** [What it does](#what-it-does) · [The boards](#the-boards) · [Flash it](#flash-it) ·
 [Stable or beta](#stable-or-beta) · [WiFi and home](#wifi-and-home) · [Where to tap](#where-to-tap):
 [the radar](#the-radar), [a plane picked](#a-plane-picked), [the map](#the-map), [the weather](#the-weather),
@@ -512,6 +518,7 @@ What is where:
 - `firmware/`: the boards, the screens and the touch chips, WiFi and HTTPS, the tiles in the flash,
   the settings in NVS, the USB console.
 - `site/`: the page that flashes the boards and sends them their settings.
+- `skills/`: what we learned building it, in the Agent Skills format, and `AGENTS.md` for an AI agent.
 
 ## The site's console
 

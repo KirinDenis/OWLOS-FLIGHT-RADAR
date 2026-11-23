@@ -1,0 +1,6 @@
+# the versions published before the site kept them (.github/archive.sh). their firmware is taken
+# from the workflow run that built and published it, not built again: GitHub keeps a run's files
+# 90 days, these till the end of January 2027. once the site has a version, its line here is passed
+# over. a line: the version, the run's id, the version as the page will say it
+0.2 41421201551 0.2, build 1 (0a86826)
+0.3 41636456462 0.3, build 3 (9a2c152)

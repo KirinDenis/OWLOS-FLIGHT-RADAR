@@ -1,0 +1,224 @@
+# OWLOS Flight Radar - build the firmware and put it on GitHub Pages, next to the page that
+# flashes it and sends the board its settings (ESP Web Tools and Web Serial, Chrome/Edge).
+#
+# One job a screen in Espressif's own ESP-IDF 5.5 image, then one job puts the page, the
+# screenshots, these binaries and the older versions' firmware the site keeps (.github/archive.sh)
+# together and publishes them. The e-paper boards are not here yet.
+#
+# Needs once: repo Settings -> Pages -> Source: "GitHub Actions".
+
+name: Firmware and flasher site
+
+on:
+  push:
+    branches: [ main ]
+  # a pull request into main: every board and the radar page are built, nothing is published (the
+  # site job below), and the firmware stays with the run as its artifacts
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+# each job asks for what it needs on top of this
+permissions:
+  contents: read
+
+# a push to main cancels the run of main before it, a pull request's push the run of that request:
+# a pull request never stops the site being published
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    name: Firmware ${{ matrix.disp }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { disp: ili9341, num: 1, target: esp32 }
+          - { disp: st7796,  num: 2, target: esp32 }
+          - { disp: ili9486, num: 3, target: esp32 }
+          - { disp: gc9a01,  num: 4, target: esp32c3 }
+          - { disp: es3c28p, num: 7, target: esp32s3 }
+          - { disp: nmcydc5, num: 8, target: esp32c5 }
+          - { disp: zlx2, num: 19, target: esp32c5 }
+          - { disp: crowadv28, num: 9, target: esp32s3 }
+          - { disp: crowadv50, num: 10, target: esp32s3 }
+          - { disp: jc8048w550, num: 11, target: esp32s3 }
+          - { disp: tab5, num: 12, target: esp32p4 }
+          - { disp: esp4827s043, num: 13, target: esp32s3 }
+          - { disp: crow70, num: 14, target: esp32s3 }
+          - { disp: wave7, num: 15, target: esp32s3 }
+          - { disp: wave7b, num: 16, target: esp32s3 }
+          - { disp: jc8012, num: 17, target: esp32p4 }
+          - { disp: crow50, num: 18, target: esp32s3 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        # the whole repo goes in, firmware/ pulls ../core. git inside the container runs as
+        # root on files that aren't root's, hence the safe.directory line
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/project" -w /project/firmware --user root \
+            espressif/idf:release-v5.5 \
+            bash -c "git config --global --add safe.directory '*' && \
+                     idf.py --no-ccache -B build_${{ matrix.disp }} \
+                       -DSDKCONFIG=/project/firmware/build_${{ matrix.disp }}/sdkconfig \
+                       -DIDF_TARGET=${{ matrix.target }} -DRADAR_DISPLAY=${{ matrix.num }} build"
+
+      - name: Collect the binaries
+        # flash_args is written by the build: where each part goes
+        run: |
+          B=firmware/build_${{ matrix.disp }}
+          mkdir -p out/${{ matrix.disp }}
+          cp "$B/bootloader/bootloader.bin" "$B/partition_table/partition-table.bin" \
+             "$B/owlos-flight-radar.bin" "$B/flash_args" out/${{ matrix.disp }}/
+          ls -l out/${{ matrix.disp }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw-${{ matrix.disp }}
+          path: out
+
+      # not for the site: the ELF turns a crash backtrace from a board flashed off the
+      # site into file and line. a locally built ELF doesn't match
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elf-${{ matrix.disp }}
+          path: |
+            firmware/build_${{ matrix.disp }}/owlos-flight-radar.elf
+            firmware/build_${{ matrix.disp }}/sdkconfig
+          retention-days: 90
+
+  # the radar in a web page: core/ for WebAssembly, what goes in is in web/emcc.args. it ends up at
+  # radar/ on the site
+  web:
+    name: Radar in the browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          VER=$(sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' CHANGES.md | head -n 1)
+          # one radar for each size of screen: 800x480, 320x240, 480x320, the round one, 480x272
+          # each with its own letters: the 5" has its own set, in the glass's pixels
+          FONTS="../core/font_small.c ../core/font_medium.c ../core/font_large.c ../core/font_huge.c"
+          GLASS="../core/font_glass_small.c ../core/font_glass_medium.c ../core/font_glass_large.c ../core/font_glass_huge.c ../core/font_glass_tiny.c"
+          for one in 10:Twin:twin 1:Twin1:twin1 2:Twin2:twin2 4:Twin4:twin4 13:Twin5:twin5; do
+            IFS=: read -r display name file <<< "$one"
+            letters=$FONTS
+            [ "$display" = 10 ] && letters=$GLASS
+            docker run --rm -v "${{ github.workspace }}:/project" -w /project/web --user root \
+              emscripten/emsdk:6.0.13 emcc @emcc.args $letters "-DFLIGHT_VERSION=\"$VER\"" \
+              "-DRADAR_DISPLAY=$display" "-sEXPORT_NAME=$name" -o "$file.js"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: |
+            web/index.html
+            web/twin*.js
+            web/twin*.wasm
+
+  # goes on when a board did not build (the others are published as before), not in a run a newer
+  # push cancelled. the older versions come from the site as it is: a version it has and this run
+  # can't fetch, or a lower number than one it has, stops here and the site stays as it was.
+  # a version's firmware is replaced by each build of it: to keep a build, give the next one a new
+  # number in CHANGES.md
+  site:
+    name: Flasher site
+    needs: [ firmware, web ]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read         # the files of the runs in archive-seed.txt
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # for the build number
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fw-*
+          path: public/fw
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true   # no radar page this time: the flasher still goes out
+        with:
+          name: web
+          path: public/radar
+
+      - id: pages               # base_url: where the site is now, the older versions come from it
+        uses: actions/configure-pages@v5
+
+      - name: Put the page together
+        # the version is CHANGES.md's first "## " line, as the firmware takes it (firmware/CMakeLists.txt).
+        # "(beta)" on it makes it a beta: its build goes to fw/<version>/ beside the stable, which stays in
+        # fw/ (archive.sh). version.json is what the boards ask for: "version" the stable, which every board
+        # reads, "beta" the beta, which only a beta board follows. CHANGES.md is the history the page shows.
+        # the older versions go to fw/<version>/, fw/versions.json lists them all for the page
+        env:
+          SITE: ${{ steps.pages.outputs.base_url }}
+        run: |
+          HEAD=$(grep -m 1 '^## ' CHANGES.md || true)
+          VER=$(printf '%s\n' "$HEAD" | sed -n 's/^## \([0-9][0-9.]*\).*/\1/p')
+          [ -n "$VER" ] || { echo "no version in CHANGES.md: its first '## ' line should be one" >&2; exit 1; }
+          BETA=0
+          WORD=""
+          case "$HEAD" in *'(beta)'*) BETA=1; WORD=' beta' ;; esac
+          VERSION="$VER$WORD, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
+          cp -r site/. public/
+          cp CHANGES.md public/
+          # where boards are counted for the map of boards (server/): server/public-url.txt, empty = nowhere.
+          # the page and the boards both read it here, so the counting starts and stops with this file
+          STATS=$(tr -d ' \r\n' < server/public-url.txt 2>/dev/null || true)
+          mkdir -p public/shots && cp -r shots/. public/shots/
+          if [ "$BETA" = 1 ]; then                 # this run's boards go beside the stable, not over it
+            mkdir -p "public/fw/$VER"
+            for d in public/fw/*/; do
+              if [ -f "$d/flash_args" ]; then
+                mv "$d" "public/fw/$VER/$(basename "$d")"
+              fi
+            done
+            bash .github/make-manifests.sh "public/fw/$VER" "$VERSION"
+          else
+            bash .github/make-manifests.sh public/fw "$VERSION"
+          fi
+          bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" .github/archive-seed.txt "$BETA"
+          # the stable is the list's first, as archive.sh wrote it: a beta's run did not build it
+          STABLE=$(grep -v '"beta":' public/fw/versions.json | sed -n 's/.*"version": "\([^"]*\)", "text": "\([^"]*\)".*/\1|\2/p' | head -n 1)
+          [ -n "$STABLE" ] || { echo "fw/versions.json has no stable version" >&2; exit 1; }
+          BETA_VER=""
+          if [ "$BETA" = 1 ]; then
+            BETA_VER="$VER"
+          fi
+          printf '{"version":"%s","beta":"%s","stats":"%s"}\n' "${STABLE%%|*}" "$BETA_VER" "$STATS" > public/version.json
+          cat public/version.json
+          sed -i "s|@VERSION@|${STABLE#*|}|g" public/index.html public/previous/index.html
+          find public -type f | sort
+
+      # a second copy of every version, should the site ever lose them: each run's for 90 days
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-fw
+          path: public/fw
+          retention-days: 90
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deploy
+        uses: actions/deploy-pages@v4

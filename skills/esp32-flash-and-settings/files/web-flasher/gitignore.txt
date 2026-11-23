@@ -1,0 +1,4 @@
+# what the workflow builds, and the Arduino IDE's exported binaries
+build/
+public/
+firmware/build/

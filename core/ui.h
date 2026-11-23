@@ -221,6 +221,11 @@ typedef struct {
                               compass, planes, panel, the rest */
     uint8_t  key_last;     /* the e-paper's key pressed (KEY_*) and when, till ui_key takes it: its third of */
     uint32_t key_at;       /* the keys' strip prints black (ui_paper.c), 0 none */
+    /* the e-paper's dial and MENU gathered (ui_key_pend): what they ask for, shown in their third of the strip,
+     * taken after PEND_MS of quiet. kind 0: nothing gathered */
+    uint8_t  pend_kind, pend_key, pend_page, pend_look;
+    float    pend_range;
+    uint32_t pend_at;
 } ui_t;
 
 /* a deadline in the 32-bit milliseconds still ahead. 0 is none: ui_frame lets a passed one go at once,
@@ -289,6 +294,16 @@ void ui_key(ui_t *u, int key, ui_cmd_t *cmd);
 /* paper: a key pressed, not yet taken: its third of the keys' strip prints black in the next picture, then the
  * firmware gives it to ui_key and prints the screen whole (main.c) */
 void ui_key_wait(ui_t *u, int key);
+/* paper: the dial (the range, or the weather's page), MENU and EXIT (the look after, the look before) are not taken
+ * at once: each press moves what is asked for, its third of the strip says it, and after PEND_MS with no press the
+ * firmware takes it, one print for them all ("на две секунды остановился, применяют"); asked back to where it was,
+ * nothing. ui_key_pend: 1 gathered (a different kind before it taken first, into cmd), 0 a key for ui_key_wait.
+ * ui_pend_take: 1 it changed the screen */
+enum { PEND_NONE, PEND_RANGE, PEND_PAGE, PEND_LOOK };
+#define PEND_MS 2000u
+int  ui_key_pend(ui_t *u, int key, uint32_t now, ui_cmd_t *cmd);
+int  ui_pend_take(ui_t *u, ui_cmd_t *cmd);
+static inline int ui_pend_due(const ui_t *u, uint32_t now) { return u->pend_kind && now - u->pend_at >= PEND_MS; }
 void ui_start_calibration(ui_t *u);
 void ui_set_theme(ui_t *u, int theme);
 void touch_apply(const touch_cal_t *c, int rx, int ry, int *x, int *y);

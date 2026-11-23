@@ -501,6 +501,7 @@ static void alerts_frame(ui_t *u)
 void ui_frame(ui_t *u, uint32_t now)
 {
     fling_step(u, now);
+    if (RADAR_EPAPER && u->cfg.look == LOOK_MAP) u->cfg.look = LOOK_CLASSIC;   // paper has no flat map, CLASSIC is its map
     u->now = now;
     weather_frame(u);                                       // the WEATHER look's page, and what its strips will read
     if (!ui_until(u->toast_until, now)) u->toast_until = 0;    // passed: let go, see ui_until
@@ -691,22 +692,24 @@ static void next_range(ui_t *u, ui_cmd_t *cmd)
     say_range(u);
 }
 
-// the e-paper dial: the next of the short list nearer (-1) or further (1), the range itself at its ends
-static float range_next(const ui_t *u, int dir)
+// the e-paper dial: the next of the short list nearer (-1) or further (1) from a range, it itself at the list's ends
+static float range_from(float range, int dir)
 {
     const int n = (int)(sizeof BOOT_RANGES / sizeof BOOT_RANGES[0]);
-    float v = u->cfg.range;
+    float v = range;
     if (dir > 0) {
         for (int i = 0; i < n; i++) {
-            if (BOOT_RANGES[i] > u->cfg.range * 1.01f) { v = BOOT_RANGES[i]; break; }
+            if (BOOT_RANGES[i] > range * 1.01f) { v = BOOT_RANGES[i]; break; }
         }
     } else {
         for (int i = n - 1; i >= 0; i--) {
-            if (BOOT_RANGES[i] < u->cfg.range * 0.99f) { v = BOOT_RANGES[i]; break; }
+            if (BOOT_RANGES[i] < range * 0.99f) { v = BOOT_RANGES[i]; break; }
         }
     }
     return v;
 }
+
+static float range_next(const ui_t *u, int dir) { return range_from(u->cfg.range, dir); }
 
 int range_can_step(const ui_t *u, int dir) { return range_next(u, dir) != u->cfg.range; }
 
@@ -737,15 +740,33 @@ static void next_theme(ui_t *u, ui_cmd_t *cmd)
     toast(u, UI_THEME[u->theme].name);
 }
 
-// the radar, the flat map, the map in its own colours
-static void next_look(ui_t *u, ui_cmd_t *cmd)
+/* the look after this one: the radar, the flat map, the map in its own colours, the weather. paper has no flat map
+ * ("экран MAP убираем"): CLASSIC is its map */
+int ui_look_after(int look)
 {
-    u->cfg.look = (uint8_t)((u->cfg.look + 1) % LOOKS);
+    look = (look + 1) % LOOKS;
+    if (RADAR_EPAPER && look == LOOK_MAP) look = LOOK_CLASSIC;
+    return look;
+}
+
+// and the one before it: paper's EXIT, when no plane is picked to let go ("нижняя кнопка не задействована")
+int ui_look_before(int look)
+{
+    look = (look + LOOKS - 1) % LOOKS;
+    if (RADAR_EPAPER && look == LOOK_MAP) look = LOOK_RADAR;
+    return look;
+}
+
+static void set_look(ui_t *u, ui_cmd_t *cmd, int look)
+{
+    u->cfg.look = (uint8_t)look;
     u->panel_open = 0;
     u->wx_page = WXP_DIAL;                             // the weather comes on its dial
     cmd->cfg = cmd->refetch = 1;                       // its map is another size, the square asks further out
-    toast(u, LOOK_NAME[u->cfg.look]);
+    if (!RADAR_EPAPER) toast(u, LOOK_NAME[u->cfg.look]);   // paper: its third of the strip said it before
 }
+
+static void next_look(ui_t *u, ui_cmd_t *cmd) { set_look(u, cmd, ui_look_after(u->cfg.look)); }
 
 static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
 {
@@ -1026,6 +1047,51 @@ void ui_key_wait(ui_t *u, int key)
 {
     u->key_last = (uint8_t)key;                        // its third of the keys' strip prints pressed in the next picture
     u->key_at = u->now ? u->now : 1;
+}
+
+int ui_key_pend(ui_t *u, int key, uint32_t now, ui_cmd_t *cmd)
+{
+    if (u->view != VIEW_MAIN) return 0;
+    const int wx = u->cfg.look == LOOK_WEATHER;
+    int kind = PEND_NONE;
+    if (key == KEY_UP || key == KEY_DOWN) kind = wx ? PEND_PAGE : PEND_RANGE;
+    else if (key == KEY_MENU || (key == KEY_BACK && !sel_plane(u))) kind = PEND_LOOK;
+    if (kind == PEND_NONE) return 0;
+    if (u->pend_kind && (u->pend_kind != kind || (kind == PEND_LOOK && u->pend_key != key))) ui_pend_take(u, cmd);
+    if (u->pend_kind != kind) {                        // gathering starts from what is shown
+        u->pend_kind = (uint8_t)kind;
+        u->pend_range = u->cfg.range;
+        u->pend_page = u->wx_page;
+        u->pend_look = u->cfg.look;
+    }
+    const int d = key == KEY_UP ? -1 : 1;
+    if (kind == PEND_RANGE) u->pend_range = range_from(u->pend_range, d);
+    else if (kind == PEND_PAGE) u->pend_page = (uint8_t)((u->pend_page + WX_PAGES + d) % WX_PAGES);
+    else u->pend_look = (uint8_t)(key == KEY_MENU ? ui_look_after(u->pend_look) : ui_look_before(u->pend_look));
+    u->pend_key = (uint8_t)key;
+    u->pend_at = now ? now : 1;
+    u->key_at = 0;
+    return 1;
+}
+
+int ui_pend_take(ui_t *u, ui_cmd_t *cmd)
+{
+    const int kind = u->pend_kind;
+    u->pend_kind = PEND_NONE;
+    if (kind == PEND_RANGE && u->pend_range != u->cfg.range) {
+        u->cfg.range = u->pend_range;
+        cmd->cfg = cmd->refetch = 1;
+        return 1;
+    }
+    if (kind == PEND_PAGE && u->pend_page != u->wx_page) {
+        u->wx_page = u->pend_page;
+        return 1;
+    }
+    if (kind == PEND_LOOK && u->pend_look != u->cfg.look) {
+        set_look(u, cmd, u->pend_look);
+        return 1;
+    }
+    return 0;                                          // asked back to where it was: nothing to print
 }
 
 void ui_key(ui_t *u, int key, ui_cmd_t *cmd)

@@ -28,7 +28,7 @@ static void build(void)
     s_built = 1;
 }
 
-int paper_inks, paper_new_sheet;
+int paper_inks, paper_new_sheet, paper_hold;
 
 /* a pixel in the paper's inks (paper.h P_*): black from a third of it, the greys from half. black a
  * little before half: the bold letters' thin strokes (the middle of a W) are a third covered here and
@@ -93,6 +93,40 @@ void paper_line(canvas_t *cv, float x0, float y0, float x1, float y1, float w, u
             if (cov > 0.0f) row[x] = paper_soft(row[x], ink, cov >= 1.0f ? 256 : (int)(cov * 256.0f));
         }
     }
+}
+
+/* a disc of radius r, or a ring w wide (w 0: the disc), soft-edged where the canvas is, else gfx's. the
+ * pictures and the clouds printed whole: their round edges without steps ("не так грубо прорисовать облачка") */
+static void soft_round(canvas_t *cv, float cx, float cy, float r, float w, uint32_t ink)
+{
+    const float out = (w > 0.0f ? r + w * 0.5f : r) + 1.0f;
+    int ya = (int)floorf(cy - out), yb = (int)ceilf(cy + out), xa = (int)floorf(cx - out), xb = (int)ceilf(cx + out);
+    if (ya < cv->y0) ya = cv->y0;
+    if (yb > cv->y0 + cv->h - 1) yb = cv->y0 + cv->h - 1;
+    if (xa < 0) xa = 0;
+    if (xb > GFX_W - 1) xb = GFX_W - 1;
+    for (int y = ya; y <= yb; y++) {
+        uint32_t *row = gfx_row(cv, y);
+        if (!row) continue;
+        const float dy = (float)y + 0.5f - cy;
+        for (int x = xa; x <= xb; x++) {
+            const float dx = (float)x + 0.5f - cx, d = sqrtf(dx * dx + dy * dy);
+            const float cov = w > 0.0f ? w * 0.5f + 0.5f - fabsf(d - r) : r + 0.5f - d;
+            if (cov > 0.0f) row[x] = paper_soft(row[x], ink, cov >= 1.0f ? 256 : (int)(cov * 256.0f));
+        }
+    }
+}
+
+void paper_disc(canvas_t *cv, float cx, float cy, float r, uint32_t ink)
+{
+    if (cv->soft) soft_round(cv, cx, cy, r, 0.0f, ink);
+    else gfx_disc(cv, cx, cy, r, ink, 255);
+}
+
+void paper_ring(canvas_t *cv, float cx, float cy, float r, float w, uint32_t ink)
+{
+    if (cv->soft) soft_round(cv, cx, cy, r, w, ink);
+    else gfx_ring(cv, cx, cy, r, w, ink, 255);
 }
 
 void paper_pack(const canvas_t *cv, uint8_t *fb)

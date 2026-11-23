@@ -367,6 +367,14 @@ int main(int argc, char **argv)
     ui.cfg.look = LOOK_RADAR;
     ui.cfg.range = 10;
     shot("25-radar-10");
+#if RADAR_EPAPER
+    ui.pend_kind = PEND_RANGE;                       // the dial turned twice further, not taken yet: its third says 50 KM
+    ui.pend_key = KEY_DOWN;
+    ui.pend_range = 50;
+    ui.pend_at = 1;
+    shot("26-paper-radar-gathering");
+    ui.pend_kind = PEND_NONE;
+#endif
     ui.cfg.range = 50;
     fly(5);
 
@@ -557,6 +565,18 @@ int main(int argc, char **argv)
         fly(1);
         shot("56-alert-weather-storm");
         ui.alerts = WXA_ALL;
+#if !RADAR_EPAPER
+        for (int k = 0; k < WX_PAST; k++) {          // yesterday, as the paper's dial below has it
+            const int hb = WX_PAST - k, lh = (17 - hb + 48) % 24;
+            wx.past_t10[k] = (int16_t)(75 + 35 * cosf((float)(lh - 14) * 0.2618f));
+            wx.past_hpa10[k] = (uint16_t)(10190 - k * 45 / 10);
+            wx.past_rain10[k] = (uint16_t)(lh >= 6 && lh <= 9 ? 3 + (lh % 3) * 2 : 0);
+            wx.past_kind[k] = (uint8_t)(lh >= 6 && lh <= 9 ? WX_RAIN : lh > 9 && lh < 15 ? WX_PARTLY : WX_CLOUDY);
+        }
+        ui.wx_page = WXP_DIAL;                       // the colour dial with the printed column beside it
+        fly(1);
+        shot("57-weather-hud");
+#endif
 #if RADAR_EPAPER
         ui.wx_page = WXP_DIAL;                       // the paper's own first page (ui_weather.c weather_paper)
         paper_style = 0;                             // the card of words before the dial

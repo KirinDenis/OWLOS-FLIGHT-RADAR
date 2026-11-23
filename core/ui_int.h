@@ -134,6 +134,8 @@ float range_snap(float v);
 float range_step(float v, int dir);
 extern const char *const SERVER_NAME[FREE_SERVERS];
 extern const char *const LOOK_NAME[LOOKS];
+int ui_look_after(int look);                         /* MENU's next look: paper skips the flat MAP */
+int ui_look_before(int look);                        /* and EXIT's, the one before */
 /* the flat looks on a square screen: a map over the whole left side, north up, no compass round
  * it. the round glass keeps its disc in every look */
 static inline int square_look(const ui_t *u) { return !RADAR_ROUND && u->cfg.look != LOOK_RADAR && u->cfg.look != LOOK_WEATHER; }
@@ -191,6 +193,7 @@ uint32_t alt_colour(const ui_t *u, const plane_t *p);
 void fmt_alt(const ui_t *u, const plane_t *p, char *buf, int sz, int short_form);
 void fmt_height(const ui_t *u, int feet, char *buf, int sz);   /* in short: FL350, 4200, or metres */
 void fmt_dist(const ui_t *u, float km, char *buf, int sz);
+void sky_status(const ui_t *u, char *buf, int sz, int *bad);   /* where the planes come from and how fresh (ui_scope.c) */
 const char *compass8(float deg);
 
 /* the scope and the panel (ui_scope.c) */
@@ -248,9 +251,12 @@ void weather_close(void);                            /* another look: its tables
 extern const char *const WX_PAGE_NAME[WX_PAGES];     /* what the toast says when a page comes */
 void next_wx_page(ui_t *u);                          /* a tap on the dial or the graph, or BOOT: the next page */
 void step_wx_page(ui_t *u, int d);                   /* the page after (d 1) or before (d -1): the paper's dial */
+/* the colour dial with the printed dial's column beside it in place of the panel (ui_weather.c wx_hud): the 480x320
+ * screens first */
+#define WX_HUD (RADAR_DISPLAY == DISPLAY_ST7796_480x320 || RADAR_DISPLAY == DISPLAY_ILI9486_480x320)
 #if RADAR_EPAPER
+int  weather_sheet_up(const ui_t *u);                /* the weather's first page is the printed dial (paper_style 1) */
 int  weather_paper_page(const ui_t *u);              /* the weather is the paper's own, all three pages (the 4.2"'s) */
-int  weather_sheet_up(const ui_t *u);                /* its first page is the printed dial (paper_style 1) */
 uint32_t weather_stamp(const ui_t *u);               /* what the printed weather shows: the forecast and the hour. 0: none */
 void weather_paper(ui_t *u, canvas_t *cv);           /* a strip of it */
 #endif

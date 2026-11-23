@@ -23,6 +23,11 @@ extern int paper_inks;
  * takes it (main.c: disp_full_next) */
 extern int paper_new_sheet;
 
+/* 1: a new screen waits for its map (another look, another range): the firmware draws nothing meanwhile, the glass
+ * keeps the old screen till the new one is printed whole once. a white sheet drawn on top of it first was a long
+ * refresh for nothing ("перерисовывать все, а это долго и не нужно"). ui_frame sets it */
+extern int paper_hold;
+
 /* the sheet's tones (ui_paper.c): 0 the 4 inks and black and white patterns, 1 more tones from
  * patterns of two inks (an experiment). the console sets it (main.c: OWLOS PAPER n) */
 extern int paper_style;
@@ -42,6 +47,8 @@ uint32_t paper_soft(uint32_t under, uint32_t ink, int k);
 // a lightness 0 (black) .. 1 (white) at pixel x, y: an ordered dither of the two inks either side, for gradients
 uint32_t paper_tone(float g, int x, int y);
 void paper_line(canvas_t *cv, float x0, float y0, float x1, float y1, float w, uint32_t ink);
+void paper_disc(canvas_t *cv, float cx, float cy, float r, uint32_t ink);
+void paper_ring(canvas_t *cv, float cx, float cy, float r, float w, uint32_t ink);
 
 /* the keys' strip at the right edge (ui_paper.c), a third of the height for each key: what is drawn on
  * the paper keeps left of it */

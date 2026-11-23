@@ -462,6 +462,24 @@ static void cloud(canvas_t *cv, float cx, float cy, float w, uint32_t c, int a)
     gfx_fill(cv, (int)(cx - 0.40f * w), (int)(cy + 0.02f * w), (int)(0.82f * w), (int)(0.19f * w), c, a);
 }
 
+/* a cloud on the dial's ring: five puffs along the ring, the middle one biggest, a little in and out of line, w
+ * the cluster's width. edge: its outline, the colour darker and a pixel and a half wider all round; drawn before
+ * every cloud's fill so neighbours run into one band */
+static void cloud_puffs(canvas_t *cv, float x, float y, float w, uint32_t c, int edge)
+{
+    static const float AT[5] = { -0.55f, -0.28f, 0.0f, 0.28f, 0.55f }, R[5] = { 0.17f, 0.23f, 0.29f, 0.24f, 0.18f };
+    static const float OUT[5] = { 0.02f, 0.07f, 0.09f, 0.05f, 0.0f };   // out from the middle: a rounder top
+    float rx = x - (float)W.cx, ry = y - (float)SCY;
+    const float l = gfx_sqrt(rx * rx + ry * ry);
+    rx /= l > 0.0f ? l : 1.0f;
+    ry /= l > 0.0f ? l : 1.0f;
+    const uint32_t ink = edge ? gfx_mix(c, RGB(0, 0, 0), 70u) : c;
+    for (int i = 0; i < 5; i++) {
+        const float px = x - ry * AT[i] * w + rx * OUT[i] * w, py = y + rx * AT[i] * w + ry * OUT[i] * w;
+        gfx_disc(cv, px, py, R[i] * w + (edge ? 1.5f : 0.0f), ink, 255);
+    }
+}
+
 static void sun_pic(canvas_t *cv, float cx, float cy, float r, float t, int a)
 {
     gfx_glow(cv, cx, cy, r * 2.6f, SUN_C, a / 3);
@@ -721,21 +739,22 @@ static void plan_marks(const ui_t *u, const weather_t *w, wtab_t *T, float t)
         at_deg((float)d + 0.5f, W_ROUT, &x1, &y1);
         seg(&T->tick[T->n_tick++], x0, y0, x1, y1, 1.6f, DAWN_C, 230);
     }
-    /* the hours ahead: clouds on the ring, each as big as the sky is covered, every other hour
-     * unless it is overcast; heavy ones grey with rain. rain under the ring and falling through it */
+    /* the hours ahead: clouds on the ring, a cluster of puffs an hour as big as the sky is covered, an overcast's
+     * running into one fluffy band (the printed dial's, "крутой худ с облаками из чернобелого"); heavy ones grey
+     * with rain. rain under the ring and falling through it */
     const float band = (float)(W_ROUT - W_RIN);
     T->n_cloud = T->n_bar = T->n_drop = T->n_snow = 0;
     for (int i = 0; i < WX_HOURS; i++) {
         const wx_hour_t *hr = &w->hour[i];
         const float deg = wrap360(dial_deg(local_hours(w, w->at + (uint32_t)i * 3600u)) + 7.5f);
         const int night = T->el[(int)deg % 360] < -3;
-        if (hr->cloud >= 35 && (hr->cloud >= 85 || i % 2 == 0)) {
+        if (hr->cloud >= 15) {
             const float sway = 2.0f * sinf(t * 0.3f + (float)i * 1.7f);
             blob_t *c = &T->cloud[T->n_cloud++];
-            at_deg(deg + sway, W_MID + (i % 2 ? 2.5f : -1.5f) + 1.2f * sinf(t * 0.45f + (float)i), &c->x, &c->y);
-            c->w = band * (0.8f + 0.42f * (float)hr->cloud / 100.0f);
+            at_deg(deg + sway, W_MID + (i % 2 ? 1.5f : -1.0f) + 1.2f * sinf(t * 0.45f + (float)i), &c->x, &c->y);
+            c->w = band * (0.45f + 0.75f * (float)hr->cloud / 100.0f);
             c->c = hr->rain10 ? (night ? RGB(62, 72, 96) : RGB(168, 178, 196)) : night ? RGB(74, 86, 114) : RGB(244, 248, 253);
-            c->a = (uint8_t)(night ? 180 : 245);
+            c->a = 255;                                // whole: puffs over puffs would darken where they meet
         }
         if (hr->rain10) {
             const float mm = (float)hr->rain10 / 10.0f, len = clampf(3.0f + mm * 8.0f, 3.0f, 16.0f);
@@ -802,9 +821,11 @@ static void draw_marks(canvas_t *cv, const wtab_t *T)
     for (int i = 0; i < T->n_lab; i++)
         if (strip_has(cv, T->lab[i].y - 3, T->lab[i].y + 3))
             micro_text(cv, (int)T->lab[i].x - micro_width(T->lab[i].s, 1) / 2, (int)T->lab[i].y - 3, T->lab[i].s, C_PRIM, 255, 1);
-    for (int i = 0; i < T->n_cloud; i++) {
-        const blob_t *c = &T->cloud[i];
-        if (strip_has(cv, c->y - c->w * 0.4f, c->y + c->w * 0.25f)) cloud(cv, c->x, c->y, c->w, c->c, c->a);
+    for (int pass = 0; pass < 2; pass++) {             // every cloud's edge first, then every fill: no seams in a band
+        for (int i = 0; i < T->n_cloud; i++) {
+            const blob_t *c = &T->cloud[i];
+            if (strip_has(cv, c->y - c->w * 0.8f, c->y + c->w * 0.8f)) cloud_puffs(cv, c->x, c->y, c->w, c->c, pass == 0);
+        }
     }
     for (int i = 0; i < T->n_bar; i++) seg_draw(cv, &T->bar[i]);
     for (int i = 0; i < T->n_drop; i++) seg_draw(cv, &T->drop[i]);
@@ -839,9 +860,10 @@ static void dial_core(ui_t *u, canvas_t *cv, const weather_t *w)
     snprintf(s, sizeof s, "%d", (int)lroundf(t_of(w->now_t10)));
     const font_t *f = W_CORE >= 34 ? &FONT_HUGE : &FONT_LARGE;
     const int tw = font_width(f, s), th = FONT_ASCENT(f);
-    const int x = cx - tw / 2 - 3, y = SCY - th / 2 - W_CORE / 12;
+    const int x = cx - tw / 2 - 3, y = SCY - th / 2 - W_CORE / 12 + (WX_HUD ? W_CORE / 8 : 0);
     font_text(cv, f, x, y - (FONT_LINE_H(f) - th) / 2, s, temp_colour(w->now_t10), 255);
     gfx_ring(cv, (float)(x + tw + 4), (float)y + 3.0f, f == &FONT_HUGE ? 3.2f : 2.4f, 1.6f, temp_colour(w->now_t10), 255);
+    if (WX_HUD) return;                                // the clock is the column's, at its top
     clock_now(u, w, s, sizeof s);
     const font_t *cf = W_CORE >= 34 ? &FONT_MEDIUM : &FONT_SMALL;
     font_text(cv, cf, cx - font_width(cf, s) / 2, y + th + (W_CORE >= 34 ? 4 : 2), s, C_FOCUS, 235);
@@ -1104,6 +1126,271 @@ static void hud_item(canvas_t *cv, const item_t *it, int x, int y, int right, co
         micro_text(cv, vx + font_width(vf, it->val) + 3, vy + FONT_ASCENT(vf) - MICRO_H + 1, it->unit, C_DIM, 230, 1);
     if (it->sn) scale_bar(cv, right ? x - bw : x, vy + vh + 2, bw, it->sn, it->slv, it->sc);
 }
+
+#if RADAR_EPAPER || WX_HUD
+static const char *const WDAY_FULL[7] = { "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" };
+static const char *const MONTH[12] = { "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
+                                       "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER" };
+
+// the calendar's day from the days since 1970 (H. Hinnant's civil_from_days, sky.c has the other way)
+static void civil_date(int64_t days, int *y, int *m, int *d)
+{
+    days += 719468;
+    const int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+    const int64_t doe = days - era * 146097;
+    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int64_t mp = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = (int)(yoe + era * 400 + (*m <= 2));
+}
+#endif
+
+#if WX_HUD
+static float pressure_disp(const weather_t *w, int tt);   /* the pages' (further down): the pressure tt hours on, shown */
+/* --- the dial's column on the 480x320 screens, in place of the panel: the colour dial's sky, sun and rain with the
+ * printed dial's column beside it ("берем то что круто было на цветных... и крутой худ из чернобелого"). no frame:
+ * each row from where the dial's circle lets it start. the sky in words and now's rows in their colours, the
+ * warnings in theirs, the barometer with its storm-to-fair gradient and the wind's rose beside it, the next days
+ * stepping out with the circle; the buttons and the dots where the panel has them --- */
+
+// where words may start right of the dial for the rows y0 .. y1
+static int hud_x(int y0, int y1)
+{
+    const float r = (float)SR + 6.0f;
+    float x = (float)W.cx;
+    for (int y = y0; y <= y1; y++) {
+        const float dy = (float)y + 0.5f - (float)SCY;
+        if (fabsf(dy) < r) x = fmaxf(x, (float)W.cx + gfx_sqrt(r * r - dy * dy));
+    }
+    return (int)ceilf(x) + 6;
+}
+
+// a row: its name dim where the circle lets it start, its value at the right in its colour. back: the next row
+static int hud_row(canvas_t *cv, int y, const char *key, const char *val, uint32_t c)
+{
+    const int lh = FONT_LINE_H(&FONT_SMALL);
+    if (gfx_touches(cv, y - 1, y + lh)) {
+        font_text(cv, &FONT_SMALL, hud_x(y, y + lh), y, key, C_DIM, 255);
+        font_text(cv, &FONT_SMALL, GFX_W - 8 - font_width(&FONT_SMALL, val), y, val, c, 255);
+    }
+    return y + lh + 3;
+}
+
+// the barometer's colour at f of its scale, in the theme's own ("сбалансируй палитру"): a storm's end dim, a fair day's bright
+static uint32_t baro_colour(float f) { return gfx_mix(gfx_mix(C_GLASS, C_PRIM, 90u), C_FOCUS, (uint32_t)(clampf(f, 0, 1) * 256.0f)); }
+
+/* the barometer, as the printed dial's: a half dial, its scale fixed (100 hPa, 3 inHg, 80 mmHg round now), a band
+ * outside the arc from a storm's red to a fair day's green, the needle now, the thin hand a day ago, a mark outside
+ * where the forecast takes it, the value and its way under the hub, then by how much and when in the warning's
+ * colour. back: the row under it */
+static int hud_baro(canvas_t *cv, const weather_t *w, float xc, int y, float r)
+{
+    const float yc = (float)y + r + 7.0f;
+    float lo, span;
+    const float now = p_of(w->now_hpa10, w->now_t10);
+    if (W.pu == PRES_INHG) {
+        lo = 28.5f;
+        span = 3.0f;
+    } else if (W.pu == PRES_MMHG) {
+        lo = roundf(now * 0.1f) * 10.0f - 40.0f;
+        span = 80.0f;
+    } else {
+        lo = 960.0f;
+        span = 100.0f;
+    }
+    wx_alert_t a;
+    wx_alerts(w, WXA_ALL, &a);
+    const int lv = a.level[WXA_PRESSURE];
+    int at = lv ? clampi(a.hour[WXA_PRESSURE], 1, WX_HOURS - 1) : 1;
+    for (int tt = 1; !lv && tt < WX_HOURS; tt++) {
+        if (fabsf(pressure_disp(w, tt) - now) > fabsf(pressure_disp(w, at) - now)) at = tt;
+    }
+    const float to = pressure_disp(w, at), ago = pressure_disp(w, -WX_PAST);
+    if (gfx_touches(cv, (int)(yc - r) - 9, (int)yc + 4)) {
+        const int y0 = cv->y0 > (int)(yc - r) - 8 ? cv->y0 : (int)(yc - r) - 8;
+        const int y1 = cv->y0 + cv->h - 1 < (int)yc ? cv->y0 + cv->h - 1 : (int)yc;
+        for (int py = y0; py <= y1; py++) {            // the band, a pixel at a time, its edges soft
+            uint32_t *row = gfx_row(cv, py);
+            const float ry = yc - ((float)py + 0.5f);
+            for (int px = (int)(xc - r) - 8; row && px <= (int)(xc + r) + 8; px++) {
+                const float rx = (float)px + 0.5f - xc, d = gfx_sqrt(rx * rx + ry * ry);
+                const float cov = fminf(d - r, r + 6.0f - d) + 0.5f;
+                if (cov <= 0.0f || ry < 0.0f || px < 0 || px >= GFX_PW) continue;
+                row[px] = gfx_mix(row[px], baro_colour(1.0f - atan2f(ry, rx) / 3.14159265f), (uint32_t)(clampf(cov, 0, 1) * 220.0f));
+            }
+        }
+        for (int k = 0; k <= 10; k++) {                // a tick every tenth, the ends and the middle long
+            const float f = (float)k / 10.0f, an = 3.14159265f * (1.0f - f), l = k % 5 ? 3.0f : 6.0f;
+            gfx_line(cv, xc + cosf(an) * (r - l), yc - sinf(an) * (r - l), xc + cosf(an) * r, yc - sinf(an) * r, k % 5 ? 1.0f : 1.4f, C_DIM, 230);
+        }
+        char v[12];
+        for (int i = 0; i < 2; i++) {                  // the scale's ends inside it by the hub
+            if (W.pu == PRES_INHG) snprintf(v, sizeof v, "%.1f", (double)(i ? lo + span : lo));
+            else fmt_p(v, sizeof v, i ? lo + span : lo, 0);
+            const int lw = micro_width(v, 1);
+            micro_text(cv, i ? (int)(xc + r) - 6 - lw : (int)(xc - r) + 6, (int)yc - 8, v, C_DIM, 230, 1);
+        }
+        const float ft = clampf((to - lo) / span, 0, 1), an = 3.14159265f * (1.0f - ft), ca = cosf(an), sa = sinf(an);
+        const float xa = xc + ca * (r + 7.5f), ya = yc - sa * (r + 7.5f);
+        gfx_tri(cv, xc + ca * (r + 1.0f), yc - sa * (r + 1.0f), xa - sa * 4.0f, ya - ca * 4.0f, xa + sa * 4.0f, ya + ca * 4.0f,
+                lv ? alert_colour(lv) : C_FOCUS, 255);   // where the forecast takes it
+        if (ago > 0.0f) {                              // a day ago: the thin hand
+            const float fa = 3.14159265f * (1.0f - clampf((ago - lo) / span, 0, 1));
+            gfx_line(cv, xc, yc, xc + cosf(fa) * (r - 5.0f), yc - sinf(fa) * (r - 5.0f), 1.2f, C_DIM, 220);
+        }
+        const float fn = 3.14159265f * (1.0f - clampf((now - lo) / span, 0, 1));
+        gfx_line(cv, xc, yc, xc + cosf(fn) * (r - 3.0f), yc - sinf(fn) * (r - 3.0f), 4.0f, C_FOCUS, 50);   // the needle and its glow
+        gfx_line(cv, xc, yc, xc + cosf(fn) * (r - 3.0f), yc - sinf(fn) * (r - 3.0f), 1.8f, C_FOCUS, 255);
+        gfx_disc(cv, xc, yc, 3.0f, C_FOCUS, 255);
+    }
+    // under the hub: the value, its unit and its way; then by how much and when
+    char v[24], d[24];
+    fmt_p(v, sizeof v, now, 0);
+    const int vw = font_width(&FONT_MEDIUM, v), uw = micro_width(PRES_NAME[W.pu], 1), dp = (int)lroundf(to - now);
+    const int vy = (int)yc + 5, way = dp <= -2 ? -1 : dp >= 2 ? 1 : 0;
+    int x = (int)xc - (vw + 4 + uw + (way ? 11 : 0)) / 2;
+    if (gfx_touches(cv, vy, vy + FONT_LINE_H(&FONT_MEDIUM))) {
+        font_text(cv, &FONT_MEDIUM, x, vy, v, lv ? alert_colour(lv) : C_FOCUS, 255);
+        x += vw + 4;
+        micro_text(cv, x, vy + FONT_ASCENT(&FONT_MEDIUM) - MICRO_H + 1, PRES_NAME[W.pu], C_DIM, 230, 1);
+        x += uw + 4;
+        if (way) pressure_arrow(cv, (float)x, (float)vy + 4.0f, way < 0, lv ? alert_colour(lv) : C_DIM);
+    }
+    const int ty = vy + FONT_LINE_H(&FONT_MEDIUM) + 1;
+    if (W.pu == PRES_INHG) snprintf(d, sizeof d, "%+.2f BY %02d:00", (double)(to - now), clock_hour(w, at));
+    else if (dp) snprintf(d, sizeof d, "%+d BY %02d:00", dp, clock_hour(w, at));
+    else snprintf(d, sizeof d, "STEADY");
+    if (gfx_touches(cv, ty, ty + FONT_LINE_H(&FONT_SMALL))) font_text(cv, &FONT_SMALL, (int)xc - font_width(&FONT_SMALL, d) / 2, ty, d, lv ? alert_colour(lv) : C_DIM, 255);
+    return ty + FONT_LINE_H(&FONT_SMALL) + 3;
+}
+
+/* the wind's rose: a petal an eighth of the compass the next 24 hours blow from, as long as their share, the
+ * warning's colours only where it would warn there; the needle now the way it blows. its circle stands on the line
+ * `base` the barometer's dial ends on, its words under it on the barometer's rows: the wind in the value's
+ * letters, the unit under */
+static void hud_rose(canvas_t *cv, const weather_t *w, float cx, float base, float r)
+{
+    const float cy = base - r;
+    if (!gfx_touches(cv, (int)(cy - r) - 12, (int)base + 32)) return;
+    int n[8] = { 0 }, kmh[8] = { 0 }, most = 1;
+    for (int tt = 0; tt < WX_HOURS; tt++) {
+        const int s = (w->hour[tt].wind_from2 * 2 + 22) / 45 % 8;
+        n[s]++;
+        kmh[s] += w->hour[tt].wind_kmh;
+    }
+    for (int s = 0; s < 8; s++) most = n[s] > most ? n[s] : most;
+    for (int s = 0; s < 8; s++) {
+        if (!n[s]) continue;
+        const float a = (float)s * 45.0f * D2R, len = (r - 2.0f) * (float)n[s] / (float)most, k = (float)kmh[s] / (float)n[s];
+        const uint32_t c = k >= 75.0f ? C_ALARM : k >= 50.0f ? C_LOW : C_PRIM;   // the warning's colours only where it would warn
+        const float q[8] = { cx, cy, cx + sinf(a - 0.30f) * len, cy - cosf(a - 0.30f) * len, cx + sinf(a) * len * 1.05f,
+                             cy - cosf(a) * len * 1.05f, cx + sinf(a + 0.30f) * len, cy - cosf(a + 0.30f) * len };
+        gfx_poly(cv, q, 4, c, 150);
+    }
+    gfx_ring(cv, cx, cy, r, 1.0f, C_DIM, 220);
+    for (int s = 0; s < 8; s++) {
+        const float a = (float)s * 45.0f * D2R, l = s % 2 ? 2.5f : 4.5f;
+        gfx_line(cv, cx + sinf(a) * (r - l), cy - cosf(a) * (r - l), cx + sinf(a) * r, cy - cosf(a) * r, 1.0f, C_DIM, 220);
+    }
+    gfx_tri(cv, cx, cy - r - 1.0f, cx - 3.5f, cy - r + 5.5f, cx + 3.5f, cy - r + 5.5f, C_FOCUS, 255);   // north: a mark on the ring, no letter over it
+    const float a = ((float)w->wind_from + 180.0f) * D2R, dx = sinf(a), dy = -cosf(a);
+    gfx_line(cv, cx - dx * (r - 5.0f), cy - dy * (r - 5.0f), cx + dx * (r - 6.0f), cy + dy * (r - 6.0f), 4.0f, C_FOCUS, 50);
+    gfx_line(cv, cx - dx * (r - 5.0f), cy - dy * (r - 5.0f), cx + dx * (r - 6.0f), cy + dy * (r - 6.0f), 1.8f, C_FOCUS, 255);
+    gfx_tri(cv, cx + dx * (r - 2.0f), cy + dy * (r - 2.0f), cx + dx * (r - 8.0f) - dy * 3.5f, cy + dy * (r - 8.0f) + dx * 3.5f,
+            cx + dx * (r - 8.0f) + dy * 3.5f, cy + dy * (r - 8.0f) - dx * 3.5f, C_FOCUS, 255);
+    gfx_disc(cv, cx, cy, 2.4f, C_FOCUS, 255);
+    char v[24];
+    if (w->gust_kmh >= w->wind_kmh + 10) snprintf(v, sizeof v, "%s %d-%d", compass8((float)w->wind_from), w_of(w->wind_kmh), w_of(w->gust_kmh));
+    else snprintf(v, sizeof v, "%s %d", compass8((float)w->wind_from), w_of(w->wind_kmh));
+    const int vy = (int)base + 5;
+    font_text(cv, &FONT_MEDIUM, (int)cx - font_width(&FONT_MEDIUM, v) / 2, vy, v, w->gust_kmh >= 75 ? C_LOW : C_FOCUS, 255);
+    font_text(cv, &FONT_SMALL, (int)cx - font_width(&FONT_SMALL, WIND_NAME[W.wu]) / 2, vy + FONT_LINE_H(&FONT_MEDIUM) + 1, WIND_NAME[W.wu], C_DIM, 255);
+}
+
+/* the column as one table ("чтобы все сбалансировалось в единую картину"): the clock between the look's button and
+ * the dots, the day and the date under it; the sky in words; now's rows, their names against the circle, their
+ * values against the right edge; the warnings; the barometer and the rose side by side, their pictures ending on
+ * one line, their words on the same rows under it; the next days as the rows above: the day against the circle,
+ * its sky and its warmest in columns, its coldest against the right edge */
+static void wx_hud(ui_t *u, canvas_t *cv, const weather_t *w)
+{
+    char v[40], k[16];
+    const int x1 = GFX_W - 8, ca = look_x(u) + look_w(u) + 6, cb = RDOTS_X - 6;
+    clock_now(u, w, v, sizeof v);
+    if (gfx_touches(cv, 0, FONT_LINE_H(&FONT_LARGE))) font_text(cv, &FONT_LARGE, (ca + cb - font_width(&FONT_LARGE, v)) / 2, 0, v, C_FOCUS, 255);
+    int y = FONT_LINE_H(&FONT_LARGE) + 2;
+    if (u->net.utc && gfx_touches(cv, y, y + FONT_LINE_H(&FONT_SMALL))) {
+        const int64_t s = (int64_t)u->net.utc + (int64_t)w->utc_min * 60, days = s / 86400;
+        int yy, mm, dd;
+        civil_date(days, &yy, &mm, &dd);
+        snprintf(v, sizeof v, "%s %d %s %d", WDAY_FULL[(days + 3) % 7], dd, MONTH[(mm + 11) % 12], yy);
+        font_text(cv, &FONT_SMALL, x1 - font_width(&FONT_SMALL, v), y, v, C_FOCUS, 255);
+    }
+    y += FONT_LINE_H(&FONT_SMALL) + 4;
+    const char *kind = KIND_NAME[w->now_kind < WX_KINDS ? w->now_kind : 0];
+    const int kx = hud_x(y, y + FONT_LINE_H(&FONT_MEDIUM));
+    if (gfx_touches(cv, y, y + FONT_LINE_H(&FONT_MEDIUM))) font_text_clip(cv, &FONT_MEDIUM, kx, y, kind, C_FOCUS, 255, x1 - kx);
+    y += FONT_LINE_H(&FONT_MEDIUM) + 2;
+    fmt_t(v, sizeof v, w->feels10);
+    y = hud_row(cv, y, "FEELS LIKE", v, C_FOCUS);       // the theme's colours; the warnings' the one accent
+    snprintf(v, sizeof v, "%d%%", w->humidity);
+    y = hud_row(cv, y, "HUMIDITY", v, C_FOCUS);
+    if (w->aqi != WX_NONE) {
+        snprintf(v, sizeof v, "%s %d.%d", aqi_word(w->aqi), w->pm25_10 / 10, w->pm25_10 % 10);
+        y = hud_row(cv, y, "AIR PM2.5", v, w->aqi >= 60 ? alert_colour(w->aqi >= 80 ? WXA_RED : WXA_AMBER) : C_FOCUS);
+    } else if (w->uv10 >= 30) {
+        snprintf(v, sizeof v, "%d %s", (w->uv10 + 5) / 10, uv_word(w->uv10));
+        y = hud_row(cv, y, "UV", v, w->uv10 >= 80 ? C_LOW : C_FOCUS);
+    }
+    if (w->gamma_nsv) {
+        snprintf(v, sizeof v, "%d.%02d \xC2\xB5SV/H", w->gamma_nsv / 1000, w->gamma_nsv % 1000 / 10);
+        y = hud_row(cv, y, "RADIATION", v, w->gamma_nsv >= 1000 ? C_ALARM : w->gamma_nsv >= 300 ? C_LOW : C_FOCUS);
+    } else if (sun_next(w, k, sizeof k, v, sizeof v)) {
+        y = hud_row(cv, y, k, v, C_FOCUS);
+    }
+    for (int i = 0; i < WXA_KINDS; i++) {              // the warnings SET leaves on, in their colours, no box: what, how much, when
+        if (!u->alert.level[i] || i == WXA_PRESSURE) continue;   // the pressure's is the barometer's
+        char head[24];
+        alert_said(&u->alert, i, head, sizeof head);
+        alert_detail(w, &u->alert, i, v, sizeof v, 1);
+        const uint32_t c = alert_colour(u->alert.level[i]);
+        const int lh = FONT_LINE_H(&FONT_SMALL);
+        if (gfx_touches(cv, y, y + 2 * lh)) {
+            font_text(cv, &FONT_SMALL, hud_x(y, y + lh), y, head, c, 255);
+            font_text(cv, &FONT_SMALL, x1 - font_width(&FONT_SMALL, v), y + lh, v, c, 235);
+        }
+        y += 2 * lh + 3;
+    }
+    /* the next days at the foot over the buttons, as low as they go: their rows first worked out from there up. the
+     * indicators get what is between */
+    const int dh = 16, dstep = 16, dtop = BTN_Y - 4 - (WX_DAYS - 1) * dstep - dh;
+    // the barometer and the rose side by side, in the room between, their pictures standing on one line
+    const int r = 30, top = y + 9, base = top + r + 7, hx = hud_x(top - 8, base + 34);   // base: hud_baro's hub
+    hud_rose(cv, w, (float)(x1 - 30), (float)base, 20.0f);
+    hud_baro(cv, w, (float)(hx + r + 10), top, (float)r);
+    // the days: the day against the circle, its sky and its warmest in columns, its coldest against the right edge
+    const int xi = x1 - 104, xh = x1 - 48;
+    y = dtop > base + 38 ? dtop : base + 38;
+    for (int j = 0; j < WX_DAYS; j++, y += dstep) {
+        const wx_day_t *d = &w->day[j];
+        if (!gfx_touches(cv, y - 2, y + dh)) continue;
+        font_text(cv, &FONT_SMALL, hud_x(y, y + dh - 2), y + 3, WDAY[d->wday % 7], C_DIM, 255);
+        wx_pic(cv, d->kind, 0, (float)xi, (float)y + 7.0f, 15.0f, W.anim, 255);
+        fmt_t(v, sizeof v, d->hi10);
+        font_text(cv, &FONT_MEDIUM, xh - font_width(&FONT_MEDIUM, v), y, v, C_FOCUS, 255);
+        fmt_t(v, sizeof v, d->lo10);
+        font_text(cv, &FONT_MEDIUM, x1 - font_width(&FONT_MEDIUM, v), y, v, C_DIM, 255);
+    }
+    // the buttons where the panel has them
+    static const char *const L[3] = { "HUE", "LIST", "SET" };
+    for (int i = 0; i < 3 && gfx_touches(cv, BTN_Y, BTN_Y + BTN_H); i++) {
+        const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_BTN + i;
+        button(cv, TX - 3 + i * (BTN_W + 3), BTN_Y, BTN_W, BTN_H, L[i], pressed ? 2 : 0);
+    }
+}
+#endif
 
 // the room beside the dial for a thing at the rows y .. y + h: little by its middle, more up and down where the circle draws in
 static int room_at(int y, int h)
@@ -1972,7 +2259,12 @@ void weather_draw(ui_t *u, canvas_t *cv)
         }
         page_dots(u, cv);
         corners(u, cv, w);
+#if WX_HUD
+        if (panel_in && u->wx_page == WXP_DIAL) wx_hud(u, cv, w);   // the dial: the printed dial's column, no panel
+        else if (panel_in) panel(u, cv, w);
+#else
         if (panel_in) panel(u, cv, w);
+#endif
     }
 #if RADAR_HAS_TOUCH && !RADAR_ROUND
     if (gfx_touches(cv, LOOK_Y, LOOK_Y + LOOK_H)) panel_dots(u, cv, RDOTS_X, LOOK_Y, RDOTS_W);   // over the panel's corner, or where it was
@@ -1981,6 +2273,33 @@ void weather_draw(ui_t *u, canvas_t *cv)
 
 #if RADAR_EPAPER
 #include "paper.h"
+
+/* the printed weather's inks by their parts: the paper, its light and dark greys, the ink. on the colour screens
+ * the same drawing is their negative in the theme's colours ("красивенный экран погоды... перенеси на цветные
+ * экраны"): the glass, a dim and a mid tone of the theme, the bright words. a tone between two of them is a
+ * halftone on paper (a chequer, a dither), a blend on glass */
+#if RADAR_EPAPER
+#define K_PAPER P_WHITE
+#define K_LIGHT P_LIGHT
+#define K_DARK  P_DARK
+#define K_INK   P_BLACK
+#define K_ALARM P_BLACK                                /* a red warning: on paper inverted */
+#define K_ON_ALARM P_WHITE
+static uint32_t wx_tone(float g, int x, int y) { return paper_tone(g, x, y); }   // g: 0 ink .. 1 paper
+#else
+#define K_PAPER C_GLASS
+#define K_LIGHT gfx_mix(C_GLASS, C_PRIM, 80u)
+#define K_DARK  gfx_mix(C_GLASS, C_PRIM, 170u)
+#define K_INK   C_FOCUS
+#define K_ALARM C_ALARM                                /* a red warning: on glass in its own colour, the words white on it */
+#define K_ON_ALARM RGB(255, 255, 255)
+static uint32_t wx_tone(float g, int x, int y)
+{
+    (void)x;
+    (void)y;
+    return gfx_mix(K_INK, K_PAPER, (uint32_t)(clampf(g, 0, 1) * 256.0f));
+}
+#endif
 
 /* --- the 24 HOURS page printed, the 4.2"'s own (ui_paper.c shows it, its key tabs over it). not the dial,
  * which is light on dark glass and moves: a weather station's card. now big on the left, the clock in the
@@ -2020,10 +2339,10 @@ static void pcloud(canvas_t *cv, float cx, float cy, float w, float g, uint32_t 
 {
     static const float PUFF[4][3] = { { -0.27f, 0.02f, 0.12f }, { -0.10f, -0.10f, 0.17f }, { 0.11f, -0.15f, 0.20f },
                                       { 0.29f, -0.02f, 0.13f } };   // x, y, radius, of w
-    for (int i = 0; i < 4; i++) gfx_disc(cv, cx + PUFF[i][0] * w, cy + PUFF[i][1] * w, PUFF[i][2] * w + g, c, 255);
+    for (int i = 0; i < 4; i++) paper_disc(cv, cx + PUFF[i][0] * w, cy + PUFF[i][1] * w, PUFF[i][2] * w + g, c);
     const float r = 0.10f * w + g, y = cy + 0.10f * w, xa = cx - 0.30f * w, xb = cx + 0.32f * w;
-    gfx_disc(cv, xa, y, r, c, 255);
-    gfx_disc(cv, xb, y, r, c, 255);
+    paper_disc(cv, xa, y, r, c);
+    paper_disc(cv, xb, y, r, c);
     const float q[8] = { xa, y - r, xb, y - r, xb, y + r, xa, y + r };
     gfx_poly(cv, q, 4, c, 255);
 }
@@ -2033,56 +2352,56 @@ static void pcloud(canvas_t *cv, float cx, float cy, float w, float g, uint32_t 
  * strokes, the snow flakes. bg: the ground under it, the crescent is cut out of the moon with it */
 static void paper_pic(canvas_t *cv, int kind, int night, float cx, float cy, float s, uint32_t bg)
 {
-    const float g = s > 40.0f ? 2.4f : 1.4f;           // the ink's width
-    const uint32_t fill = bg == P_LIGHT ? P_WHITE : P_LIGHT;
+    const float g = s > 40.0f ? 2.4f : s > 24.0f ? 1.4f : 1.0f;   // the ink's width: fine on the small ones
+    const uint32_t fill = bg == K_LIGHT ? K_PAPER : K_LIGHT;
     if (kind == WX_CLEAR || kind == WX_PARTLY) {
         const int part = kind == WX_PARTLY;
         const float x = part ? cx - s * 0.15f : cx, y = part ? cy - s * 0.14f : cy, r = s * (part ? 0.15f : 0.21f);
         if (night) {
-            gfx_disc(cv, x, y, r * 1.15f, P_BLACK, 255);
-            gfx_disc(cv, x + r * 0.55f, y - r * 0.3f, r, bg, 255);
+            paper_disc(cv, x, y, r * 1.15f, K_INK);
+            paper_disc(cv, x + r * 0.55f, y - r * 0.3f, r, bg);
         } else {
-            gfx_ring(cv, x, y, r * 0.8f, g, P_BLACK, 255);
+            paper_ring(cv, x, y, r * 0.8f, g, K_INK);
             for (int i = 0; i < 8; i++) {
                 const float q = (float)i * 0.7854f;
-                gfx_line(cv, x + sinf(q) * r * 1.2f, y - cosf(q) * r * 1.2f, x + sinf(q) * r * 1.65f, y - cosf(q) * r * 1.65f, g, P_BLACK, 255);
+                paper_line(cv, x + sinf(q) * r * 1.2f, y - cosf(q) * r * 1.2f, x + sinf(q) * r * 1.65f, y - cosf(q) * r * 1.65f, g, K_INK);
             }
         }
         if (!part) return;
-        pcloud(cv, cx + s * 0.06f, cy + s * 0.1f, s * 0.72f, g, P_BLACK);
+        pcloud(cv, cx + s * 0.06f, cy + s * 0.1f, s * 0.72f, g, K_INK);
         pcloud(cv, cx + s * 0.06f, cy + s * 0.1f, s * 0.72f, 0.0f, fill);
         return;
     }
     if (kind == WX_FOG) {
         for (int i = 0; i < 3; i++) {
             const float y = cy - s * 0.15f + (float)i * s * 0.15f, in = i == 1 ? s * 0.08f : 0.0f;
-            gfx_line(cv, cx - s * 0.35f + in, y, cx + s * 0.35f - (i == 1 ? 0.0f : s * 0.08f), y, g, P_BLACK, 255);
+            paper_line(cv, cx - s * 0.35f + in, y, cx + s * 0.35f - (i == 1 ? 0.0f : s * 0.08f), y, g, K_INK);
         }
         return;
     }
     const float y = cy - (kind == WX_CLOUDY ? 0.0f : s * 0.1f);
-    pcloud(cv, cx, y, s * 0.8f, g, P_BLACK);
-    pcloud(cv, cx, y, s * 0.8f, 0.0f, kind == WX_STORM ? P_DARK : fill);
+    pcloud(cv, cx, y, s * 0.8f, g, K_INK);
+    pcloud(cv, cx, y, s * 0.8f, 0.0f, kind == WX_STORM ? K_DARK : fill);
     const float top = y + s * 0.24f;                   // under the cloud
     for (int i = 0; i < 3 && kind != WX_CLOUDY && kind != WX_STORM; i++) {
         const float x = cx - s * 0.18f + (float)i * s * 0.18f;
         if (kind == WX_RAIN) {
-            gfx_line(cv, x + s * 0.04f, top, x - s * 0.03f, top + s * 0.16f, g, P_BLACK, 255);
+            paper_line(cv, x + s * 0.04f, top, x - s * 0.03f, top + s * 0.16f, g, K_INK);
         } else if (kind == WX_DRIZZLE) {
-            gfx_disc(cv, x, top + s * 0.07f, s * 0.035f + 0.9f, P_BLACK, 255);
+            paper_disc(cv, x, top + s * 0.07f, s * 0.035f + 0.9f, K_INK);
         } else {                                       // a flake: three strokes across
             const float r = s * 0.06f + 1.0f;
             for (int q = 0; q < 3; q++) {
                 const float a = (float)q * 1.0472f;
-                gfx_line(cv, x - cosf(a) * r, top + s * 0.08f - sinf(a) * r, x + cosf(a) * r, top + s * 0.08f + sinf(a) * r, g * 0.8f, P_BLACK, 255);
+                paper_line(cv, x - cosf(a) * r, top + s * 0.08f - sinf(a) * r, x + cosf(a) * r, top + s * 0.08f + sinf(a) * r, g * 0.8f, K_INK);
             }
         }
     }
     if (kind == WX_STORM) {
         const float bx = cx, by = top - s * 0.04f, bw = g * 1.4f;
-        gfx_line(cv, bx + s * 0.06f, by, bx - s * 0.05f, by + s * 0.14f, bw, P_BLACK, 255);
-        gfx_line(cv, bx - s * 0.05f, by + s * 0.14f, bx + s * 0.06f, by + s * 0.14f, bw, P_BLACK, 255);
-        gfx_line(cv, bx + s * 0.06f, by + s * 0.14f, bx - s * 0.04f, by + s * 0.3f, bw, P_BLACK, 255);
+        paper_line(cv, bx + s * 0.06f, by, bx - s * 0.05f, by + s * 0.14f, bw, K_INK);
+        paper_line(cv, bx - s * 0.05f, by + s * 0.14f, bx + s * 0.06f, by + s * 0.14f, bw, K_INK);
+        paper_line(cv, bx + s * 0.06f, by + s * 0.14f, bx - s * 0.04f, by + s * 0.3f, bw, K_INK);
     }
 }
 
@@ -2093,9 +2412,9 @@ static int pwx_row(canvas_t *cv, int x, int x1, int y, const char *key, const ch
     const int uw = unit && unit[0] ? 3 + font_width(&FONT_PAPER_S, unit) : 0;
     const int vx = x1 - uw - font_width(&FONT_PAPER_M, val);
     if (!gfx_touches(cv, y - 1, y + PWX_ROW_H)) return vx;
-    font_text(cv, &FONT_PAPER_S, x, y + 2, key, P_DARK, 255);
-    font_text(cv, &FONT_PAPER_M, vx, y, val, P_BLACK, 255);
-    if (uw) font_text(cv, &FONT_PAPER_S, x1 - uw + 3, y + 2, unit, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, x, y + 2, key, K_DARK, 255);
+    font_text(cv, &FONT_PAPER_M, vx, y, val, K_INK, 255);
+    if (uw) font_text(cv, &FONT_PAPER_S, x1 - uw + 3, y + 2, unit, K_INK, 255);
     return vx;
 }
 
@@ -2116,7 +2435,7 @@ static void pwx_rows(canvas_t *cv, const weather_t *w)
     const int px = pwx_row(cv, x0, x1, y + PWX_ROW_H, "PRESSURE", v, PRES_NAME[W.pu]);
     const int d = all.value[WXA_PRESSURE];
     if ((d <= -20 || d >= 20) && gfx_touches(cv, y + PWX_ROW_H, y + 2 * PWX_ROW_H)) {
-        pressure_arrow(cv, (float)(px - 11), (float)(y + PWX_ROW_H + 3), d < 0, P_BLACK);
+        pressure_arrow(cv, (float)(px - 11), (float)(y + PWX_ROW_H + 3), d < 0, K_INK);
     }
     snprintf(v, sizeof v, "%d%%", w->humidity);
     pwx_row(cv, x0, x1, y + 2 * PWX_ROW_H, "HUMIDITY", v, NULL);
@@ -2157,9 +2476,9 @@ static void pwx_warning(ui_t *u, canvas_t *cv, const weather_t *w)
     char head[24], v[32];
     alert_said(&u->alert, k, head, sizeof head);
     alert_detail(w, &u->alert, k, v, sizeof v, 1);
-    gfx_fill(cv, 4, PWX_WARN_Y, PWX_X1 - 4, 22, P_BLACK, 255);
-    if (!red) gfx_fill(cv, 6, PWX_WARN_Y + 2, PWX_X1 - 8, 18, P_WHITE, 255);
-    const uint32_t ink = red ? P_WHITE : P_BLACK;
+    gfx_fill(cv, 4, PWX_WARN_Y, PWX_X1 - 4, 22, K_INK, 255);
+    if (!red) gfx_fill(cv, 6, PWX_WARN_Y + 2, PWX_X1 - 8, 18, K_PAPER, 255);
+    const uint32_t ink = red ? K_PAPER : K_INK;
     font_text(cv, &FONT_PAPER_M, 10, PWX_WARN_Y + 4, head, ink, 255);
     const int x = 20 + font_width(&FONT_PAPER_M, head);
     font_text_clip(cv, &FONT_PAPER_S, x, PWX_WARN_Y + 6, v, ink, 255, PWX_X1 - 6 - x);
@@ -2169,23 +2488,23 @@ static void pwx_warning(ui_t *u, canvas_t *cv, const weather_t *w)
 static void pwx_hours(ui_t *u, canvas_t *cv, const weather_t *w)
 {
     if (!gfx_touches(cv, PWX_HRS_Y - 3, PWX_HRS_Y + PWX_HRS_H)) return;
-    gfx_fill(cv, 0, PWX_HRS_Y - 3, GFX_W - PAPER_KEYS_W - 3, 2, P_BLACK, 255);   // a rule: now above it, what comes under it
+    gfx_fill(cv, 0, PWX_HRS_Y - 3, GFX_W - PAPER_KEYS_W - 3, 2, K_INK, 255);   // a rule: now above it, what comes under it
     char v[12];
     const int cw = (GFX_W - PAPER_KEYS_W - 3) / 8;
     for (int i = 0; i < 8; i++) {
         const int hi = i * 3, x0 = i * cw, cx = x0 + cw / 2;
         const wx_hour_t *h = &w->hour[hi];
         const int night = night_at(u, w->at + (uint32_t)hi * 3600u + 5400u);
-        if (night) gfx_fill(cv, x0, PWX_HRS_Y, cw, PWX_HRS_H, P_LIGHT, 255);
+        if (night) gfx_fill(cv, x0, PWX_HRS_Y, cw, PWX_HRS_H, K_LIGHT, 255);
         if (i) {
             snprintf(v, sizeof v, "%02d", clock_hour(w, hi));
         } else {
             snprintf(v, sizeof v, "NOW");
         }
-        font_text(cv, &FONT_PAPER_S, cx - font_width(&FONT_PAPER_S, v) / 2, PWX_HRS_Y + 3, v, P_BLACK, 255);
-        paper_pic(cv, h->kind, night, (float)cx, PWX_HRS_Y + 25.0f, 28.0f, night ? P_LIGHT : P_WHITE);
+        font_text(cv, &FONT_PAPER_S, cx - font_width(&FONT_PAPER_S, v) / 2, PWX_HRS_Y + 3, v, K_INK, 255);
+        paper_pic(cv, h->kind, night, (float)cx, PWX_HRS_Y + 25.0f, 28.0f, night ? K_LIGHT : K_PAPER);
         fmt_t(v, sizeof v, h->t10);
-        font_text(cv, &FONT_PAPER_M, cx - font_width(&FONT_PAPER_M, v) / 2, PWX_HRS_Y + 38, v, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_M, cx - font_width(&FONT_PAPER_M, v) / 2, PWX_HRS_Y + 38, v, K_INK, 255);
     }
 }
 
@@ -2193,39 +2512,22 @@ static void pwx_hours(ui_t *u, canvas_t *cv, const weather_t *w)
 static void pwx_days(canvas_t *cv, const weather_t *w)
 {
     if (!gfx_touches(cv, PWX_DAYS_Y - 2, GFX_H)) return;
-    gfx_fill(cv, 0, PWX_DAYS_Y - 2, GFX_W - PAPER_KEYS_W - 3, 1, P_BLACK, 255);
+    gfx_fill(cv, 0, PWX_DAYS_Y - 2, GFX_W - PAPER_KEYS_W - 3, 1, K_INK, 255);
     char v[12];
     const int dw = (GFX_W - PAPER_KEYS_W - 3) / WX_DAYS;
     for (int i = 0; i < WX_DAYS; i++) {
         const wx_day_t *d = &w->day[i];
         const int x0 = i * dw;
-        if (i) gfx_fill(cv, x0, PWX_DAYS_Y + 3, 1, GFX_H - PWX_DAYS_Y - 6, P_DARK, 255);
-        font_text(cv, &FONT_PAPER_S, x0 + 7, PWX_DAYS_Y + 3, WDAY[d->wday % 7], P_BLACK, 255);
-        paper_pic(cv, d->kind, 0, x0 + 22.0f, PWX_DAYS_Y + 26.0f, 22.0f, P_WHITE);
+        if (i) gfx_fill(cv, x0, PWX_DAYS_Y + 3, 1, GFX_H - PWX_DAYS_Y - 6, K_DARK, 255);
+        font_text(cv, &FONT_PAPER_S, x0 + 7, PWX_DAYS_Y + 3, WDAY[d->wday % 7], K_INK, 255);
+        paper_pic(cv, d->kind, 0, x0 + 22.0f, PWX_DAYS_Y + 26.0f, 22.0f, K_PAPER);
         fmt_t(v, sizeof v, d->hi10);
-        font_text(cv, &FONT_PAPER_M, x0 + dw - 9 - font_width(&FONT_PAPER_M, v), PWX_DAYS_Y + 4, v, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_M, x0 + dw - 9 - font_width(&FONT_PAPER_M, v), PWX_DAYS_Y + 4, v, K_INK, 255);
         fmt_t(v, sizeof v, d->lo10);
-        font_text(cv, &FONT_PAPER_M, x0 + dw - 9 - font_width(&FONT_PAPER_M, v), PWX_DAYS_Y + 20, v, P_DARK, 255);
+        font_text(cv, &FONT_PAPER_M, x0 + dw - 9 - font_width(&FONT_PAPER_M, v), PWX_DAYS_Y + 20, v, K_DARK, 255);
     }
 }
 
-static const char *const WDAY_FULL[7] = { "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY" };
-static const char *const MONTH[12] = { "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST",
-                                       "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER" };
-
-// the calendar's day from the days since 1970 (H. Hinnant's civil_from_days, sky.c has the other way)
-static void civil_date(int64_t days, int *y, int *m, int *d)
-{
-    days += 719468;
-    const int64_t era = (days >= 0 ? days : days - 146096) / 146097;
-    const int64_t doe = days - era * 146097;
-    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const int64_t mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
-    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
-    *y = (int)(yoe + era * 400 + (*m <= 2));
-}
 
 /* the clock and the date by the home's clock, against the right edge: the time big at the top, beside the
  * place, then the day, the date and the year right of the temperature. x0: where the temperature ends. a
@@ -2236,7 +2538,7 @@ static void pwx_time(ui_t *u, canvas_t *cv, const weather_t *w)
     const int soft = cv->soft;
     cv->soft = 0;                                      // it changes every minute, drawn on top in black and white: crisp
     clock_now(u, w, v, sizeof v);
-    if (gfx_touches(cv, 0, 38)) font_text(cv, &FONT_PAPER_XL, PWX_X1 - font_width(&FONT_PAPER_XL, v), 2, v, P_BLACK, 255);
+    if (gfx_touches(cv, 0, 38)) font_text(cv, &FONT_PAPER_XL, PWX_X1 - font_width(&FONT_PAPER_XL, v), 2, v, K_INK, 255);
     cv->soft = soft;
 }
 
@@ -2250,12 +2552,12 @@ static void pwx_clock(ui_t *u, canvas_t *cv, const weather_t *w, int x0)
     civil_date(days, &y, &m, &d);
     const int wd = (int)((days + 3) % 7), room = PWX_X1 - x0;   // 1970-01-01 was a Thursday
     const char *day = font_width(&FONT_PAPER_M, WDAY_FULL[wd]) <= room ? WDAY_FULL[wd] : WDAY[wd];
-    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, day), 44, day, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, day), 44, day, K_INK, 255);
     snprintf(v, sizeof v, "%d %s", d, MONTH[(m + 11) % 12]);
     if (font_width(&FONT_PAPER_M, v) > room) snprintf(v, sizeof v, "%d %.3s", d, MONTH[(m + 11) % 12]);
-    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, v), 60, v, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, v), 60, v, K_INK, 255);
     snprintf(v, sizeof v, "%d", y);
-    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, v), 76, v, P_DARK, 255);
+    font_text(cv, &FONT_PAPER_M, PWX_X1 - font_width(&FONT_PAPER_M, v), 76, v, K_DARK, 255);
 }
 
 /* --- the graphs printed: the pressure and the temperature (plan_pages works their scales and the sun out, as for
@@ -2312,11 +2614,16 @@ static int pg_night(const wtab_t *T, float h)
 static uint32_t pg_ink(int tone, int x, int y)
 {
     switch (tone) {
-    case 1:  return (x + y) & 1 ? P_WHITE : P_LIGHT;
-    case 2:  return P_LIGHT;
-    case 3:  return (x + y) & 1 ? P_LIGHT : P_DARK;
-    case 4:  return P_DARK;
-    default: return P_WHITE;
+#if RADAR_EPAPER
+    case 1:  return (x + y) & 1 ? K_PAPER : K_LIGHT;   // between two inks: a chequer
+    case 3:  return (x + y) & 1 ? K_LIGHT : K_DARK;
+#else
+    case 1:  return (void)x, (void)y, gfx_mix(K_PAPER, K_LIGHT, 128u);   // on glass a blend
+    case 3:  return gfx_mix(K_LIGHT, K_DARK, 128u);
+#endif
+    case 2:  return K_LIGHT;
+    case 4:  return K_DARK;
+    default: return K_PAPER;
     }
 }
 
@@ -2353,12 +2660,12 @@ static void pg_grid(canvas_t *cv, const pgraph_t *g, float step, int temp)
         const int iy = (int)lroundf(y);
         uint32_t *row = gfx_row(cv, iy);
         if (row) {
-            for (int x = PGP_X0; x <= PGP_X1; x += 4) row[x] = P_BLACK;
+            for (int x = PGP_X0; x <= PGP_X1; x += 4) row[x] = K_INK;
         }
         if (j % every || !gfx_touches(cv, iy - 6, iy + 6)) continue;
         if (temp) snprintf(v, sizeof v, "%d", (int)lroundf(gv));
         else fmt_p(v, sizeof v, gv, 0);
-        font_text(cv, &FONT_PAPER_S, PGP_X0 - 4 - font_width(&FONT_PAPER_S, v), iy - 5, v, P_DARK, 255);
+        font_text(cv, &FONT_PAPER_S, PGP_X0 - 4 - font_width(&FONT_PAPER_S, v), iy - 5, v, K_DARK, 255);
     }
 }
 
@@ -2377,7 +2684,7 @@ static void pg_curve(canvas_t *cv, const wtab_t *T, const pgraph_t *g)
         }
         const float y = pg_y(g, v);
         const int past = h - (float)PG_PAST < T->now_h;
-        if (prev) paper_line(cv, px, py, (float)x, y, past ? 1.6f : 2.6f, past ? P_DARK : P_BLACK);   // its edges soft: printed whole
+        if (prev) paper_line(cv, px, py, (float)x, y, past ? 1.6f : 2.6f, past ? K_DARK : K_INK);   // its edges soft: printed whole
         px = (float)x;
         py = y;
         prev = 1;
@@ -2391,11 +2698,11 @@ static void pg_now(canvas_t *cv, const wtab_t *T, const pgraph_t *g)
     float v;
     const float ny = curve_at(g->val, g->m, g->ok, PG_N, T->now_h + (float)PG_PAST, &v) ? pg_y(g, v) : -1.0f;
     for (int y = ny >= 0.0f ? (int)ny + 6 : PGP_TOP; y < PGP_AX; y += 5) {
-        if (gfx_touches(cv, y, y + 3)) gfx_fill(cv, (int)lroundf(nx), y, 2, 3, P_BLACK, 255);
+        if (gfx_touches(cv, y, y + 3)) gfx_fill(cv, (int)lroundf(nx), y, 2, 3, K_INK, 255);
     }
     if (ny >= 0.0f && strip_has(cv, ny - 7.0f, ny + 7.0f)) {
-        gfx_disc(cv, nx, ny, 5.8f, P_WHITE, 255);
-        gfx_disc(cv, nx, ny, 3.6f, P_BLACK, 255);
+        paper_disc(cv, nx, ny, 5.8f, K_PAPER);
+        paper_disc(cv, nx, ny, 3.6f, K_INK);
     }
 }
 
@@ -2403,7 +2710,7 @@ static void pg_now(canvas_t *cv, const wtab_t *T, const pgraph_t *g)
 static void pg_axis(canvas_t *cv, const weather_t *w, const wtab_t *T, const pgraph_t *g)
 {
     if (!gfx_touches(cv, PGP_AX - 1, GFX_H)) return;
-    gfx_fill(cv, PGP_X0, PGP_AX, PGP_X1 - PGP_X0 + 1, 2, P_BLACK, 255);
+    gfx_fill(cv, PGP_X0, PGP_AX, PGP_X1 - PGP_X0 + 1, 2, K_INK, 255);
     const float nx = pg_x(g, T->now_h + (float)PG_PAST);
     const int nw = font_width(&FONT_PAPER_S, "NOW");
     char v[8];
@@ -2411,22 +2718,22 @@ static void pg_axis(canvas_t *cv, const weather_t *w, const wtab_t *T, const pgr
         const int hr = clock_hour(w, tt);
         if (hr % 6) continue;
         const float x = pg_x(g, (float)(tt + PG_PAST));
-        gfx_fill(cv, (int)lroundf(x), PGP_AX + 2, 1, 3, P_BLACK, 255);
+        gfx_fill(cv, (int)lroundf(x), PGP_AX + 2, 1, 3, K_INK, 255);
         snprintf(v, sizeof v, "%02d", hr);
         const int lw = font_width(&FONT_PAPER_S, v), lx = (int)lroundf(x) - lw / 2;
         if (fabsf(x - nx) < (float)(lw + nw) * 0.5f + 4.0f || lx < PGP_X0 - 6 || lx + lw > PGP_X1 + 6) continue;
-        font_text(cv, &FONT_PAPER_S, lx, PGP_AX + 5, v, P_DARK, 255);
+        font_text(cv, &FONT_PAPER_S, lx, PGP_AX + 5, v, K_DARK, 255);
     }
-    font_text(cv, &FONT_PAPER_S, (int)lroundf(nx) - nw / 2, PGP_AX + 5, "NOW", P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, (int)lroundf(nx) - nw / 2, PGP_AX + 5, "NOW", K_INK, 255);
 }
 
 // the weather's pictures in a row over the graph, every three hours by the home's clock, the past's too
 static void pg_pics(canvas_t *cv, const weather_t *w, const wtab_t *T, const pgraph_t *g)
 {
-    if (!gfx_touches(cv, PGP_PIC - 12, PGP_PIC + 12)) return;
+    if (!gfx_touches(cv, PGP_PIC - 15, PGP_PIC + 15)) return;
     for (int tt = -PG_PAST; tt < WX_HOURS; tt++) {
         if (clock_hour(w, tt) % 3 || (tt < 0 && !w->past_hpa10[WX_PAST + tt])) continue;
-        paper_pic(cv, kind_at(w, tt), T->pel[tt + WX_PAST] < -3, pg_x(g, (float)(tt + PG_PAST)), (float)PGP_PIC, 19.0f, P_WHITE);
+        paper_pic(cv, kind_at(w, tt), T->pel[tt + WX_PAST] < -3, pg_x(g, (float)(tt + PG_PAST)), (float)PGP_PIC, fminf(25.0f, g->k * 3.0f - 2.0f), K_PAPER);   // as big as three hours let them
     }
 }
 
@@ -2435,14 +2742,14 @@ static void pg_label(canvas_t *cv, int x, int y, const char *s, const font_t *f)
 {
     const int w = font_width(f, s), lh = FONT_LINE_H(f);
     if (!gfx_touches(cv, y - 1, y + lh)) return;
-    gfx_fill(cv, x - 2, y - 1, w + 4, lh + 1, P_WHITE, 255);
-    font_text(cv, f, x, y, s, P_BLACK, 255);
+    gfx_fill(cv, x - 2, y - 1, w + 4, lh + 1, K_PAPER, 255);
+    font_text(cv, f, x, y, s, K_INK, 255);
 }
 
 // the page's head: its name, and the clock where the first page has it
 static void pg_head(ui_t *u, canvas_t *cv, const weather_t *w, const char *name)
 {
-    if (gfx_touches(cv, 0, 36)) font_text(cv, &FONT_PAPER_L, 6, 8, name, P_BLACK, 255);
+    if (gfx_touches(cv, 0, 36)) font_text(cv, &FONT_PAPER_L, 6, 8, name, K_INK, 255);
     pwx_time(u, cv, w);
 }
 
@@ -2459,12 +2766,12 @@ static void page_pressure_paper(ui_t *u, canvas_t *cv, const weather_t *w)
     const int way = T->p_lv ? (T->p_d < 0 ? -1 : 1) : d12 <= -15 ? -1 : d12 >= 15 ? 1 : 0;
     if (gfx_touches(cv, 38, 92)) {
         fmt_p(v, sizeof v, p_of(w->now_hpa10, w->now_t10), 0);
-        font_text(cv, &FONT_PAPER_XXL, 6, 40, v, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_XXL, 6, 40, v, K_INK, 255);
         const int x = 6 + font_width(&FONT_PAPER_XXL, v) + 10;
-        font_text(cv, &FONT_PAPER_M, x, 46, PRES_NAME[W.pu], P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_M, x, 46, PRES_NAME[W.pu], K_INK, 255);
         const char *said = way < 0 ? "FALLING" : way > 0 ? "RISING" : "STEADY";
-        font_text(cv, &FONT_PAPER_M, x, 66, said, P_BLACK, 255);
-        if (way) pressure_arrow(cv, (float)(x + font_width(&FONT_PAPER_M, said) + 5), 70.0f, way < 0, P_BLACK);
+        font_text(cv, &FONT_PAPER_M, x, 66, said, K_INK, 255);
+        if (way) pressure_arrow(cv, (float)(x + font_width(&FONT_PAPER_M, said) + 5), 70.0f, way < 0, K_INK);
     }
     const float before = pressure_disp(w, -12);
     if (before > 0.0f) fmt_p(v, sizeof v, before, 0);
@@ -2482,8 +2789,8 @@ static void page_pressure_paper(ui_t *u, canvas_t *cv, const weather_t *w)
     if (T->p_lv) {                                     // the warning: where it is worst, and by how much
         const float qx = pg_x(&g, (float)(T->p_at + PG_PAST)), qy = pg_y(&g, pressure_disp(w, T->p_at));
         if (strip_has(cv, qy - 8.0f, qy + 8.0f)) {
-            gfx_disc(cv, qx, qy, 6.5f, P_WHITE, 255);
-            gfx_ring(cv, qx, qy, 4.6f, 2.0f, P_BLACK, 255);
+            paper_disc(cv, qx, qy, 6.5f, K_PAPER);
+            paper_ring(cv, qx, qy, 4.6f, 2.0f, K_INK);
         }
         fmt_dp(n, sizeof n, dp_of(T->p_d, w));
         snprintf(v, sizeof v, "%s BY %02d:00", n, clock_hour(w, T->p_at));
@@ -2506,8 +2813,8 @@ static void page_temp_paper(ui_t *u, canvas_t *cv, const weather_t *w)
     snprintf(v, sizeof v, "%d", (int)lroundf(t_of(w->now_t10)));
     const int xe = 6 + font_width(&FONT_PAPER_XXL, v) + 9 + 30;   // the number, its degree, a gap
     if (gfx_touches(cv, 38, 92)) {
-        font_text(cv, &FONT_PAPER_XXL, 6, 40, v, P_BLACK, 255);
-        gfx_ring(cv, 6.0f + (float)font_width(&FONT_PAPER_XXL, v) + 9.0f, 52.0f, 5.5f, 3.0f, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_XXL, 6, 40, v, K_INK, 255);
+        paper_ring(cv, 6.0f + (float)font_width(&FONT_PAPER_XXL, v) + 9.0f, 52.0f, 5.5f, 3.0f, K_INK);
     }
     const int x1 = xe + 110 < PWX_X1 ? xe + 110 : PWX_X1;
     fmt_t(t, sizeof t, T->t_max);
@@ -2543,8 +2850,8 @@ static void page_temp_paper(ui_t *u, canvas_t *cv, const weather_t *w)
         if (!strip_has(cv, by, (float)PGP_AX)) continue;
         const int past = (float)tt < T->now_h - 0.5f, snow = kind_at(w, tt) == WX_SNOW;
         const int ix = (int)lroundf(bx), iy = (int)lroundf(by), iw = (int)lroundf(bw), ih = PGP_AX - iy;
-        gfx_fill(cv, ix, iy, iw, ih, past ? P_LIGHT : snow ? P_BLACK : P_DARK, 255);
-        if (snow && !past && iw > 2 && ih > 2) gfx_fill(cv, ix + 1, iy + 1, iw - 2, ih - 1, P_WHITE, 255);   // snow: white, edged
+        gfx_fill(cv, ix, iy, iw, ih, past ? K_LIGHT : snow ? K_INK : K_DARK, 255);
+        if (snow && !past && iw > 2 && ih > 2) gfx_fill(cv, ix + 1, iy + 1, iw - 2, ih - 1, K_PAPER, 255);   // snow: white, edged
     }
     if (most_at >= 0) {
         fmt_r(v, sizeof v, most);
@@ -2554,7 +2861,7 @@ static void page_temp_paper(ui_t *u, canvas_t *cv, const weather_t *w)
     } else {
         const int lw = font_width(&FONT_PAPER_S, "NO RAIN");
         const int lx = (int)((pg_x(&g, T->now_h + (float)PG_PAST) + (float)PGP_X1) * 0.5f) - lw / 2;
-        if (gfx_touches(cv, PGP_AX - 18, PGP_AX)) font_text(cv, &FONT_PAPER_S, lx, PGP_AX - 16, "NO RAIN", P_DARK, 255);
+        if (gfx_touches(cv, PGP_AX - 18, PGP_AX)) font_text(cv, &FONT_PAPER_S, lx, PGP_AX - 16, "NO RAIN", K_DARK, 255);
     }
     pg_pics(cv, w, T, &g);
     pg_curve(cv, T, &g);
@@ -2562,7 +2869,7 @@ static void page_temp_paper(ui_t *u, canvas_t *cv, const weather_t *w)
         const int k = tt + PG_PAST;
         if (!g.ok[k] || clock_hour(w, tt) % 6) continue;
         const float x = pg_x(&g, (float)k), y = pg_y(&g, g.val[k]);
-        if (strip_has(cv, y - 4.0f, y + 4.0f)) gfx_disc(cv, x, y, 2.6f, P_BLACK, 255);
+        if (strip_has(cv, y - 4.0f, y + 4.0f)) paper_disc(cv, x, y, 2.6f, K_INK);
         snprintf(v, sizeof v, "%d\xC2\xB0", (int)lroundf(g.val[k]));
         const int lw = font_width(&FONT_PAPER_S, v);
         const int ly = y - 17.0f > (float)PGP_TOP ? (int)y - 17 : (int)y + 6;
@@ -2581,14 +2888,15 @@ static void page_temp_paper(ui_t *u, canvas_t *cv, const weather_t *w)
  * a step darker than the sky over it, yesterday's loop dotted beside it; the wind on it every three hours, an
  * arrow the way it blows. the rest in a column of words on the right: the date, now, the barograph, the days --- */
 
-#define DL_CX   140
-#define DL_CY   150
-#define DL_R    122                                    /* the sky's outer edge, the hours' numbers round it */
-#define DL_RS   93                                     /* its inner edge: 0.618 of the way out from the core */
-#define DL_RC   47                                     /* the core: 0.382 of the dial */
-#define DL_RLO  55                                     /* the temperature's coldest and warmest radii */
-#define DL_RHI  82
-#define DL_RM   108                                    /* the middle of the sky's ring: the clouds */
+#define DL_SC(v) ((v) * GFX_H / 300)                  /* the 4.2"'s dial (300 high) to this screen's height */
+#define DL_CX   DL_SC(140)
+#define DL_CY   (GFX_H / 2)
+#define DL_R    DL_SC(122)                                   /* the sky's outer edge, the hours' numbers round it */
+#define DL_RS   DL_SC(93)                                   /* its inner edge: 0.618 of the way out from the core */
+#define DL_RC   DL_SC(47)                                   /* the core: 0.382 of the dial */
+#define DL_RLO  DL_SC(55)                                   /* the temperature's coldest and warmest radii */
+#define DL_RHI  DL_SC(82)
+#define DL_RM   DL_SC(108)                                   /* the middle of the sky's ring: the clouds */
 #define SH_N    (2 * WX_PAST)                          /* the hours a day back and a day on */
 
 int weather_sheet_up(const ui_t *u) { return weather_paper_page(u) && paper_style && u->wx_page == WXP_DIAL; }
@@ -2671,7 +2979,7 @@ static void dl_label(canvas_t *cv, int x, int y, const char *s, const font_t *f,
 {
     const int w = font_width(f, s), lh = FONT_LINE_H(f);
     if (!gfx_touches(cv, y - 1, y + lh)) return;
-    gfx_fill(cv, x - 2, y - 1, w + 4, lh + 1, P_WHITE, 255);
+    gfx_fill(cv, x - 2, y - 1, w + 4, lh + 1, K_PAPER, 255);
     font_text(cv, f, x, y, s, ink, 255);
 }
 
@@ -2723,8 +3031,8 @@ static void dl_clouds(canvas_t *cv, const weather_t *w, const wtab_t *T, int fil
             float x, y;
             dl_at(dl_deg(w, at), rad, &x, &y);
             if (!gfx_touches(cv, (int)(y - rr) - 2, (int)(y + rr) + 2)) continue;
-            if (!fill) gfx_disc(cv, x, y, rr + 1.3f, P_DARK, 255);
-            else gfx_disc(cv, x, y, rr, dl_sun(T, at) < -0.833f ? P_WHITE : P_LIGHT, 255);
+            if (!fill) paper_disc(cv, x, y, rr + 1.3f, K_DARK);
+            else paper_disc(cv, x, y, rr, dl_sun(T, at) < -0.833f ? K_PAPER : K_LIGHT);
         }
     }
 }
@@ -2742,9 +3050,9 @@ static void dl_rain(canvas_t *cv, const weather_t *w, const wtab_t *T)
             float bx, by;
             dl_at(deg, (float)DL_RS + 7.0f, &bx, &by);
             if (gfx_touches(cv, (int)by - 8, (int)by + 8)) {
-                gfx_line(cv, bx + 2.5f, by - 7.0f, bx - 2.0f, by, 1.6f, P_BLACK, 255);
-                gfx_line(cv, bx - 2.0f, by, bx + 2.5f, by, 1.6f, P_BLACK, 255);
-                gfx_line(cv, bx + 2.5f, by, bx - 1.5f, by + 7.0f, 1.6f, P_BLACK, 255);
+                paper_line(cv, bx + 2.5f, by - 7.0f, bx - 2.0f, by, 1.6f, K_INK);
+                paper_line(cv, bx - 2.0f, by, bx + 2.5f, by, 1.6f, K_INK);
+                paper_line(cv, bx + 2.5f, by, bx - 1.5f, by + 7.0f, 1.6f, K_INK);
             }
         }
         if (!mm10) continue;
@@ -2758,14 +3066,14 @@ static void dl_rain(canvas_t *cv, const weather_t *w, const wtab_t *T)
             dl_at(d, r1, &xb, &yb);
             if (!gfx_touches(cv, (int)fminf(ya, yb) - 2, (int)fmaxf(ya, yb) + 2)) continue;
             if (!dots) {
-                gfx_line(cv, xa, ya, xb, yb, 1.2f, P_DARK, 255);
+                paper_line(cv, xa, ya, xb, yb, 1.2f, K_DARK);
                 continue;
             }
             for (float rr = r0; rr > r1; rr -= snow ? 4.0f : 3.0f) {
                 float px, py;
                 dl_at(d, rr, &px, &py);
-                if (snow) gfx_disc(cv, px, py, 1.1f, P_DARK, 255);
-                else gfx_fill(cv, (int)px, (int)py, 1, 1, P_DARK, 255);
+                if (snow) paper_disc(cv, px, py, 1.1f, K_DARK);
+                else gfx_fill(cv, (int)px, (int)py, 1, 1, K_DARK, 255);
             }
         }
     }
@@ -2775,7 +3083,7 @@ static void dl_rain(canvas_t *cv, const weather_t *w, const wtab_t *T)
     float x, y;
     dl_at(dl_deg(w, (float)most + 0.5f), (float)DL_RM, &x, &y);   // on its cloud
     const int lw = font_width(&FONT_PAPER_S, v);
-    dl_label(cv, (int)x - lw / 2, (int)y - 5, v, &FONT_PAPER_S, P_BLACK);
+    dl_label(cv, (int)x - lw / 2, (int)y - 5, v, &FONT_PAPER_S, K_INK);
 }
 
 // the sun where it is highest each day, in the ring under the clouds: drawn before them
@@ -2788,10 +3096,10 @@ static void dl_suns(canvas_t *cv, const weather_t *w, const wtab_t *T)
             float x, y;
             dl_at(dl_deg(w, tt), (float)DL_RM + 3.0f, &x, &y);
             if (gfx_touches(cv, (int)y - 9, (int)y + 9)) {
-                gfx_ring(cv, x, y, 3.6f, 1.6f, P_BLACK, 255);
+                paper_ring(cv, x, y, 3.6f, 1.6f, K_INK);
                 for (int i = 0; i < 8; i++) {
                     const float q = (float)i * 0.7854f;
-                    gfx_line(cv, x + sinf(q) * 5.6f, y - cosf(q) * 5.6f, x + sinf(q) * 8.2f, y - cosf(q) * 8.2f, 1.2f, P_BLACK, 255);
+                    paper_line(cv, x + sinf(q) * 5.6f, y - cosf(q) * 5.6f, x + sinf(q) * 8.2f, y - cosf(q) * 8.2f, 1.2f, K_INK);
                 }
             }
         }
@@ -2818,7 +3126,7 @@ static void dl_loops(canvas_t *cv, const weather_t *w, const wtab_t *T)
             }
             dl_at(d0 + (float)i, dl_tr(T, v), &x, &y);
             if (prev && (!past || i % 4 < 2)) {
-                gfx_line(cv, px, py, x, y, past ? 1.2f : pass == 1 ? 5.2f : 2.4f, pass == 1 ? P_WHITE : P_BLACK, 255);
+                paper_line(cv, px, py, x, y, past ? 1.2f : pass == 1 ? 5.2f : 2.4f, pass == 1 ? K_PAPER : K_INK);
             }
             px = x;
             py = y;
@@ -2852,11 +3160,11 @@ static void dl_marks(ui_t *u, canvas_t *cv, const weather_t *w, const wtab_t *T)
         const int out = rl - 17.0f < (float)DL_RC;     // too near the core for its number inside: outside, the wind further out
         if (named) {                                   // the temperature every six hours, and at its ends
             dl_at(deg, rl, &x, &y);
-            if (gfx_touches(cv, (int)y - 4, (int)y + 4)) gfx_disc(cv, x, y, 2.4f, P_BLACK, 255);
+            if (gfx_touches(cv, (int)y - 4, (int)y + 4)) paper_disc(cv, x, y, 2.4f, K_INK);
             fmt_t(v, sizeof v, w->hour[tt].t10);
             const int lw = font_width(&FONT_PAPER_S, v);
             dl_at(deg, out ? rl + 11.0f : rl - 11.0f, &x, &y);
-            dl_label(cv, (int)lroundf(x) - lw / 2, (int)lroundf(y) - 5, v, &FONT_PAPER_S, P_BLACK);
+            dl_label(cv, (int)lroundf(x) - lw / 2, (int)lroundf(y) - 5, v, &FONT_PAPER_S, K_INK);
         }
         if (ch % 3 && tt != storm) continue;
         const wx_hour_t *h = &w->hour[tt];
@@ -2865,18 +3173,18 @@ static void dl_marks(ui_t *u, canvas_t *cv, const weather_t *w, const wtab_t *T)
             const int lw = font_width(&FONT_PAPER_S, v);
             dl_at(deg, rl + 25.0f, &x, &y);
             if (gfx_touches(cv, (int)y - 7, (int)y + 7)) {
-                gfx_fill(cv, (int)lroundf(x) - lw / 2 - 3, (int)lroundf(y) - 6, lw + 6, 12, P_BLACK, 255);
-                font_text(cv, &FONT_PAPER_S, (int)lroundf(x) - lw / 2, (int)lroundf(y) - 5, v, P_WHITE, 255);
+                gfx_fill(cv, (int)lroundf(x) - lw / 2 - 3, (int)lroundf(y) - 6, lw + 6, 12, K_ALARM, 255);
+                font_text(cv, &FONT_PAPER_S, (int)lroundf(x) - lw / 2, (int)lroundf(y) - 5, v, K_ON_ALARM, 255);
             }
         }
         const float a = ((float)h->wind_from2 * 2.0f + 180.0f) * D2R, len = 4.0f + clampf((float)h->wind_kmh / 50.0f, 0, 1) * 5.0f;
         const float dx = sinf(a) * len, dy = -cosf(a) * len, bold = h->gust_kmh >= 50 ? 2.2f : 1.3f;
         dl_at(deg, rl + (out && named ? 24.0f : 12.0f), &x, &y);
         if (!gfx_touches(cv, (int)y - 11, (int)y + 11)) continue;
-        gfx_line(cv, x - dx, y - dy, x + dx * 0.3f, y + dy * 0.3f, bold, P_BLACK, 255);
+        paper_line(cv, x - dx, y - dy, x + dx * 0.3f, y + dy * 0.3f, bold, K_INK);
         const float hx = dx / len * 4.0f, hy = dy / len * 4.0f;
         gfx_tri(cv, x + dx, y + dy, x + dx - hx * 1.3f - hy * 0.8f, y + dy - hy * 1.3f + hx * 0.8f,
-                x + dx - hx * 1.3f + hy * 0.8f, y + dy - hy * 1.3f - hx * 0.8f, P_BLACK, 255);
+                x + dx - hx * 1.3f + hy * 0.8f, y + dy - hy * 1.3f - hx * 0.8f, K_INK, 255);
     }
 }
 
@@ -2925,12 +3233,12 @@ static void dl_rim(canvas_t *cv, const weather_t *w, const wtab_t *T)
         if (h % 3) {                                   // a tick; the hours every three are their numbers ("-18" read as minus)
             dl_at(deg, (float)DL_R + 1.0f, &xa, &ya);
             dl_at(deg, (float)DL_R + 4.0f, &xb, &yb);
-            if (gfx_touches(cv, (int)fminf(ya, yb) - 1, (int)fmaxf(ya, yb) + 1)) gfx_line(cv, xa, ya, xb, yb, 1.2f, P_BLACK, 255);
+            if (gfx_touches(cv, (int)fminf(ya, yb) - 1, (int)fmaxf(ya, yb) + 1)) paper_line(cv, xa, ya, xb, yb, 1.2f, K_INK);
             continue;
         }
         int x0, y0, x1, y1;
         dl_hour_box(h, v, &x0, &y0, &x1, &y1);
-        if (gfx_touches(cv, y0 - 1, y1 + 1)) font_text(cv, &FONT_PAPER_S, x0, y0 - 2, v, P_BLACK, 255);
+        if (gfx_touches(cv, y0 - 1, y1 + 1)) font_text(cv, &FONT_PAPER_S, x0, y0 - 2, v, K_INK, 255);
     }
     /* the hand: a needle from the core to past the rim, white-edged over the greys, fine ("стрелка... брутальненько
      * и жирно"): a hand points, it does not shout */
@@ -2940,15 +3248,15 @@ static void dl_rim(canvas_t *cv, const weather_t *w, const wtab_t *T)
         const float h0 = pass ? 1.9f : 3.6f, h1 = pass ? 0.3f : 1.5f;
         const float bx = (float)DL_CX + sx * r0, by = (float)DL_CY + sy * r0, tx = (float)DL_CX + sx * r1, ty = (float)DL_CY + sy * r1;
         const float q[8] = { bx + cx * h0, by + cy * h0, tx + cx * h1, ty + cy * h1, tx - cx * h1, ty - cy * h1, bx - cx * h0, by - cy * h0 };
-        if (gfx_touches(cv, (int)fminf(by, ty) - 5, (int)fmaxf(by, ty) + 5)) gfx_poly(cv, q, 4, pass ? P_BLACK : P_WHITE, 255);
+        if (gfx_touches(cv, (int)fminf(by, ty) - 5, (int)fmaxf(by, ty) + 5)) gfx_poly(cv, q, 4, pass ? K_INK : K_PAPER, 255);
     }
     float v2;
     if (dl_t(T, T->s_now, &v2)) {
         float x, y;
         dl_at(d0, dl_tr(T, v2), &x, &y);
         if (gfx_touches(cv, (int)y - 6, (int)y + 6)) {
-            gfx_disc(cv, x, y, 4.6f, P_WHITE, 255);
-            gfx_disc(cv, x, y, 2.8f, P_BLACK, 255);
+            paper_disc(cv, x, y, 4.6f, K_PAPER);
+            paper_disc(cv, x, y, 2.8f, K_INK);
         }
     }
 }
@@ -2958,8 +3266,8 @@ static void dl_rim(canvas_t *cv, const weather_t *w, const wtab_t *T)
 static void dl_core(canvas_t *cv, const weather_t *w)
 {
     if (!gfx_touches(cv, DL_CY - DL_RC, DL_CY + DL_RC)) return;
-    gfx_disc(cv, (float)DL_CX, (float)DL_CY, (float)DL_RC - 0.5f, P_WHITE, 255);
-    gfx_ring(cv, (float)DL_CX, (float)DL_CY, (float)DL_RC, 1.0f, P_BLACK, 255);
+    paper_disc(cv, (float)DL_CX, (float)DL_CY, (float)DL_RC - 0.5f, K_PAPER);
+    paper_ring(cv, (float)DL_CX, (float)DL_CY, (float)DL_RC, 1.0f, K_INK);
     char v[16], t[12], f[24];
     fmt_t(t, sizeof t, w->feels10);
     snprintf(f, sizeof f, "FEELS %s", t);
@@ -2969,16 +3277,16 @@ static void dl_core(canvas_t *cv, const weather_t *w)
     int fy;
     if ((float)bw <= room) {                           // the digits 47 high from top, the feel 6 under them
         const int x = DL_CX - bw / 2;
-        font_text(cv, &FONT_PAPER_XXL, x, (int)top - 1, v, P_BLACK, 255);
-        gfx_ring(cv, (float)(x + tw) + 1.0f, top + 5.5f, 4.4f, 2.4f, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_XXL, x, (int)top - 1, v, K_INK, 255);
+        paper_ring(cv, (float)(x + tw) + 1.0f, top + 5.5f, 4.4f, 2.4f, K_INK);
         fy = (int)top + 51;
     } else {                                           // the next letters, 25 high, their own degree
         fmt_t(v, sizeof v, w->now_t10);
         const int y = DL_CY - 19;
-        font_text(cv, &FONT_PAPER_XL, DL_CX - font_width(&FONT_PAPER_XL, v) / 2, y - 2, v, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_XL, DL_CX - font_width(&FONT_PAPER_XL, v) / 2, y - 2, v, K_INK, 255);
         fy = y + 29;
     }
-    font_text(cv, &FONT_PAPER_S, DL_CX - font_width(&FONT_PAPER_S, f) / 2, fy, f, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, DL_CX - font_width(&FONT_PAPER_S, f) / 2, fy, f, K_INK, 255);
 }
 
 /* a row of the column: its name small at the left, where the circle lets it start, its value at the right
@@ -2989,8 +3297,8 @@ static int dl_row(canvas_t *cv, int y, int x1, const char *key, const char *val)
     const font_t *f = kw + 5 + font_width(&FONT_PAPER_M, val) <= x1 - x0 ? &FONT_PAPER_M : &FONT_PAPER_S;
     const int vx = x1 - font_width(f, val);
     if (!gfx_touches(cv, y - 1, y + 14)) return vx;
-    font_text(cv, &FONT_PAPER_S, x0, y + 2, key, P_BLACK, 255);
-    font_text(cv, f, vx, f == &FONT_PAPER_M ? y : y + 2, val, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, x0, y + 2, key, K_INK, 255);
+    font_text(cv, f, vx, f == &FONT_PAPER_M ? y : y + 2, val, K_INK, 255);
     return vx;
 }
 
@@ -3007,7 +3315,7 @@ static int dl_clock(ui_t *u, canvas_t *cv, const weather_t *w, int x1)
     clock_now(u, w, v, sizeof v);
     const int soft = cv->soft;
     cv->soft = 0;
-    if (gfx_touches(cv, 0, 26)) font_text(cv, &FONT_PAPER_XL, x, -2, v, P_BLACK, 255);   // the digits 25 high from the top
+    if (gfx_touches(cv, 0, 26)) font_text(cv, &FONT_PAPER_XL, x, -2, v, K_INK, 255);   // the digits 25 high from the top
     cv->soft = soft;
     const int xd = x + font_width(&FONT_PAPER_XL, v) + 8, room = x1 - xd;
     if (!u->net.utc || !gfx_touches(cv, 0, 38)) return 44;
@@ -3016,12 +3324,12 @@ static int dl_clock(ui_t *u, canvas_t *cv, const weather_t *w, int x1)
     civil_date(days, &yy, &mm, &dd);
     const char *day = WDAY_FULL[(days + 3) % 7];
     const int m = font_width(&FONT_PAPER_M, day) <= room;
-    font_text(cv, m ? &FONT_PAPER_M : &FONT_PAPER_S, xd, m ? -1 : 1, day, P_BLACK, 255);
+    font_text(cv, m ? &FONT_PAPER_M : &FONT_PAPER_S, xd, m ? -1 : 1, day, K_INK, 255);
     snprintf(v, sizeof v, "%d %s", dd, MONTH[(mm + 11) % 12]);
     if (font_width(&FONT_PAPER_S, v) > room) snprintf(v, sizeof v, "%d %.3s", dd, MONTH[(mm + 11) % 12]);
-    font_text(cv, &FONT_PAPER_S, xd, 13, v, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, xd, 13, v, K_INK, 255);
     snprintf(v, sizeof v, "%d", yy);
-    font_text(cv, &FONT_PAPER_S, xd, 25, v, P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, xd, 25, v, K_INK, 255);
     return 44;
 }
 
@@ -3071,38 +3379,38 @@ static int dl_barometer(canvas_t *cv, const weather_t *w, const wtab_t *T, int x
                 const float rx = (float)px + 0.5f - xc, d = gfx_sqrt(rx * rx + ry * ry);
                 if (d < r + 0.5f || d > r + 6.0f || ry < 0.0f) continue;
                 const float f = 1.0f - atan2f(ry, rx) / 3.14159265f;   // 0 the low end, 1 the high
-                row[px] = paper_tone(0.18f + 0.82f * f, px, py);
+                row[px] = wx_tone(0.18f + 0.82f * f, px, py);
             }
         }
         for (int i = 0; i < 36; i++) {                 // the scale's arc
             dl_baro_at(xc, yc, r, (float)i / 36.0f, &xa, &ya);
             dl_baro_at(xc, yc, r, (float)(i + 1) / 36.0f, &xb, &yb);
-            paper_line(cv, xa, ya, xb, yb, 1.2f, P_BLACK);
+            paper_line(cv, xa, ya, xb, yb, 1.2f, K_INK);
         }
         for (float t = lo; t <= lo + span + tick * 0.01f; t += tick) {   // its ticks, long at its numbers
             const int big = fabsf(t - lab[0]) < tick * 0.1f || fabsf(t - lab[1]) < tick * 0.1f || fabsf(t - lab[2]) < tick * 0.1f;
             dl_baro_at(xc, yc, r - (big ? 5.0f : 3.0f), (t - lo) / span, &xa, &ya);   // inward, on white: seen on the dark end too
             dl_baro_at(xc, yc, r, (t - lo) / span, &xb, &yb);
-            paper_line(cv, xa, ya, xb, yb, big ? 1.4f : 1.0f, P_BLACK);
+            paper_line(cv, xa, ya, xb, yb, big ? 1.4f : 1.0f, K_INK);
         }
         for (int i = 0; i < 2; i++) {                  // the scale's ends inside it by the hub, where the needle seldom goes
             const float e = i ? lo + span : lo;
             if (W.pu == PRES_INHG) snprintf(v, sizeof v, "%.1f", (double)e);
             else fmt_p(v, sizeof v, e, 0);
             const int lw = font_width(&FONT_PAPER_S, v);
-            font_text(cv, &FONT_PAPER_S, i ? (int)(xc + r) - 5 - lw : (int)(xc - r) + 5, (int)yc - 12, v, P_BLACK, 255);
+            font_text(cv, &FONT_PAPER_S, i ? (int)(xc + r) - 5 - lw : (int)(xc - r) + 5, (int)yc - 12, v, K_INK, 255);
         }
         // the forecast's mark: a triangle outside the scale pointing in
         const float f = (to - lo) / span, a = 3.14159265f * (1.0f - clampf(f, 0, 1)), ca = cosf(a), sa = -sinf(a);
         dl_baro_at(xc, yc, r + 0.6f, f, &xa, &ya);
         dl_baro_at(xc, yc, r + 9.0f, f, &xb, &yb);
-        gfx_tri(cv, xa, ya, xb - sa * 5.5f, yb + ca * 5.5f, xb + sa * 5.5f, yb - ca * 5.5f, P_WHITE, 255);   // white-edged over the band
+        gfx_tri(cv, xa, ya, xb - sa * 5.5f, yb + ca * 5.5f, xb + sa * 5.5f, yb - ca * 5.5f, K_PAPER, 255);   // white-edged over the band
         dl_baro_at(xc, yc, r + 1.0f, f, &xa, &ya);
         dl_baro_at(xc, yc, r + 8.0f, f, &xb, &yb);
-        gfx_tri(cv, xa, ya, xb - sa * 4.0f, yb + ca * 4.0f, xb + sa * 4.0f, yb - ca * 4.0f, P_BLACK, 255);
+        gfx_tri(cv, xa, ya, xb - sa * 4.0f, yb + ca * 4.0f, xb + sa * 4.0f, yb - ca * 4.0f, K_INK, 255);
         if (ago > 0.0f) {                              // a day ago: the thin hand
             dl_baro_at(xc, yc, r - 4.0f, (ago - lo) / span, &xa, &ya);
-            paper_line(cv, xc, yc, xa, ya, 1.3f, P_DARK);
+            paper_line(cv, xc, yc, xa, ya, 1.3f, K_DARK);
         }
         // now: a needle as the dial's, white-edged, and its hub
         const float fn = (now - lo) / span, an = 3.14159265f * (1.0f - clampf(fn, 0, 1)), dx = cosf(an), dy = -sinf(an);
@@ -3110,9 +3418,9 @@ static int dl_barometer(canvas_t *cv, const weather_t *w, const wtab_t *T, int x
             const float rt = r - (pass ? 3.0f : 1.5f), h0 = pass ? 1.8f : 3.2f, h1 = pass ? 0.3f : 1.3f;
             const float tx = xc + dx * rt, ty = yc + dy * rt;
             const float q[8] = { xc - dy * h0, yc + dx * h0, tx - dy * h1, ty + dx * h1, tx + dy * h1, ty - dx * h1, xc + dy * h0, yc - dx * h0 };
-            gfx_poly(cv, q, 4, pass ? P_BLACK : P_WHITE, 255);
+            gfx_poly(cv, q, 4, pass ? K_INK : K_PAPER, 255);
         }
-        gfx_disc(cv, xc, yc, 3.4f, P_BLACK, 255);
+        paper_disc(cv, xc, yc, 3.4f, K_INK);
     }
     // under the hub: the value, its unit and its way; then by how much and when
     const int d = (int)lroundf((to - now) * (W.pu == PRES_INHG ? 100.0f : 1.0f));
@@ -3122,9 +3430,9 @@ static int dl_barometer(canvas_t *cv, const weather_t *w, const wtab_t *T, int x
     int x = (int)xc - (vw + 4 + uw + (way ? 11 : 0)) / 2;
     const int vy = (int)yc + 6;
     if (gfx_touches(cv, vy, vy + 14)) {
-        x += font_text(cv, &FONT_PAPER_M, x, vy, v, P_BLACK, 255) + 4;
-        x += font_text(cv, &FONT_PAPER_S, x, vy + 2, u, P_BLACK, 255) + 4;
-        if (way) pressure_arrow(cv, (float)x, (float)vy + 3.0f, way < 0, P_BLACK);
+        x += font_text(cv, &FONT_PAPER_M, x, vy, v, K_INK, 255) + 4;
+        x += font_text(cv, &FONT_PAPER_S, x, vy + 2, u, K_INK, 255) + 4;
+        if (way) pressure_arrow(cv, (float)x, (float)vy + 3.0f, way < 0, K_INK);
     }
     const float dp = to - now;
     if (W.pu == PRES_INHG) snprintf(v, sizeof v, "%+.2f BY %02d:00", (double)dp, clock_hour(w, at));
@@ -3132,8 +3440,8 @@ static int dl_barometer(canvas_t *cv, const weather_t *w, const wtab_t *T, int x
     else snprintf(v, sizeof v, "STEADY");
     const int red = T->p_lv >= WXA_RED, lw = font_width(&FONT_PAPER_S, v), ty = vy + 18;
     if (gfx_touches(cv, ty - 2, ty + 12)) {
-        if (red) gfx_fill(cv, (int)xc - lw / 2 - 3, ty - 2, lw + 6, 14, P_BLACK, 255);
-        font_text(cv, &FONT_PAPER_S, (int)xc - lw / 2, ty, v, red ? P_WHITE : P_BLACK, 255);
+        if (red) gfx_fill(cv, (int)xc - lw / 2 - 3, ty - 2, lw + 6, 14, K_ALARM, 255);
+        font_text(cv, &FONT_PAPER_S, (int)xc - lw / 2, ty, v, red ? K_ON_ALARM : K_INK, 255);
     }
     return ty + 17;
 }
@@ -3142,10 +3450,10 @@ static int dl_barometer(canvas_t *cv, const weather_t *w, const wtab_t *T, int x
  * up: a petal for each eighth of the compass the next 24 hours' wind comes from, as long as the share of the hours
  * it blows from there and as dark as it blows hard there; the needle now the way it blows, as the barometer's; from
  * where, how strong and the gusts under it */
-static void dl_rose(canvas_t *cv, const weather_t *w, int x1)
+static void dl_rose_at(canvas_t *cv, const weather_t *w, float cx, float cy, int x1, int under)
 {
-    const float r = 22.0f, cx = (float)x1 - r - 3.0f, cy = (float)GFX_H - 38.0f;
-    if (!gfx_touches(cv, (int)(cy - r) - 12, GFX_H)) return;
+    const float r = 22.0f;
+    if (!gfx_touches(cv, (int)(cy - r) - 16, under ? (int)(cy + r) + 30 : GFX_H)) return;
     int n[8] = { 0 }, kmh[8] = { 0 }, most = 1;
     for (int tt = 0; tt < WX_HOURS; tt++) {
         const int s = (w->hour[tt].wind_from2 * 2 + 22) / 45 % 8;
@@ -3164,36 +3472,50 @@ static void dl_rose(canvas_t *cv, const weather_t *w, int x1)
             const int s = (int)((deg + 22.5f) / 45.0f) % 8;
             if (!n[s] || fabsf(wrap360(deg - (float)s * 45.0f + 180.0f) - 180.0f) > 17.0f) continue;
             if (d > (r - 2.0f) * (float)n[s] / (float)most) continue;
-            row[px] = paper_tone(0.85f - 0.65f * clampf((float)kmh[s] / (float)n[s] / 50.0f, 0, 1), px, py);
+            row[px] = wx_tone(0.85f - 0.65f * clampf((float)kmh[s] / (float)n[s] / 50.0f, 0, 1), px, py);
         }
     }
     float xa, ya, xb, yb;
     for (int i = 0; i < 48; i++) {                     // the compass: its ring, a tick each eighth, N
         const float a0 = (float)i * 7.5f * D2R, a1 = (float)(i + 1) * 7.5f * D2R;
-        paper_line(cv, cx + sinf(a0) * r, cy - cosf(a0) * r, cx + sinf(a1) * r, cy - cosf(a1) * r, 1.1f, P_BLACK);
+        paper_line(cv, cx + sinf(a0) * r, cy - cosf(a0) * r, cx + sinf(a1) * r, cy - cosf(a1) * r, 1.1f, K_INK);
     }
     for (int s = 0; s < 8; s++) {
         const float a = (float)s * 45.0f * D2R, l = s % 2 ? 3.0f : 5.0f;
-        paper_line(cv, cx + sinf(a) * r, cy - cosf(a) * r, cx + sinf(a) * (r + l), cy - cosf(a) * (r + l), 1.2f, P_BLACK);
+        paper_line(cv, cx + sinf(a) * r, cy - cosf(a) * r, cx + sinf(a) * (r + l), cy - cosf(a) * (r + l), 1.2f, K_INK);
     }
-    font_text(cv, &FONT_PAPER_S, (int)cx - font_width(&FONT_PAPER_S, "N") / 2, (int)(cy - r) - 15, "N", P_BLACK, 255);
+    font_text(cv, &FONT_PAPER_S, (int)cx - font_width(&FONT_PAPER_S, "N") / 2, (int)(cy - r) - 15, "N", K_INK, 255);
     // now: a needle from where it comes, through the middle, to where it goes
     const float a = ((float)w->wind_from + 180.0f) * D2R, dx = sinf(a), dy = -cosf(a);
     for (int pass = 0; pass < 2; pass++) {
         const float h0 = pass ? 1.8f : 3.2f, h1 = pass ? 0.3f : 1.4f, rt = r - (pass ? 4.0f : 2.5f);
         xa = cx - dx * (r - 6.0f), ya = cy - dy * (r - 6.0f), xb = cx + dx * rt, yb = cy + dy * rt;
         const float q[8] = { xa - dy * h0, ya + dx * h0, xb - dy * h1, yb + dx * h1, xb + dy * h1, yb - dx * h1, xa + dy * h0, ya - dx * h0 };
-        gfx_poly(cv, q, 4, pass ? P_BLACK : P_WHITE, 255);
+        gfx_poly(cv, q, 4, pass ? K_INK : K_PAPER, 255);
     }
-    gfx_disc(cv, cx, cy, 2.6f, P_BLACK, 255);
+    paper_disc(cv, cx, cy, 2.6f, K_INK);
     char v[32];
     if (w->gust_kmh >= w->wind_kmh + 10) snprintf(v, sizeof v, "%s %d-%d %s", compass8((float)w->wind_from), w_of(w->wind_kmh), w_of(w->gust_kmh), WIND_NAME[W.wu]);
     else snprintf(v, sizeof v, "%s %d %s", compass8((float)w->wind_from), w_of(w->wind_kmh), WIND_NAME[W.wu]);
-    font_text(cv, &FONT_PAPER_S, x1 - font_width(&FONT_PAPER_S, v), GFX_H - 11, v, P_BLACK, 255);
+    if (!under) {                                      // paper: at the glass's foot against the right
+        font_text(cv, &FONT_PAPER_S, x1 - font_width(&FONT_PAPER_S, v), GFX_H - 11, v, K_INK, 255);
+        return;
+    }
+    char *sp = strrchr(v, ' ');                        // under it, the unit on a line of its own, both in its middle
+    if (sp) *sp = 0;
+    font_text(cv, &FONT_PAPER_S, (int)cx - font_width(&FONT_PAPER_S, v) / 2, (int)(cy + r) + 6, v, K_INK, 255);
+    if (sp) font_text(cv, &FONT_PAPER_S, (int)cx - font_width(&FONT_PAPER_S, sp + 1) / 2, (int)(cy + r) + 17, sp + 1, K_DARK, 255);
+}
+
+static void dl_rose(canvas_t *cv, const weather_t *w, int x1)
+{
+    dl_rose_at(cv, w, (float)x1 - 25.0f, (float)GFX_H - 38.0f, x1, 0);
 }
 
 /* the column right of the dial, its left edge the circle's: the sky in words, the sun, the air; the barometer; the
  * next days; the wind's rose in the corner */
+static void dl_days(canvas_t *cv, const weather_t *w, int y, int last);
+
 static void dl_column(ui_t *u, canvas_t *cv, const weather_t *w)
 {
     const wtab_t *T = W.t;
@@ -3203,7 +3525,7 @@ static void dl_column(ui_t *u, canvas_t *cv, const weather_t *w)
     const char *kind = KIND_NAME[w->now_kind < WX_KINDS ? w->now_kind : 0];
     int x0 = dl_free_x(y, y + 13);
     const int kind_m = font_width(&FONT_PAPER_M, kind) <= x1 - x0;
-    if (gfx_touches(cv, y, y + 14)) font_text_clip(cv, kind_m ? &FONT_PAPER_M : &FONT_PAPER_S, x0, kind_m ? y : y + 2, kind, P_BLACK, 255, x1 - x0);
+    if (gfx_touches(cv, y, y + 14)) font_text_clip(cv, kind_m ? &FONT_PAPER_M : &FONT_PAPER_S, x0, kind_m ? y : y + 2, kind, K_INK, 255, x1 - x0);
     y += 16;                                           // the wind is the rose's, in the corner (dl_rose)
     y = dl_barometer(cv, w, T, x1, y) + 2;             // high, where the dial leaves its widest row room, the "18" below it
     if (w->gamma_nsv) {                                // the short row first: it goes by the "18", where a row is shortest
@@ -3223,34 +3545,42 @@ static void dl_column(ui_t *u, canvas_t *cv, const weather_t *w)
     snprintf(v, sizeof v, "%d%%", w->humidity);
     dl_row(cv, y, x1, "HUMIDITY", v);
     y += 20;
-    /* the next days, each row from where the circle lets it start, its numbers right after its day and its sky: the
-     * rows step out with the circle ("температуры так же лесенкой пододвинуться за датой и облачками") */
-    const int step = clampi((GFX_H - 26 - y) / (WX_DAYS - 1), 19, 24);   // down to the foot of the glass, not bunched under the graph
+    dl_days(cv, w, y, GFX_H - 26);
+}
+
+/* the next days, each row from where the circle lets it start, its numbers right after its day and its sky: the rows
+ * step out with the circle ("температуры так же лесенкой пододвинуться за датой и облачками"). from y down to the
+ * last row's top at most, not bunched under what is over them */
+static void dl_days(canvas_t *cv, const weather_t *w, int y, int last)
+{
+    char v[12];
+    const int step = clampi((last - y) / (WX_DAYS - 1), 19, 24);
     for (int j = 0; j < WX_DAYS; j++, y += step) {
         const wx_day_t *dd = &w->day[j];
         if (!gfx_touches(cv, y - 2, y + 16)) continue;
-        x0 = dl_free_x(y, y + 15);
+        const int x0 = dl_free_x(y, y + 15);
         const char *name = WDAY[dd->wday % 7];
-        font_text(cv, &FONT_PAPER_S, x0, y + 3, name, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_S, x0, y + 3, name, K_INK, 255);
         int x = x0 + font_width(&FONT_PAPER_S, name) + 4;
-        paper_pic(cv, dd->kind, 0, (float)x + 9.0f, (float)y + 8.0f, 17.0f, P_WHITE);
+        paper_pic(cv, dd->kind, 0, (float)x + 9.0f, (float)y + 8.0f, 17.0f, K_PAPER);
         x += 23;
         fmt_t(v, sizeof v, dd->hi10);
-        x += font_text(cv, &FONT_PAPER_M, x, y + 1, v, P_BLACK, 255) + 6;
+        x += font_text(cv, &FONT_PAPER_M, x, y + 1, v, K_INK, 255) + 6;
         fmt_t(v, sizeof v, dd->lo10);
-        font_text(cv, &FONT_PAPER_M, x, y + 1, v, P_DARK, 255);
+        font_text(cv, &FONT_PAPER_M, x, y + 1, v, K_DARK, 255);
     }
 }
-
-static void weather_sheet(ui_t *u, canvas_t *cv, const weather_t *w)
+/* the dial itself and its corners, for paper and glass alike: where, how fresh, the loops' key in the corner the
+ * dial leaves */
+static void dl_dial(ui_t *u, canvas_t *cv, const weather_t *w)
 {
     const wtab_t *T = W.t;
     char v[24];
-    if (gfx_touches(cv, 0, 20)) font_text_clip(cv, &FONT_PAPER_M, 4, 3, u->cfg.place[0] ? u->cfg.place : "HOME", P_BLACK, 255, 120);
+    if (gfx_touches(cv, 0, 20)) font_text_clip(cv, &FONT_PAPER_M, 4, 3, u->cfg.place[0] ? u->cfg.place : "HOME", K_INK, 255, 120);
     if (gfx_touches(cv, GFX_H - 14, GFX_H)) {
         const float h = local_hours(w, w->updated ? w->updated : w->at);
         snprintf(v, sizeof v, "OPEN-METEO %02d:%02d", (int)h, (int)(fmodf(h, 1.0f) * 60.0f));   // its licence asks for the name
-        font_text(cv, &FONT_PAPER_S, 4, GFX_H - 11, v, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_S, 4, GFX_H - 11, v, K_INK, 255);
     }
     dl_ground(cv, w, T);
     dl_suns(cv, w, T);
@@ -3261,21 +3591,27 @@ static void weather_sheet(ui_t *u, canvas_t *cv, const weather_t *w)
     dl_marks(u, cv, w, T);
     dl_rim(cv, w, T);
     dl_core(cv, w);
-    dl_column(u, cv, w);
-    dl_rose(cv, w, GFX_W - PAPER_KEYS_W - 5);
-    if (gfx_touches(cv, 262, 290)) {                   // the loops' key, in the corner the dial leaves
-        gfx_line(cv, 4.0f, 270.0f, 16.0f, 270.0f, 2.4f, P_BLACK, 255);
-        font_text(cv, &FONT_PAPER_S, 21, 265, "NEXT 24 H", P_BLACK, 255);
-        for (int x = 4; x < 16; x += 4) gfx_line(cv, (float)x, 282.0f, (float)x + 2.0f, 282.0f, 1.2f, P_BLACK, 255);
-        font_text(cv, &FONT_PAPER_S, 21, 277, "YESTERDAY", P_BLACK, 255);
+    if (gfx_touches(cv, GFX_H - 38, GFX_H - 10)) {     // the loops' key, in the corner the dial leaves
+        paper_line(cv, 4.0f, (float)GFX_H - 30.0f, 16.0f, (float)GFX_H - 30.0f, 2.4f, K_INK);
+        font_text(cv, &FONT_PAPER_S, 21, GFX_H - 35, "NEXT 24 H", K_INK, 255);
+        for (int x = 4; x < 16; x += 4) paper_line(cv, (float)x, (float)GFX_H - 18.0f, (float)x + 2.0f, (float)GFX_H - 18.0f, 1.2f, K_INK);
+        font_text(cv, &FONT_PAPER_S, 21, GFX_H - 23, "YESTERDAY", K_INK, 255);
     }
 }
+
+static void weather_sheet(ui_t *u, canvas_t *cv, const weather_t *w)
+{
+    dl_dial(u, cv, w);
+    dl_column(u, cv, w);
+    dl_rose(cv, w, GFX_W - PAPER_KEYS_W - 5);
+}
+
 
 void weather_paper(ui_t *u, canvas_t *cv)
 {
     const weather_t *w = u->wx;
     char v[32];
-    gfx_fill(cv, 0, 0, GFX_W, GFX_H, P_WHITE, 255);
+    gfx_fill(cv, 0, 0, GFX_W, GFX_H, K_PAPER, 255);
     if (w && w->at && weather_sheet_up(u) && W.room && W.t && W.t->planned) {       // the printed dial
         weather_sheet(u, cv, w);
         return;
@@ -3291,31 +3627,31 @@ void weather_paper(ui_t *u, canvas_t *cv)
             clock_now(u, w, v, sizeof v);
             room = PWX_X1 - 18 - font_width(&FONT_PAPER_XL, v);
         }
-        font_text_clip(cv, &FONT_PAPER_M, 6, 4, u->cfg.place[0] ? u->cfg.place : "HOME", P_BLACK, 255, room);
+        font_text_clip(cv, &FONT_PAPER_M, 6, 4, u->cfg.place[0] ? u->cfg.place : "HOME", K_INK, 255, room);
         if (w && w->at) {
             const float h = local_hours(w, w->updated ? w->updated : w->at);
             snprintf(v, sizeof v, "OPEN-METEO %02d:%02d", (int)h, (int)(fmodf(h, 1.0f) * 60.0f));   // its licence asks for the name
-            font_text(cv, &FONT_PAPER_S, 6, 21, v, P_DARK, 255);
+            font_text(cv, &FONT_PAPER_S, 6, 21, v, K_DARK, 255);
         }
     }
     if (!w || !w->at) {                                // no forecast yet: why
         if (gfx_touches(cv, 110, 160)) {
-            font_text(cv, &FONT_PAPER_L, 6, 110, u->net.wifi ? "ASKING FOR" : "NO WIFI:", P_BLACK, 255);
-            font_text(cv, &FONT_PAPER_L, 6, 134, u->net.wifi ? "THE FORECAST" : "NO FORECAST", P_BLACK, 255);
+            font_text(cv, &FONT_PAPER_L, 6, 110, u->net.wifi ? "ASKING FOR" : "NO WIFI:", K_INK, 255);
+            font_text(cv, &FONT_PAPER_L, 6, 134, u->net.wifi ? "THE FORECAST" : "NO FORECAST", K_INK, 255);
         }
         return;
     }
     if (gfx_touches(cv, 36, 128)) {                    // now: the sky, how warm, in words
         const uint32_t utc = u->net.utc ? u->net.utc : w->at;
-        paper_pic(cv, w->now_kind, night_at(u, utc), 44.0f, 78.0f, 74.0f, P_WHITE);
+        paper_pic(cv, w->now_kind, night_at(u, utc), 44.0f, 78.0f, 74.0f, K_PAPER);
         snprintf(v, sizeof v, "%d", (int)lroundf(t_of(w->now_t10)));
-        font_text(cv, &FONT_PAPER_XXL, 90, 40, v, P_BLACK, 255);
-        gfx_ring(cv, 90.0f + (float)font_width(&FONT_PAPER_XXL, v) + 9.0f, 52.0f, 5.5f, 3.0f, P_BLACK, 255);   // the big font has digits only
-        font_text_clip(cv, &FONT_PAPER_M, 90, 96, KIND_NAME[w->now_kind < WX_KINDS ? w->now_kind : 0], P_BLACK, 255, PWX_X1 - 90);
+        font_text(cv, &FONT_PAPER_XXL, 90, 40, v, K_INK, 255);
+        paper_ring(cv, 90.0f + (float)font_width(&FONT_PAPER_XXL, v) + 9.0f, 52.0f, 5.5f, 3.0f, K_INK);   // the big font has digits only
+        font_text_clip(cv, &FONT_PAPER_M, 90, 96, KIND_NAME[w->now_kind < WX_KINDS ? w->now_kind : 0], K_INK, 255, PWX_X1 - 90);
         char t[12];
         fmt_t(t, sizeof t, w->feels10);
         snprintf(v, sizeof v, "FEELS LIKE %s", t);
-        font_text(cv, &FONT_PAPER_S, 90, 113, v, P_DARK, 255);
+        font_text(cv, &FONT_PAPER_S, 90, 113, v, K_DARK, 255);
     }
     snprintf(v, sizeof v, "%d", (int)lroundf(t_of(w->now_t10)));
     pwx_clock(u, cv, w, 90 + font_width(&FONT_PAPER_XXL, v) + 28);   // after the temperature and its degree

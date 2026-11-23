@@ -45,7 +45,15 @@ static uint32_t s_map_gen;                             /* and its map: 0 none, e
 
 static int overlaps(pbox_t a, pbox_t b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
 
-int paper_shown(const ui_t *u) { return (u->view == VIEW_MAIN && u->cfg.look == LOOK_CLASSIC) || weather_paper_page(u); }
+int paper_shown(const ui_t *u)
+{
+    return (u->view == VIEW_MAIN && (u->cfg.look == LOOK_CLASSIC || u->cfg.look == LOOK_RADAR)) || weather_paper_page(u);
+}
+
+// the middle the planes are placed round: the radar's scope beside its column (ui_scope.c), else the sheet's
+static float paper_cx(const ui_t *u) { return u->cfg.look == LOOK_RADAR ? (float)view_cx(u) : GFX_W / 2.0f; }
+static int rd_free_x(const ui_t *u, int y0, int y1);   /* the radar's column: where its words may start */
+static float alt_shadow(const plane_t *p);             /* the radar's plane's shadow: how far off it falls */
 
 static const char *plane_name(const plane_t *p) { return p->flight[0] ? p->flight : p->reg[0] ? p->reg : "------"; }
 static const char *home_name(const ui_t *u) { return u->net.demo ? "DEMO SKY" : u->cfg.place[0] ? u->cfg.place : "HOME"; }
@@ -103,16 +111,15 @@ static const char *tab_words(const ui_t *u, int t, const char **held)
 {
     const int picked = sel_plane(u) != NULL;
     *held = NULL;
-    if (u->cfg.look == LOOK_WEATHER && t != TAB_MENU) {   // the weather: the dial turns its pages, nothing to let go of
+    if (t == TAB_EXIT) return picked ? "LET GO" : LOOK_NAME[ui_look_before(u->cfg.look)];   // else the look before
+    if (u->cfg.look == LOOK_WEATHER && t != TAB_MENU) {   // the weather: the dial turns its pages
         if (t == TAB_UP) return WX_PAGE_NAME[(u->wx_page + WX_PAGES - 1) % WX_PAGES];
         return t == TAB_DOWN ? WX_PAGE_NAME[(u->wx_page + 1) % WX_PAGES] : NULL;
     }
     switch (t) {
     case TAB_MENU:
         *held = "HOLD: ABOUT";
-        return LOOK_NAME[(u->cfg.look + 1) % LOOKS];
-    case TAB_EXIT:
-        return picked ? "LET GO" : NULL;
+        return LOOK_NAME[ui_look_after(u->cfg.look)];
     case TAB_UP:
         return range_can_step(u, -1) ? "NEARER" : NULL;
     case TAB_OK:
@@ -123,22 +130,36 @@ static const char *tab_words(const ui_t *u, int t, const char **held)
     }
 }
 
-// was this third's key the one pressed, its press not yet taken
+// the third a key is in
+static int key_zone(int k)
+{
+    if (k == KEY_MENU || k == KEY_MENU_LONG) return ZONE_MENU;
+    return k == KEY_BACK ? ZONE_EXIT : ZONE_DIAL;
+}
+
+// was this third's key the one pressed, its press not yet taken; or does this third gather what is asked for
 static int zone_pressed(const ui_t *u, int z)
 {
-    if (!u->key_at) return 0;
-    const int k = u->key_last;
-    if (z == ZONE_MENU) return k == KEY_MENU || k == KEY_MENU_LONG;
-    if (z == ZONE_EXIT) return k == KEY_BACK;
-    return k == KEY_UP || k == KEY_DOWN || k == KEY_OK || k == KEY_OK_LONG;
+    if (u->pend_kind) return key_zone(u->pend_key) == z;
+    return u->key_at && key_zone(u->key_last) == z;
+}
+
+/* what the gathered presses ask for, said in their third: the range, the page, the look */
+static const char *pend_words(const ui_t *u, char *b, int sz)
+{
+    if (u->pend_kind == PEND_RANGE) {
+        fmt_dist(u, u->pend_range, b, sz);
+        return b;
+    }
+    if (u->pend_kind == PEND_PAGE) return WX_PAGE_NAME[u->pend_page % WX_PAGES];
+    return LOOK_NAME[u->pend_look % LOOKS];
 }
 
 static pbox_t ring_label(const ui_t *u, int ring, const char *t)
 {
     const float r = ring ? (float)PR : PR * 0.5f, a = 45.0f * D2R;
     const int w = font_width(&FONT_PAPER_S, t) + 6;
-    const int cx = GFX_W / 2 + (int)lroundf(r * sinf(a)), cy = GFX_H / 2 - (int)lroundf(r * cosf(a));
-    (void)u;
+    const int cx = (int)lroundf(paper_cx(u) + r * sinf(a)), cy = GFX_H / 2 - (int)lroundf(r * cosf(a));
     return (pbox_t){ cx - w / 2, cy - 7, w, 14 };
 }
 
@@ -167,8 +188,9 @@ static uint32_t s_wait_at;                             /* when the screen change
 
 static void screen_news(const ui_t *u)
 {
-    const uint32_t screen = (uint32_t)paper_style << 24 | (uint32_t)u->view << 16 | (uint32_t)u->cfg.look << 8 |
-                            (u->cfg.look == LOOK_WEATHER ? u->wx_page : 0u);   // the sheet's tones changed: printed anew too
+    const uint32_t screen = ((uint32_t)paper_style << 24 | (uint32_t)u->view << 16 | (uint32_t)u->cfg.look << 8 |
+                             (u->cfg.look == LOOK_WEATHER ? u->wx_page : 0u)) ^   // the sheet's tones changed: printed anew too
+                            (uint32_t)lroundf(u->cfg.range * 10.0f) * 2654435761u;   // another range: waits for its map as a look does
     const int wx = u->view == VIEW_MAIN && u->cfg.look == LOOK_WEATHER;
     const int wants = wx || (u->cfg.map && u->view == VIEW_MAIN);
     const map_t *m = wants && !wx ? sheet_map(u) : NULL;   // one made for a screen that does not show it is no news
@@ -185,6 +207,7 @@ static void screen_news(const ui_t *u)
         paper_new_sheet = 1;
         s_map_gen = gen;
     }
+    paper_hold = s_wait_at != 0;                       // waiting for its map: the old screen stays on the glass
 }
 
 void paper_frame(ui_t *u)
@@ -195,23 +218,32 @@ void paper_frame(ui_t *u)
     if (!shown || u->cfg.look == LOOK_WEATHER) return;  // the weather has no labels to place
 
     // the labels: the picked one first, then the emergencies, then the nearest, each where it covers nothing
-    static pbox_t used[SKY_MAX * 2 + 16];
+    static pbox_t used[SKY_MAX * 3 + 16];
     int nu = 0;
-    used[nu++] = home_card(u);
-    used[nu++] = osm_chip();
-    if (sel_plane(u)) used[nu++] = pick_card();
+    const int radar = u->cfg.look == LOOK_RADAR;
+    if (radar) {                                       // the scope's corners: the place, the feed and the licence
+        used[nu++] = (pbox_t){ 0, 0, 110, 20 };
+        used[nu++] = (pbox_t){ 0, GFX_H - 26, 124, 26 };
+    } else {
+        used[nu++] = home_card(u);
+        used[nu++] = osm_chip();
+        if (sel_plane(u)) used[nu++] = pick_card();
+    }
     used[nu++] = (pbox_t){ KEYS_RIGHT ? GFX_W - KS_W - 3 : 0, 0, KS_W + 3, GFX_H };   // the keys' strip
     for (int r = 0; r < 2; r++) {
         char b[16];
         ring_text(u, r, b, sizeof b);
         used[nu++] = ring_label(u, r, b);
     }
-    used[nu++] = (pbox_t){ GFX_W / 2 - 8, GFX_H / 2 - 8, 16, 16 };   // home
+    used[nu++] = (pbox_t){ (int)paper_cx(u) - 8, GFX_H / 2 - 8, 16, 16 };   // home
     const sky_t *s = &u->snap;
     for (int i = 0; i < s->n; i++) {
         s_lab[i].w = 0;
         const spot_t *sp = &u->spot[i];
-        if (sp->vis == 1) used[nu++] = (pbox_t){ sp->x - 7, sp->y - 7, 14, 14 };
+        if (sp->vis != 1) continue;
+        used[nu++] = (pbox_t){ sp->x - 7, sp->y - 7, 14, 14 };
+        const int sh = radar ? (int)alt_shadow(&s->p[i]) : 0;   // the radar's shadow: no label over it, its own neither
+        if (sh) used[nu++] = (pbox_t){ sp->x - 7 + sh, sp->y - 7 + sh, 14, 14 };
     }
     int order[SKY_MAX + 1], no = 0, sel = -1;
     for (int i = 0; i < s->n; i++) if (s->p[i].icao == u->sel) sel = i;
@@ -237,6 +269,7 @@ void paper_frame(ui_t *u)
         for (int c = 0; c < 6; c++) {
             pbox_t b = { sp->x + cand[c][0], sp->y + cand[c][1], w, LAB_H };
             if (b.x < 2 || b.y < 2 || b.x + b.w > GFX_W - 2 || b.y + b.h > GFX_H - 2) continue;
+            if (radar && b.x + b.w > rd_free_x(u, b.y, b.y + b.h) - 8) continue;   // the radar's column is the list's
             int clash = 0;
             for (int q = 0; q < nu && !clash; q++) {
                 const pbox_t *o = &used[q];
@@ -380,11 +413,16 @@ static void sheet(ui_t *u, canvas_t *cv)
 // the range rings, dashed, a dash a 6 degrees
 static void rings(ui_t *u, canvas_t *cv)
 {
-    const float cx = GFX_W / 2.0f, cy = GFX_H / 2.0f;
+    const float cx = paper_cx(u), cy = GFX_H / 2.0f;
     for (int r = 0; r < 2; r++) {
         const float rad = r ? (float)PR : PR * 0.5f;
         if (!gfx_touches(cv, (int)(cy - rad - 2), (int)(cy + rad + 2))) continue;
-        for (int a = 0; a < 360; a += 6) gfx_arc(cv, cx, cy, rad, (float)a, a + 3.0f, 1.2f, P_BLACK, 255);
+        for (int a = 0; a < 360; a += 6) {             // a dash of 3 degrees in two pieces: soft where the canvas is
+            for (int h = 0; h < 2; h++) {
+                const float a0 = ((float)a + 1.5f * (float)h) * D2R, a1 = a0 + 1.5f * D2R;
+                paper_line(cv, cx + rad * sinf(a0), cy - rad * cosf(a0), cx + rad * sinf(a1), cy - rad * cosf(a1), 1.2f, P_BLACK);
+            }
+        }
     }
     for (int r = 0; r < 2; r++) {
         char b[16];
@@ -397,18 +435,47 @@ static void rings(ui_t *u, canvas_t *cv)
 }
 
 // home: a circle with a dot in a white ground, the chart's sign for a place you stand on
-static void home(canvas_t *cv)
+static void home(const ui_t *u, canvas_t *cv)
 {
-    const float cx = GFX_W / 2.0f, cy = GFX_H / 2.0f;
+    const float cx = paper_cx(u), cy = GFX_H / 2.0f;
     if (!gfx_touches(cv, (int)cy - 9, (int)cy + 9)) return;
     gfx_disc(cv, cx, cy, 8.0f, P_WHITE, 255);
     gfx_ring(cv, cx, cy, 5.5f, 1.8f, P_BLACK, 255);
     gfx_disc(cv, cx, cy, 1.9f, P_BLACK, 255);
 }
 
+/* the height in halftones, the radar's ("полутона на радаре"): each plane casts a shadow, a halftone of itself
+ * down and to the right of it, as far off as it is high: on the ground none, at 40 000 ft ten pixels. black and
+ * white dots only: a plane moves, it is drawn on top by the partial refresh, which has no greys. (its inside
+ * filled by the height first: the wings are two pixels, the dots read as a broken plane.) not known: as high.
+ * the list and the key say it in the colour screens' four classes (GND, under 10 000 ft, under 25 000, higher) */
+static int alt_class(const plane_t *p)
+{
+    if (p->ground) return 0;
+    if (!p->has_alt) return 3;
+    return p->alt < 10000 ? 1 : p->alt < 25000 ? 2 : 3;
+}
+static float alt_shadow(const plane_t *p)              // the shadow's offset, pixels down and right
+{
+    if (p->ground) return 0.0f;
+    return 2.0f + 8.0f * clampf(p->has_alt ? (float)p->alt / 40000.0f : 0.6f, 0, 1);
+}
+#define P_MARK RGB(0, 0, 7)                            /* a shadow, marked to be turned into its dots */
+
+// a class's swatch, for the list and the key: a square and its shadow behind it, as far off as the class is high
+static void alt_swatch(canvas_t *cv, int x, int y, int c, uint32_t ink, uint32_t paper)
+{
+    for (int yy = y + c; yy < y + c + 7; yy++) {
+        uint32_t *row = gfx_row(cv, yy);
+        for (int xx = x + c; row && xx < x + c + 7; xx++) row[xx] = (xx + yy) & 1 ? ink : paper;
+    }
+    gfx_fill(cv, x, y, 7, 7, ink, 255);
+}
+
 static void planes(ui_t *u, canvas_t *cv)
 {
     const sky_t *s = &u->snap;
+    const int radar = u->cfg.look == LOOK_RADAR;
     const float size = (float)GFX_H / 240.0f * 1.1f;   // a tenth over the colour screens': no glow to find it by
     for (int q = u->n_order - 1; q >= 0; q--) {         // farthest first, the nearest on top
         const int i = u->order[q];
@@ -417,7 +484,7 @@ static void planes(ui_t *u, canvas_t *cv)
         if (!sp->vis) continue;
         if (sp->vis == 2) {                             // off the sheet: a dart at its edge, pointing out
             if (!gfx_touches(cv, sp->y - 8, sp->y + 8)) continue;
-            const float a = atan2f((float)(sp->x - GFX_W / 2), (float)(GFX_H / 2 - sp->y));
+            const float a = atan2f((float)sp->x - paper_cx(u), (float)(GFX_H / 2 - sp->y));
             const float ox = sinf(a), oy = -cosf(a), px = -oy, py = ox;
             gfx_tri(cv, sp->x + ox * 5, sp->y + oy * 5, sp->x - ox * 4 + px * 4, sp->y - oy * 4 + py * 4,
                     sp->x - ox * 4 - px * 4, sp->y - oy * 4 - py * 4, P_BLACK, 255);
@@ -430,7 +497,7 @@ static void planes(ui_t *u, canvas_t *cv)
                 gfx_disc(cv, sp->tx8[t] * 0.125f, sp->ty8[t] * 0.125f, 0.9f + 0.5f * (float)t / (float)sp->tn, P_BLACK, 255);
             }
         }
-        const float head = plane_track(s, p, u->now), a = head * D2R;
+        const float head = wrap360(plane_track(s, p, u->now) - (float)view_up(u)), a = head * D2R;   // the scope may be turned
         /* and which way and how fast, as a controller's scope draws it: a minute's flight at 50 km, the
          * same length at every range (ui_scope.c's VECTOR_PX). a minute at 10 km crossed the sheet */
         if (p->has_spd && !p->ground && p->gs > 30.0f) {
@@ -439,9 +506,22 @@ static void planes(ui_t *u, canvas_t *cv)
             if (gfx_touches(cv, (int)fminf((float)sp->y, by) - 2, (int)fmaxf((float)sp->y, by) + 2))
                 gfx_line(cv, (float)sp->x, (float)sp->y, bx, by, 1.2f, P_BLACK, 255);
         }
-        if (!gfx_touches(cv, sp->y - 20, sp->y + 20)) continue;
+        const float off = radar ? alt_shadow(p) : 0.0f;
+        if (!gfx_touches(cv, sp->y - 20, sp->y + 20 + (int)off)) continue;
         const float sz = p->ground ? size * 0.75f : size;
         silhouette(cv, p->kind, sp->x, sp->y, head, sz * 1.5f, P_WHITE, 255);   // a white ground round it
+        if (off > 0.0f) {                              // its shadow on paper of its own (the map's halftones hid it), its dots a chequer
+            const float sx = (float)sp->x + off, sy = (float)sp->y + off;
+            silhouette(cv, p->kind, sx, sy, head, sz * 1.5f, P_WHITE, 255);
+            silhouette(cv, p->kind, sx, sy, head, sz * 1.15f, P_MARK, 255);
+            const int r = (int)(sz * 16.0f) + 2;
+            for (int yy = (int)sy - r; yy <= (int)sy + r; yy++) {
+                uint32_t *row = gfx_row(cv, yy);
+                for (int xx = (int)sx - r; row && xx <= (int)sx + r; xx++) {
+                    if (xx >= 0 && xx < GFX_PW && row[xx] == P_MARK) row[xx] = (xx + yy) & 1 ? P_BLACK : P_WHITE;
+                }
+            }
+        }
         silhouette(cv, p->kind, sp->x, sp->y, head, sz, P_BLACK, 255);
         if (lost(u, p)) silhouette(cv, p->kind, sp->x, sp->y, head, sz * 0.55f, P_WHITE, 255);   // a guess: hollow
         if (p->icao == u->sel) gfx_ring(cv, sp->x, sp->y, 14.0f * size, 2.0f, P_BLACK, 255);
@@ -539,6 +619,172 @@ static void osm(ui_t *u, canvas_t *cv)               // whose map it is: its lic
     font_text(cv, &FONT_PAPER_S, b.x + 4, b.y + 1, "\xC2\xA9 OpenStreetMap", P_BLACK, 255);
 }
 
+/* --- the RADAR look printed, the weather's dial's sister ("радар доработать под чернильный экран по уже
+ * выработанному стилю"): the scope a circle on the left where the radar's own is (ui_scope.c: view_cx, SCY,
+ * PR), so its planes stand where it puts them. inside it the map faint: the water light grey, the towns a light
+ * hatch, the main roads dotted, the motorways and the names dark grey, the rest paper; the range's half dashed,
+ * its edge solid; round it a tick every 10 degrees, the bearing every 30, N E S W bold, turned as the scope is.
+ * right of it the column, its left edge the circle's: how many in range at the top, then the nearest planes, a
+ * name and under it the height and how far, the picked one inverted. the scope is printed whole with soft
+ * edges; the planes, their labels and the column move: black and white --- */
+
+#define RD_OUT (PR + 26)                               /* the scope with its bearings round it */
+
+/* a bearing's words round the rim (every 30 degrees): v them, f their letters, the box their ink fills, just off
+ * the ticks whichever way it faces, turned as the scope is */
+static void rd_bearing(const ui_t *u, int b, char *v, const font_t **f, int *x0, int *y0, int *x1, int *y1)
+{
+    const int card = b % 90 == 0;
+    if (card) snprintf(v, 4, "%c", "NESW"[b / 90]);
+    else snprintf(v, 4, "%03d", b);
+    *f = card ? &FONT_PAPER_M : &FONT_PAPER_S;
+    const float a = wrap360((float)b - (float)view_up(u)) * D2R, sa = sinf(a), ca = cosf(a);
+    const int lw = font_width(*f, v), lh = card ? 9 : 7;   // the letters' ink, 2 under the line's top
+    const float r = (float)PR + 10.0f + fabsf(sa) * (float)lw * 0.5f + fabsf(ca) * (float)lh * 0.5f;
+    *x0 = (int)lroundf(paper_cx(u) + sa * r) - lw / 2;
+    *y0 = (int)lroundf((float)SCY - ca * r) - lh / 2;
+    *x1 = *x0 + lw;
+    *y1 = *y0 + lh;
+}
+
+// where words may start right of the scope for the rows y0 .. y1: past its ticks and its bearings' words
+static int rd_free_x(const ui_t *u, int y0, int y1)
+{
+    const float r = (float)PR + 8.0f, cx = paper_cx(u);
+    float x = cx;
+    for (int y = y0; y <= y1; y++) {
+        const float dy = (float)y + 0.5f - (float)SCY;
+        if (fabsf(dy) < r) x = fmaxf(x, cx + sqrtf(r * r - dy * dy));
+    }
+    char v[4];
+    const font_t *f;
+    for (int b = 0; b < 360; b += 30) {
+        int bx0, by0, bx1, by1;
+        rd_bearing(u, b, v, &f, &bx0, &by0, &bx1, &by1);
+        if (by0 <= y1 && y0 <= by1 && (float)bx1 > cx) x = fmaxf(x, (float)bx1);
+    }
+    return (int)ceilf(x) + 6;
+}
+
+/* the scope's paper: the CLASSIC's printed map ("у нас же уже есть карта обработанная под чернильницу"), its
+ * kinds and tones (sheet_kinds, area_kind, ink_at), inside the range, turned and scaled as the radar's disc
+ * (ui_scope.c disc_pass: on paper a texel a pixel). the patterns go by the glass's pixel, the areas by their
+ * neighbours on the map. round it, under the ticks, a light grey band: the glass's rim */
+static void rd_sheet(ui_t *u, canvas_t *cv)
+{
+    const map_t *m = sheet_map(u);
+    uint8_t kind[16];
+    const int cx = (int)paper_cx(u), near = range_km(&u->cfg) <= 10.0f;
+    const float c = cosf((float)view_up(u) * D2R), s = sinf((float)view_up(u) * D2R);
+    const int r_in = (PR + 1) * (PR + 1), r_out = (PR + 11) * (PR + 11);
+    if (m) sheet_kinds(u, kind);
+    for (int y = cv->y0; y < cv->y0 + cv->h; y++) {
+        uint32_t *row = gfx_row(cv, y);
+        const int dy = y - SCY;
+        for (int x = 0; x < GFX_PW; x++) {
+            const int dx = x - cx, d2 = dx * dx + dy * dy;
+            uint32_t ink = P_WHITE;
+            if (d2 > r_in && d2 <= r_out) {             // the rim's band: mid grey at the glass's edge fading out to paper
+                const float f = (sqrtf((float)d2) - (float)PR - 1.0f) / 10.0f;
+                ink = paper_tone(0.50f + 0.50f * f * f, x, y);   // dithered, eased: dark by the rim, a long fade, no steps
+            }
+            if (m && d2 <= PR * PR) {
+                const float right = (float)dx, up = (float)-dy;
+                const int mu = (int)floorf((float)m->w * 0.5f + right * c + up * s);
+                const int mv = (int)floorf((float)m->h * 0.5f - (up * c - right * s));
+                if (mu >= 0 && mu < m->w && mv >= 0 && mv < m->h) {
+                    const int k = map_at(m, mu, mv);
+                    const int area = k == M_WATER || k == M_URBAN || k == M_BUILDING || k == M_WOOD || k == M_GREEN;
+                    ink = ink_at(area ? area_kind(m, k, mu, mv, near) : k < 16 ? kind[k] : S_WHITE, x, y);
+                }
+            }
+            row[x] = ink;
+        }
+    }
+}
+
+// the range's edge, and round it the bearings: a tick every 10 degrees, every 30 longer and said, N E S W bold
+static void rd_rim(ui_t *u, canvas_t *cv)
+{
+    const float cx = paper_cx(u), cy = (float)SCY;
+    if (!gfx_touches(cv, SCY - RD_OUT - 2, SCY + RD_OUT + 2)) return;
+    paper_ring(cv, cx, cy, (float)PR, 1.4f, P_BLACK);
+    char v[4];
+    for (int b = 0; b < 360; b += 10) {
+        const float a = wrap360((float)b - (float)view_up(u)) * D2R, sa = sinf(a), ca = cosf(a), l = b % 30 ? 3.0f : 6.0f;
+        paper_line(cv, cx + sa * ((float)PR + 1.0f), cy - ca * ((float)PR + 1.0f), cx + sa * ((float)PR + 1.0f + l),
+                   cy - ca * ((float)PR + 1.0f + l), b % 30 ? 1.0f : 1.4f, P_BLACK);
+        if (b % 30) continue;
+        const font_t *f;
+        int x0, y0, x1, y1;
+        rd_bearing(u, b, v, &f, &x0, &y0, &x1, &y1);
+        font_text(cv, f, x0, y0 - 2, v, P_BLACK, 255);
+    }
+}
+
+// where, from where and how fresh: the place at the top left, the feed and the map's licence at the foot
+static void rd_corners(ui_t *u, canvas_t *cv)
+{
+    char b[48];
+    int bad;
+    if (gfx_touches(cv, 0, 20)) font_text_clip(cv, &FONT_PAPER_M, 4, 3, home_name(u), P_BLACK, 255, 100);
+    if (!gfx_touches(cv, GFX_H - 26, GFX_H)) return;
+    sky_status(u, b, sizeof b, &bad);
+    font_text(cv, &FONT_PAPER_S, 4, GFX_H - 11, b, P_BLACK, 255);
+    if (sheet_map(u)) font_text(cv, &FONT_PAPER_S, 4, GFX_H - 23, "\xC2\xA9 OpenStreetMap", P_BLACK, 255);
+}
+
+/* the column: how many in range, big, over the scope's top right; then the nearest, a name and under it the height
+ * left and how far right, as many as the glass holds, each row from where the circle lets it start. the picked one
+ * and an emergency inverted */
+static void rd_column(ui_t *u, canvas_t *cv)
+{
+    const int x1 = GFX_W - KS_W - 5;
+    const sky_t *s = &u->snap;
+    char b[32], alt[16], d[16];
+    int in = 0;
+    for (int k = 0; k < u->n_order; k++) in += u->spot[u->order[k]].vis == 1;
+    if (gfx_touches(cv, 0, 30)) {
+        snprintf(b, sizeof b, "%d", in);
+        const int x = (int)paper_cx(u) + 16;
+        const int w = font_text(cv, &FONT_PAPER_XL, x, -2, b, P_BLACK, 255);
+        font_text(cv, &FONT_PAPER_S, x + w + 6, 1, in == 1 ? "PLANE" : "PLANES", P_BLACK, 255);
+        fmt_dist(u, range_km(&u->cfg), d, sizeof d);
+        snprintf(b, sizeof b, "IN %s", d);
+        font_text(cv, &FONT_PAPER_S, x + w + 6, 13, b, P_BLACK, 255);
+    }
+    /* the height's key under it: the four classes' swatches, two to a row, the highest first. its words in the
+     * unit the person picked, as the colour screens' legend */
+    static const char *const FT[4] = { "GND", "<10K", "<25K", "HIGH" }, *const MT[4] = { "GND", "<3KM", "<7.6KM", "HIGH" };
+    const char *const *name = u->cfg.alt_unit == ALT_M ? MT : FT;
+    int y = 32;
+    if (gfx_touches(cv, y, y + 24)) {
+        for (int r = 0; r < 2; r++) {
+            int x = rd_free_x(u, y + r * 12, y + r * 12 + 9);
+            for (int k = 0; k < 2; k++) {
+                const int c = 3 - r * 2 - k;
+                alt_swatch(cv, x, y + r * 12 + 1, c, P_BLACK, P_WHITE);
+                x += 11 + font_text(cv, &FONT_PAPER_S, x + 11, y + r * 12, name[c], P_BLACK, 255) + 8;
+            }
+        }
+    }
+    y = 60;
+    for (int k = 0; k < u->n_order && y + 24 <= GFX_H; k++, y += 26) {
+        const plane_t *p = &s->p[u->order[k]];
+        if (!gfx_touches(cv, y - 2, y + 25)) continue;
+        const int x0 = rd_free_x(u, y, y + 23), inv = p->icao == u->sel || emergency(p);
+        const uint32_t fg = inv ? P_WHITE : P_BLACK, bg = inv ? P_BLACK : P_WHITE;
+        if (inv) gfx_fill(cv, x0 - 3, y - 2, x1 - x0 + 6, 27, P_BLACK, 255);
+        alt_swatch(cv, x0, y + 3, alt_class(p), fg, bg);   // its height's class, as its plane on the scope
+        font_text_clip(cv, &FONT_PAPER_M, x0 + 12, y, plane_name(p), fg, 255, x1 - x0 - 12);
+        if (emergency(p)) snprintf(alt, sizeof alt, "%04u", (unsigned)p->squawk);
+        else fmt_alt(u, p, alt, sizeof alt, 1);
+        fmt_dist(u, p->dist, d, sizeof d);
+        font_text(cv, &FONT_PAPER_S, x0, y + 14, alt, fg, 255);          // under the swatch: the narrow rows hold both
+        font_text(cv, &FONT_PAPER_S, x1 - font_width(&FONT_PAPER_S, d), y + 14, d, fg, 255);
+    }
+}
+
 /* --- the keys' strip: what each key does now --- */
 
 static void tab_sign(canvas_t *cv, int key, float x, float y, uint32_t c)
@@ -581,6 +827,15 @@ static void zone(ui_t *u, canvas_t *cv, int z)
     }
     const int soft = cv->soft;
     cv->soft = !pressed;                               // pressed it is drawn on top in black and white: crisp
+    if (pressed && u->pend_kind) {                     // gathering: what is asked for, big, till it is taken
+        char w[16];
+        const char *s = pend_words(u, w, sizeof w);
+        const font_t *f = font_width(&FONT_PAPER_M, s) <= b.h - 8 ? &FONT_PAPER_M : &FONT_PAPER_S;
+        const int len = font_width(f, s), lh = f == &FONT_PAPER_M ? 9 : 7;
+        font_text_down(cv, f, b.x + KS_W / 2 + lh / 2 + 2, b.y + (b.h - len) / 2, s, P_WHITE);
+        cv->soft = soft;
+        return;
+    }
     for (int i = 0; i < n; i++) {
         /* the lines' letters 7 high from 2 under their line's top, 9 apart: three in the strip, the middle one in its middle */
         const float mid = (float)b.x + (float)KS_W * 0.5f + ((float)(n - 1) * 0.5f - (float)i) * 9.0f;
@@ -617,9 +872,25 @@ void paper_draw(ui_t *u, canvas_t *cv)
         tabs(u, cv);
         return;
     }
+    if (u->cfg.look == LOOK_RADAR) {                   // the scope printed whole and soft, what moves over it crisp
+        const int soft = cv->soft;
+        cv->soft = 1;
+        rd_sheet(u, cv);
+        rings(u, cv);
+        rd_rim(u, cv);
+        rd_corners(u, cv);
+        cv->soft = soft;
+        home(u, cv);
+        planes(u, cv);
+        labels(u, cv);
+        rd_column(u, cv);
+        tabs(u, cv);
+        toast_card(u, cv);
+        return;
+    }
     sheet(u, cv);
     rings(u, cv);
-    home(cv);
+    home(u, cv);
     planes(u, cv);
     labels(u, cv);
     draw_home_card(u, cv);

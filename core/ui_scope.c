@@ -1061,7 +1061,7 @@ static void attribution(ui_t *u, canvas_t *cv)
  * here. the panel slides in over its right side from the three dots, or while a plane is picked:
  * the corners on the right move in with it --- */
 
-static void sky_status(const ui_t *u, char *buf, int sz, int *bad);
+void sky_status(const ui_t *u, char *buf, int sz, int *bad);
 
 static int sq_free(const ui_t *u, int x, int y, int w, int h)   // a box on the map, clear of its corners
 {
@@ -1427,7 +1427,7 @@ static int clock_text(const ui_t *u, char *buf, int sz)
 }
 
 // where the planes come from and how fresh they are, or what is wrong. bad: say it in the alarm colour
-static void sky_status(const ui_t *u, char *buf, int sz, int *bad)
+void sky_status(const ui_t *u, char *buf, int sz, int *bad)
 {
     if (u->net.demo) snprintf(buf, (size_t)sz, u->net.configured ? "NO WIFI" : "NO SETUP YET");
     else if (!u->net.wifi) snprintf(buf, (size_t)sz, u->snap.status == SKY_CONNECTING ? "CONNECTING" : "NO WIFI");

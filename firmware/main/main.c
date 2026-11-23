@@ -2732,7 +2732,19 @@ static void ui_task(void *arg)
             disp_full_next();
             paper_due(now, 1);
         }
-        if (key) {
+        /* the dial and MENU are gathered: each press says what it asks for in its third at once (drawn on top), and
+         * after PEND_MS with none it is taken, one print for them all; asked back to where it was, nothing
+         * ("200-150-100... на две секунды остановился, применяют") */
+        if (ui_pend_due(&s_ui, now)) {
+            const int changed = ui_pend_take(&s_ui, &cmd);
+            ESP_LOGI(TAG, "keys taken after the quiet: %s; look %d, range %g, page %d", changed ? "changed" : "as it was",
+                     s_ui.cfg.look, (double)s_ui.cfg.range, s_ui.wx_page);
+            paper_due(now, 1);
+        }
+        if (key && ui_key_pend(&s_ui, key, now, &cmd)) {
+            ESP_LOGI(TAG, "key %d gathered", key);
+            paper_due(now, 1);
+        } else if (key) {
             if (s_key_n < (int)sizeof s_key_wait) s_key_wait[s_key_n++] = (uint8_t)key;
             s_key_shown = 0;
             ui_key_wait(&s_ui, key);
@@ -3029,16 +3041,19 @@ static void ui_task(void *arg)
         frame_layered(now);
 #else
         ui_frame(&s_ui, now);
+        int hold = 0;                                  // paper: a new screen waits for its map, the old one stays
 #if DISP_EPD
         if (paper_new_sheet) {                         // a new map on the paper's sheet: printed whole, its greys too
             paper_new_sheet = 0;
             disp_full_next();
         }
+        hold = paper_hold;
+        if (hold) paper_due(now, 1);                   // looked at again in a quarter of a second
 #endif
 #if DISP_HELPER
         uint32_t waited = 0;                           // this frame's, for where the halves' strips are cut
 #endif
-        for (int sy0 = 0; sy0 < GFX_PH; sy0 += step) {
+        for (int sy0 = 0; !hold && sy0 < GFX_PH; sy0 += step) {
             canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0, 0, 0 };
 #if DISP_HELPER
             const int y1 = sy0 + DISP_STRIP, under = pair && y1 < GFX_PH;
@@ -3072,7 +3087,7 @@ static void ui_task(void *arg)
             s_send_us += now_us() - ts;
             touch_sample(0);
         }
-        disp_frame_end();
+        if (!hold) disp_frame_end();
 #if DISP_HELPER
         /* halves: the cut a row lower when this core waited for the second over 1.5 ms of the frame, a row
          * higher when it hardly waited at all, the second core may have then. a quarter of a strip at least */
@@ -3085,7 +3100,7 @@ static void ui_task(void *arg)
         busy_us += (uint32_t)(esp_timer_get_time() - t0);
         frames++;
 #if DISP_EPD
-        if (s_key_n) s_key_shown = 1;                  // the keys' thirds went out black: the next pass takes them
+        if (s_key_n && !hold) s_key_shown = 1;       // the keys' thirds went out black: the next pass takes them
 #endif
         /* the weather's warnings: one that came or got worse this frame (ui_frame worked them out) lights the
          * LED, which stays lit as SET's HOW LONG says; "while it lasts" is while any is up */

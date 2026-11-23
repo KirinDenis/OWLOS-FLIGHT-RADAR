@@ -138,6 +138,7 @@ int map_alloc(map_t *m, int w, int h, int disc)
         return 1;
     }
     map_free(m);
+    if (w & 7) return 0;                             // a row is whole words of 8 texels: the last few would go past it
     const int words = w / 8;
     for (int v0 = 0; v0 < h; v0 += MAP_BAND) {
         int rows = h - v0 < MAP_BAND ? h - v0 : MAP_BAND;

@@ -210,6 +210,13 @@ static inline int menu_x(int i) { return SCX - (MENU_N * MENU_W + (MENU_N - 1) *
 void boot_banner(ui_t *u, canvas_t *cv);            /* the first seconds: the name, and which screen */
 void scope_frame(ui_t *u);
 void main_draw(ui_t *u, canvas_t *cv);
+int  range_can_step(const ui_t *u, int dir);          /* the dial's short list (ui.c) goes on nearer (-1) or further (1) */
+#if RADAR_EPAPER
+/* the e-paper's own main screen (ui_paper.c): the CLASSIC look as a printed chart, the weather's first page */
+int  paper_shown(const ui_t *u);                     /* this frame is the paper's own */
+void paper_frame(ui_t *u);                           /* once a frame, after scope_frame: labels, the sheet's news */
+void paper_draw(ui_t *u, canvas_t *cv);              /* a strip of it */
+#endif
 #if RADAR_OVERLAY
 void main_top(ui_t *u, canvas_t *cv);
 #define LAYER_BG  (cv->layer == UI_LAYER_BG)    /* drawing the frame in memory: no moving things */
@@ -240,6 +247,13 @@ void weather_draw(ui_t *u, canvas_t *cv);            /* a strip: reads the table
 void weather_close(void);                            /* another look: its tables go back to the heap */
 extern const char *const WX_PAGE_NAME[WX_PAGES];     /* what the toast says when a page comes */
 void next_wx_page(ui_t *u);                          /* a tap on the dial or the graph, or BOOT: the next page */
+void step_wx_page(ui_t *u, int d);                   /* the page after (d 1) or before (d -1): the paper's dial */
+#if RADAR_EPAPER
+int  weather_paper_page(const ui_t *u);              /* the weather is the paper's own, all three pages (the 4.2"'s) */
+int  weather_sheet_up(const ui_t *u);                /* its first page is the printed dial (paper_style 1) */
+uint32_t weather_stamp(const ui_t *u);               /* what the printed weather shows: the forecast and the hour. 0: none */
+void weather_paper(ui_t *u, canvas_t *cv);           /* a strip of it */
+#endif
 enum { WXU_TEMP, WXU_PRES, WXU_WIND, WXU_RAIN };     /* the weather's units, SET's UNITS rows */
 int  wx_unit(const ui_t *u, int which);              /* the one in use: the setting, or home's country's (ui.h TEMP_* ...) */
 void wx_unit_text(const ui_t *u, int which, char *b, int sz);   /* SET's value: KM/H, or AUTO KM/H */

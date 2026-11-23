@@ -51,6 +51,8 @@ int font_text(canvas_t *cv, const font_t *f, int x, int y, const char *utf8, uin
 int font_width(const font_t *f, const char *utf8);
 // draws max maxw pixels, a cut string fades out on the right
 int font_text_clip(canvas_t *cv, const font_t *f, int x, int y, const char *utf8, uint32_t c, int a, int maxw);
+// turned a quarter clockwise, read downwards: x the right edge of its line, the pen from y down. back: its length
+int font_text_down(canvas_t *cv, const font_t *f, int x, int y, const char *utf8, uint32_t c);
 
 // MICRO: 3x5 glyph in a 4x6 cell, scale is integer
 #define MICRO_ADV 4

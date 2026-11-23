@@ -73,6 +73,8 @@ typedef struct {
     int h;          /* rows in strip */
     int helper;     /* drawn by the second core (main.c): its time is not in ui_t.prof */
     int layer;      /* RADAR_OVERLAY builds: which layer it is drawn for (ui.h UI_LAYER_*), 0 everywhere else */
+    int soft;       /* paper: the letters' edges in the panel's greys (font.c), for what is printed whole with
+                       them. 0: edges round to the ink or the paper, what the black and white refresh can draw */
 } canvas_t;
 
 #define RGB(r, g, b) ((uint32_t)((((r) & 255) << 16) | (((g) & 255) << 8) | ((b) & 255)))
@@ -158,7 +160,7 @@ static inline int gfx_sub(const canvas_t *cv, int ya, int yb, canvas_t *out)
     if (a < cv->y0) a = cv->y0;
     if (b > cv->y0 + cv->h - 1) b = cv->y0 + cv->h - 1;
     if (a > b) return 0;
-    *out = (canvas_t){ cv->px + (a - cv->y0) * GFX_PW, a, b - a + 1, cv->helper, cv->layer };
+    *out = (canvas_t){ cv->px + (a - cv->y0) * GFX_PW, a, b - a + 1, cv->helper, cv->layer, cv->soft };
     return 1;
 }
 

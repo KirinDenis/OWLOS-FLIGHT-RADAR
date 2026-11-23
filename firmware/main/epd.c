@@ -166,6 +166,14 @@ static void after_partial(void)
     }
 }
 
+/* the grey waveform the panel gets: a copy of the panel's LUT_4GRAY below, made in disp_init, which
+ * the console may change a byte at a time (disp_lut_poke) to find greys nearer the middle. how it
+ * reads (the 4.2"'s): 5 blocks of 6 groups of 7 bytes, then the frame rate. a group: repeats, four
+ * phases, two state repeats. a phase byte: its voltage in the top 2 bits (00 none, 01 VSH1 towards
+ * white, 10 VSL towards black), its frames in the low 6. the first block has no voltage at all (the
+ * common electrode), then black, dark grey, light grey, white, in code order (RAM 0x26 bit, 0x24 bit) */
+static uint8_t s_lut[233];
+
 static void load_lut(const uint8_t *lut)
 {
     wr_cmd(0x32);                                 // grey waveform, 227 bytes
@@ -181,6 +189,10 @@ static void load_lut(const uint8_t *lut)
 #define EPD_W 400
 #define EPD_H 300
 
+/* ViewOwl's (Waveshare's 4.2" V2), the two greys moved to the middle. a grey is the third group,
+ * repeated 5 times: frames towards white, then towards black. as it came the greys were 8:3 and 8:5,
+ * 220 and 50 of 255, the light one not to be seen on the glass. a frame more or less of white each
+ * (OWLOS EPDLUT 99 49, 141 47, then OWLOS EPDTEST, 2026-11-22) and his photo had four tones */
 static const uint8_t LUT_4GRAY[233] = {
     0x01, 0x0A, 0x1B, 0x0F, 0x03, 0x01, 0x01,
     0x05, 0x0A, 0x01, 0x0A, 0x01, 0x01, 0x01,
@@ -196,13 +208,13 @@ static const uint8_t LUT_4GRAY[233] = {
     0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
     0x01, 0x0A, 0x1B, 0x8F, 0x03, 0x01, 0x01,
     0x05, 0x4A, 0x01, 0x8A, 0x01, 0x01, 0x01,
-    0x05, 0x48, 0x83, 0x82, 0x04, 0x01, 0x01,
+    0x05, 0x49, 0x83, 0x82, 0x04, 0x01, 0x01,     // dark grey: 9 frames white to 5 black (was 8, it came out all but black)
     0x01, 0x04, 0x04, 0x02, 0x00, 0x01, 0x01,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
     0x01, 0x8A, 0x1B, 0x8F, 0x03, 0x01, 0x01,
     0x05, 0x4A, 0x01, 0x8A, 0x01, 0x01, 0x01,
-    0x05, 0x48, 0x83, 0x02, 0x04, 0x01, 0x01,
+    0x05, 0x47, 0x83, 0x02, 0x04, 0x01, 0x01,     // light grey: 7 frames white to 3 black (was 8, it came out all but white)
     0x01, 0x04, 0x04, 0x02, 0x00, 0x01, 0x01,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
@@ -245,7 +257,7 @@ static void init_4gray(void)
     wr_cmd(0x21); wr_data(0x00); wr_data(0x00);   // display update control 1
     wr_cmd(0x3C); wr_data(0x03);                  // border
     wr_cmd(0x0C); wr_data(0x8B); wr_data(0x9C); wr_data(0xA4); wr_data(0x0F);   // booster soft start
-    load_lut(LUT_4GRAY);
+    load_lut(s_lut);
     wr_cmd(0x11); wr_data(0x03);                  // X+, Y+
     window_all();
     wait_busy();
@@ -357,7 +369,7 @@ static void init_4gray(void)
     wr_cmd(0xC5); wr_data(0x0F); wr_data(0x01); wr_data(0x00); wr_data(0x00);
     wr_cmd(0xCE); wr_data(0x31);
     wr_cmd(0xCF); wr_data(0x0F); wr_data(0x01);
-    load_lut(LUT_4GRAY);
+    load_lut(s_lut);
 }
 
 /* four whole planes one after the other, no cursor moves in between. master gets panel
@@ -467,6 +479,7 @@ void disp_init(void)
     if (!s_frame || !s_shown) { ESP_LOGE(TAG, "no memory for the two frames"); return; }
     memset(s_frame, 0xFF, FRAME_BYTES);
     memset(s_shown, 0xFF, FRAME_BYTES);
+    memcpy(s_lut, LUT_4GRAY, sizeof s_lut);
     ESP_LOGI(TAG, "e-paper %dx%d, 4 greys, frames in %s, new picture every %u s", EPD_W, EPD_H,
              psram ? "PSRAM" : "internal RAM", (unsigned)(disp_frame_ms() / 1000));
 }
@@ -476,6 +489,46 @@ void disp_strip(const canvas_t *cv)
     if (s_frame) paper_pack(cv, s_frame);
 }
 
+/* --- finding the greys: OWLOS EPDTEST and OWLOS EPDLUT on the console (main.c) --- */
+
+#define TEST_HOLD_US (600LL * 1000000)               // the test stays this long (a photo of it), the radar's pictures wait
+static volatile int s_test_req;
+static int64_t s_test_until;
+
+void disp_grey_test(void) { s_test_req = 1; }
+
+void disp_lut_poke(int i, int v)
+{
+    if (v < 0) {
+        memcpy(s_lut, LUT_4GRAY, sizeof s_lut);
+        ESP_LOGI(TAG, "grey waveform back to the panel's own");
+    } else if (i >= 0 && i < (int)sizeof s_lut) {
+        ESP_LOGI(TAG, "grey waveform byte %d: %02x -> %02x", i, s_lut[i], v & 255);
+        s_lut[i] = (uint8_t)v;
+    }
+}
+
+/* six bands with paper above and below each to hold them against: the four codes, black to white,
+ * then the dot screens the paper screen uses, an eighth (the woods) and a half */
+static void grey_test_frame(void)
+{
+    const int bw = GFX_W / 6, top = GFX_H / 5, bottom = GFX_H - GFX_H / 5;
+    for (int y = 0; y < GFX_H; y++) {
+        for (int x = 0; x < GFX_W; x++) {
+            const int band = x / bw;
+            int c = 3;
+            if (y >= top && y < bottom && band < 6) {
+                if (band < 4) c = band;
+                else if (band == 4) c = !(y & 1) && !((x + (y & 2)) & 3) ? 0 : 3;
+                else c = (x + y) & 1 ? 3 : 0;
+            }
+            uint8_t *b = &s_frame[y * PAPER_STRIDE + (x >> 2)];
+            const int sh = 6 - 2 * (x & 3);
+            *b = (uint8_t)((*b & ~(3 << sh)) | c << sh);
+        }
+    }
+}
+
 /* full grey refresh: new screen, every 10 min, or when too many greys are wrong (but not
  * more than once a minute for that). otherwise the black/white changes go on top. nothing
  * changed: the glass is left alone */
@@ -483,6 +536,21 @@ void disp_frame_end(void)
 {
     if (!s_frame || !s_shown) return;
     int64_t t0 = esp_timer_get_time();
+    if (s_test_req) {                                  // the grey test, printed with the waveform as it is now
+        s_test_req = 0;
+        grey_test_frame();
+        push();
+        memcpy(s_shown, s_frame, FRAME_BYTES);
+        s_test_until = t0 + TEST_HOLD_US;
+        ESP_LOGI(TAG, "grey test: black, dark grey, light grey, white, dots 1/8, dots 1/2; %d ms",
+                 (int)((esp_timer_get_time() - t0) / 1000));
+        return;
+    }
+    if (s_test_until) {
+        if (t0 < s_test_until) return;                 // it stays on the glass
+        s_test_until = 0;
+        s_full = 1;                                    // and the radar comes back whole
+    }
     int flips, debt;
     count_changes(&flips, &debt);
     int full = s_full || t0 - s_last_full >= FULL_EVERY_US || (debt > GREY_DEBT_MAX && t0 - s_last_full >= FULL_GAP_US);

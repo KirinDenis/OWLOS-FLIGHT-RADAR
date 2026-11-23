@@ -391,8 +391,11 @@ CORE_HOT static void disc(ui_t *u, canvas_t *cv)
         return;
     }
 #endif
-    if (look == LOOK_RADAR && !m) disc_pass(u, cv, 1, 0, NULL, 1, 1);
-    else disc_pass(u, cv, look == LOOK_RADAR, look == LOOK_CLASSIC, m, 1, 1);
+    /* paper: no sweep. a picture every few seconds would catch the beam anywhere, and its trail would
+     * change half the scope's pixels each time */
+    const int beam_on = !RADAR_EPAPER;
+    if (look == LOOK_RADAR && !m) disc_pass(u, cv, 1, 0, NULL, beam_on, 1);
+    else disc_pass(u, cv, look == LOOK_RADAR, look == LOOK_CLASSIC, m, beam_on, 1);
 }
 
 #if RADAR_OVERLAY
@@ -669,7 +672,7 @@ void scope_frame(ui_t *u)
         float x, y, sx, sy;
         plane_now(s, p, u->now, &x, &y);
         to_screen(u, x, y, &sx, &sy);
-        if (radar && u->opt.beam_step) {               // shown where the beam last saw it, till the next turn
+        if (radar && u->opt.beam_step && !RADAR_EPAPER) {   // shown where the beam last saw it, till the next turn
             float since = wrap360(u->beam - atan2f(sx - (float)view_cx(u), (float)SCY - sy) / D2R);
             plane_now(s, p, u->now - (uint32_t)(since * (BEAM_TURN_MS / 360.0f)), &x, &y);
             to_screen(u, x, y, &sx, &sy);
@@ -1338,14 +1341,14 @@ static void planes(ui_t *u, canvas_t *cv)
             gfx_line(cv, (float)view_cx(u), SCY, sp->x, sp->y, 1.0f, C_FOCUS, 60);
             if (speed_line) gfx_line(cv, sp->x, sp->y, sp->vx, sp->vy, 1.2f, C_FOCUS, 170);
             else gfx_line(cv, sp->x, sp->y, sp->x + km * k * sinf(a), sp->y - km * k * cosf(a), 1.2f, C_FOCUS, 170);
-            gfx_glow(cv, sp->x, sp->y, 16.0f, C_FOCUS, 100);
+            if (!RADAR_EPAPER) gfx_glow(cv, sp->x, sp->y, 16.0f, C_FOCUS, 100);
         } else if (speed_line && gfx_touches(cv, (sp->y < sp->vy ? sp->y : sp->vy) - 2, (sp->y > sp->vy ? sp->y : sp->vy) + 2)) {
             gfx_line(cv, sp->x, sp->y, sp->vx, sp->vy, 1.0f, col, 130);
         }
         if (!near) continue;
         if (u->cfg.look == LOOK_CLASSIC) {               // light ground: a dark edge round it, light does not show
             silhouette(cv, p->kind, sp->x, sp->y, head, size * 1.35f, INK, 200);
-        } else if (!gone) {
+        } else if (!gone && !RADAR_EPAPER) {           // paper: no glow, a grey smudge round every plane
             // phosphor: brighter for a moment after the beam went over it
             float since = u->cfg.look == LOOK_RADAR ? wrap360(u->beam - wrap360(atan2f((float)(sp->x - view_cx(u)), (float)(SCY - sp->y)) / D2R)) : 180.0f;
             int glow = (int)(70.0f + 100.0f * (1.0f - since / 360.0f));
@@ -1353,12 +1356,12 @@ static void planes(ui_t *u, canvas_t *cv)
         }
         silhouette(cv, p->kind, sp->x, sp->y, head, size, gfx_mix(col, C_FOCUS, 60), gone ? 110 : 255);
         uint32_t age = u->now - p->first;
-        if (age < 1600u) {                               // just showed up: a ring opens round it
+        if (age < 1600u && !RADAR_EPAPER) {              // just showed up: a ring opens round it
             float f = (float)age / 1600.0f;
             gfx_ring(cv, sp->x, sp->y, 5.0f + 16.0f * f, 1.0f, col, (int)(200 * (1.0f - f)));
         }
         if (picked) {                                    // four arcs turning round it, once in 3 s
-            float rot = (float)(u->now % 3000u) * (360.0f / 3000.0f);
+            float rot = RADAR_EPAPER ? 0.0f : (float)(u->now % 3000u) * (360.0f / 3000.0f);   // paper: standing
             for (int a4 = 0; a4 < 4; a4++)
                 gfx_arc(cv, sp->x, sp->y, 12.0f, rot + a4 * 90.0f - 20.0f, rot + a4 * 90.0f + 20.0f, 1.4f, C_FOCUS, 230);
         }
@@ -1621,7 +1624,12 @@ static void buttons(ui_t *u, canvas_t *cv, const char *a, const char *b, const c
     (void)a; (void)b; (void)c; (void)lit;
     int x = btn_x(0), w = 3 * BTN_W + 6;
     chamfer_box(cv, x, BTN_Y, w, BTN_H, C_PANEL, 170, C_QUIET, 220);
+#if RADAR_EPAPER
+    // the e-paper boards: their dial and keys (ui.c ui_key)
+    const char *l1 = u->sel ? "PRESS: NEXT  EXIT: LET GO" : "PRESS: NEAREST PLANE", *l2 = "DIAL: RANGE  MENU: LOOK";
+#else
     const char *l1 = u->sel ? "BOOT: NEXT PLANE" : "BOOT: NEAREST PLANE", *l2 = "HOLD BOOT: RANGE";
+#endif
     micro_text(cv, x + (w - micro_width(l1, 1)) / 2, BTN_Y + 8, l1, C_FOCUS, 250, 1);
     micro_text(cv, x + (w - micro_width(l2, 1)) / 2, BTN_Y + 18, l2, C_DIM, 240, 1);
 #endif

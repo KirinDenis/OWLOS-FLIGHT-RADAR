@@ -52,6 +52,7 @@ void fr_cfg_defaults(fr_cfg_t *c)
     c->range = 50;
     c->map = 1;
     c->ground = 1;
+    if (RADAR_EPAPER) c->look = LOOK_CLASSIC;         // paper's own screen (ui_paper.c): the others are the colour ones printed grey
     c->lat = 48.8945f;                               // Trencin, Slovakia, until the site sends a home
     c->lon = 18.0444f;
     snprintf(c->place, sizeof c->place, "Trenčín");
@@ -84,8 +85,12 @@ float range_km(const fr_cfg_t *c)
 void ui_ground_size(const fr_cfg_t *c, int *w, int *h, int *disc)
 {
     int square = !RADAR_ROUND && c->look != LOOK_RADAR && c->look != LOOK_WEATHER;   // the weather keeps the radar's, ready for it
-    *w = square ? GFX_PW : 2 * G_PR;                 // a texel a pixel of the glass
-    *h = square ? GFX_PH : 2 * G_PR;
+    /* a texel a pixel of the glass. a row is whole words of 8 texels (map.h), so the disc's square goes up
+     * to the next 8, a few texels past the ring, home still in its middle: the 4.2" e-paper's ring is 2 x 118
+     * across, and the 4 texels past 29 words went past the row's end and broke the heap (map.c map_alloc) */
+    const int d = (2 * G_PR + 7) & ~7;
+    *w = square ? GFX_PW : d;
+    *h = square ? GFX_PH : d;
     *disc = !square;
 }
 float ui_ground_kpx(const fr_cfg_t *c) { return (float)G_PR / range_km(c); }
@@ -392,7 +397,7 @@ CORE_HOT void draw_background(canvas_t *cv, int grid_on)
             row[GFX_PW - 1 - x] = gfx_scale(row[GFX_PW - 1 - x], s_vigx[GFX_PW - 1 - x]);
         }
     }
-    for (int i = 0; i < s_nstars; i++) {
+    for (int i = 0; i < s_nstars && !RADAR_EPAPER; i++) {   // paper: the stars printed as specks of dust
         uint32_t *row = gfx_row(cv, s_stars[i].y);
         if (row) row[s_stars[i].x] = gfx_add(row[s_stars[i].x], gfx_scale(C_DIM, s_stars[i].a));
     }
@@ -505,6 +510,9 @@ void ui_frame(ui_t *u, uint32_t now)
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
     grid_columns(scope_glass_cx(u));                        // the background's grid through the scope's middle
     scope_frame(u);
+#if RADAR_EPAPER
+    paper_frame(u);                                         // the paper's own main screen, when it is the one shown
+#endif
 }
 
 /* --- touch alignment: 5 crosses, the median of each press, least squares (the radar's) --- */
@@ -681,6 +689,44 @@ static void next_range(ui_t *u, ui_cmd_t *cmd)
     u->cfg.range = v;
     cmd->cfg = cmd->refetch = 1;
     say_range(u);
+}
+
+// the e-paper dial: the next of the short list nearer (-1) or further (1), the range itself at its ends
+static float range_next(const ui_t *u, int dir)
+{
+    const int n = (int)(sizeof BOOT_RANGES / sizeof BOOT_RANGES[0]);
+    float v = u->cfg.range;
+    if (dir > 0) {
+        for (int i = 0; i < n; i++) {
+            if (BOOT_RANGES[i] > u->cfg.range * 1.01f) { v = BOOT_RANGES[i]; break; }
+        }
+    } else {
+        for (int i = n - 1; i >= 0; i--) {
+            if (BOOT_RANGES[i] < u->cfg.range * 0.99f) { v = BOOT_RANGES[i]; break; }
+        }
+    }
+    return v;
+}
+
+int range_can_step(const ui_t *u, int dir) { return range_next(u, dir) != u->cfg.range; }
+
+// one step of it, standing at its ends
+static void step_range(ui_t *u, ui_cmd_t *cmd, int dir)
+{
+    const float v = range_next(u, dir);
+    if (v == u->cfg.range) return;                     // at the end of the list already
+    u->cfg.range = v;
+    cmd->cfg = cmd->refetch = 1;
+    say_range(u);
+}
+
+// no touch: the next plane on the scope, nearest first, and past the last one none
+static void step_plane(ui_t *u)
+{
+    int at = -1, next = -1;
+    for (int k = 0; k < u->n_order; k++) if (u->snap.p[u->order[k]].icao == u->sel) at = k;
+    for (int k = at + 1; k < u->n_order && next < 0; k++) if (u->spot[u->order[k]].vis == 1) next = u->order[k];
+    select_plane(u, next);
 }
 
 static void next_theme(ui_t *u, ui_cmd_t *cmd)
@@ -961,14 +1007,8 @@ void ui_button(ui_t *u, int ev, ui_cmd_t *cmd)
 #if !RADAR_HAS_TOUCH
     /* no touch (the RPi LCD): a press steps through the planes on the scope, nearest first, and
      * past the last one lets go. held: the next range */
-    if (ev == 1) {
-        int at = -1, next = -1;
-        for (int k = 0; k < u->n_order; k++) if (u->snap.p[u->order[k]].icao == u->sel) at = k;
-        for (int k = at + 1; k < u->n_order && next < 0; k++) if (u->spot[u->order[k]].vis == 1) next = u->order[k];
-        select_plane(u, next);
-    } else {
-        next_range(u, cmd);
-    }
+    if (ev == 1) step_plane(u);
+    else next_range(u, cmd);
     return;
 #endif
     if (ev == 2) {
@@ -980,6 +1020,56 @@ void ui_button(ui_t *u, int ev, ui_cmd_t *cmd)
     next_range(u, cmd);
 }
 
+/* the keys of the e-paper boards: the dial nearer and further, pressed the next plane, held the watch
+ * list for it; MENU the next look, held ABOUT; EXIT lets the plane go and leaves a page */
+void ui_key_wait(ui_t *u, int key)
+{
+    u->key_last = (uint8_t)key;                        // its third of the keys' strip prints pressed in the next picture
+    u->key_at = u->now ? u->now : 1;
+}
+
+void ui_key(ui_t *u, int key, ui_cmd_t *cmd)
+{
+    u->key_at = 0;                                     // the press is taken: its third back to grey
+    if (u->view != VIEW_MAIN) {                        // ABOUT, or a page the site opened: back to the radar
+        if (key == KEY_BACK || key == KEY_MENU) u->view = VIEW_MAIN;
+        return;
+    }
+    const int wx = u->cfg.look == LOOK_WEATHER;        // no range and no planes there: the dial turns its pages
+    switch (key) {
+    case KEY_UP:
+        if (wx) step_wx_page(u, -1);                   // up: the page before
+        else step_range(u, cmd, -1);
+        break;
+    case KEY_DOWN:
+        if (wx) next_wx_page(u);
+        else step_range(u, cmd, 1);
+        break;
+    case KEY_OK:
+        if (!wx) step_plane(u);
+        break;
+    case KEY_OK_LONG:
+        for (int i = 0; i < u->snap.n && !wx; i++) {
+            if (u->sel && u->snap.p[i].icao == u->sel) {
+                watch_toggle(u, &u->snap.p[i], cmd);
+                break;
+            }
+        }
+        break;
+    case KEY_MENU:
+        next_look(u, cmd);
+        break;
+    case KEY_MENU_LONG:
+        u->view = VIEW_ABOUT;                          // the version, and the QR code to the site that sets it up
+        break;
+    case KEY_BACK:
+        u->sel = 0;
+        break;
+    default:
+        break;
+    }
+}
+
 /* --- draw one strip --- */
 
 #if RADAR_OVERLAY
@@ -988,6 +1078,12 @@ void ui_top_strip(ui_t *u, canvas_t *cv) { main_top(u, cv); }
 
 void ui_strip(ui_t *u, canvas_t *cv)
 {
+#if RADAR_EPAPER
+    if (paper_shown(u)) {                              // its own picture, its own cards (ui_paper.c)
+        paper_draw(u, cv);
+        return;
+    }
+#endif
     ui_lap(u, cv, -1);
     if (u->view != VIEW_MAIN || !square_look(u))       // the square map covers every pixel of it
         draw_background(cv, u->view == VIEW_MAIN || u->view == VIEW_CAL);   // pages of text read better on a plain ground

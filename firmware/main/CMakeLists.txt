@@ -4,7 +4,7 @@ set(TAB5_REQ "")
 if(IDF_TARGET STREQUAL "esp32p4")
     set(TAB5_REQ esp_driver_ppa)
 endif()
-idf_component_register(SRCS "main.c" "net.c" "nets.c" "store.c" "console.c" "button.c" "touch.c"
+idf_component_register(SRCS "main.c" "net.c" "nets.c" "store.c" "console.c" "button.c" "keys.c" "touch.c"
                             "lcd_spi.c" "lcd_rgb.c" "lcd_dsi.c" "lcd_ili9486.c" "epd.c" "i2c_bus.c" "tiles.c" "led.c"
                             "lcd_wave7.c" "lcd_wave7_panel.cpp" "ovl.c" "lcd_jc8012.c" "lcd_jc8012_panel.cpp" "logbuf.c"
                        INCLUDE_DIRS "."

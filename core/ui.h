@@ -219,6 +219,8 @@ typedef struct {
     uint8_t  alert_new;    /* the kinds that came or got worse this frame (1 << WXA_*): the firmware lights the LED */
     uint32_t prof[6];      /* us spent a layer, summed till the firmware logs them: background, disc,
                               compass, planes, panel, the rest */
+    uint8_t  key_last;     /* the e-paper's key pressed (KEY_*) and when, till ui_key takes it: its third of */
+    uint32_t key_at;       /* the keys' strip prints black (ui_paper.c), 0 none */
 } ui_t;
 
 /* a deadline in the 32-bit milliseconds still ahead. 0 is none: ui_frame lets a passed one go at once,
@@ -281,6 +283,12 @@ void ui_top_info(const ui_t *u, ui_top_t *t);
 
 void ui_touch(ui_t *u, int down, int x, int y, int rx, int ry, uint32_t now, ui_cmd_t *cmd);
 void ui_button(ui_t *u, int ev, ui_cmd_t *cmd);     /* BOOT: 1 short, 2 long */
+/* the keys of the e-paper boards (firmware/main/keys.c): the dial up, down and pressed, MENU and EXIT */
+enum { KEY_NONE, KEY_UP, KEY_DOWN, KEY_OK, KEY_OK_LONG, KEY_MENU, KEY_MENU_LONG, KEY_BACK };
+void ui_key(ui_t *u, int key, ui_cmd_t *cmd);
+/* paper: a key pressed, not yet taken: its third of the keys' strip prints black in the next picture, then the
+ * firmware gives it to ui_key and prints the screen whole (main.c) */
+void ui_key_wait(ui_t *u, int key);
 void ui_start_calibration(ui_t *u);
 void ui_set_theme(ui_t *u, int theme);
 void touch_apply(const touch_cal_t *c, int rx, int ry, int *x, int *y);

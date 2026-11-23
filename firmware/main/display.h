@@ -16,6 +16,12 @@ void     disp_frame_end(void);
 uint32_t disp_frame_ms(void);
 // e-paper: make the next refresh a full one (new screen). LCDs ignore it
 void     disp_full_next(void);
+#if DISP_EPD
+/* e-paper, finding its greys (OWLOS EPDTEST, OWLOS EPDLUT on the console): the four greys and two dot
+ * screens in bands, held 10 minutes; a byte of the grey waveform changed till the next start, v < 0 all back */
+void     disp_grey_test(void);
+void     disp_lut_poke(int i, int v);
+#endif
 // strips that never got the done callback (LCD), refreshes that timed out (e-paper)
 uint32_t disp_lost(void);
 /* SPI LCDs only (lcd_spi.c): screen start-up profiles. one on most boards, the 2.8" CYD has

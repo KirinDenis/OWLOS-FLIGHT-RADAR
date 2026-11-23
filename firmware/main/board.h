@@ -466,9 +466,10 @@
 #define PIN_BUTTON    35        // BOOT, pulled up on the board
 
 #elif RADAR_DISPLAY == DISPLAY_EPD_400x300 || RADAR_DISPLAY == DISPLAY_EPD_792x272
-/* Elecrow CrowPanel e-paper 4.2" (400x300) and 5.79" (792x272), ESP32-S3. NOT run on
- * hardware yet: panel pins and command sequences are ViewOwl's (ViewOwl.ESP32_EPD.Client),
- * the dial and key pins come from Elecrow's 5.79 key example, the 4.2 is assumed the same */
+/* Elecrow CrowPanel e-paper 4.2" (400x300) and 5.79" (792x272), ESP32-S3 N8R8. panel pins and command
+ * sequences are ViewOwl's (ViewOwl.ESP32_EPD.Client). the 4.2" runs this radar (2026-11-22, 4 greys,
+ * drawn on top in 1.2 s); its keys are the same as the 5.79"'s in Elecrow's 4.2" wiki and in
+ * Mischianti's pinout of it, not yet pressed here. the 5.79" ran the WiFi radar */
 #define DISP_EPD       1
 #define EPD_PIN_SCK   12
 #define EPD_PIN_MOSI  11

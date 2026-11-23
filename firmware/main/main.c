@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "button.h"
+#include "keys.h"
 #include "console.h"
 #include "demo.h"
 #include "display.h"
@@ -35,6 +36,9 @@ volatile uint32_t g_busy;                              // TEMP (busy.h): here, a
 #endif
 #ifdef PIN_AMP_EN
 #include "driver/gpio.h"
+#endif
+#if DISP_EPD
+#include "paper.h"
 #endif
 
 #include "esp_heap_caps.h"
@@ -751,6 +755,11 @@ static void watch_lookup(sky_reader_t *rd, int planes_server)
 #define SKY_OUT_MS 60000u
 static volatile uint32_t s_sky_until;                  // now_ms till which it goes out
 static volatile uint32_t s_pick;                       // OWLOS PICK from the page: the plane picked there
+#if DISP_EPD
+static volatile int      s_key_said;                   // OWLOS KEY: a key as if pressed, the next pass takes it
+static uint8_t           s_key_wait[4];                // keys pressed, their third of the strip printed black first
+static int               s_key_n, s_key_shown;         // how many; the picture with them black is out
+#endif
 static volatile int      s_pick_new;
 static uint32_t          s_sel_told;                   // the picked plane the page knows of
 static volatile int      s_wxpage_told = -1;           // the WEATHER look's page the page knows of, -1: tell it again (a GET)
@@ -1121,6 +1130,10 @@ static const char *board_name(void)
     return "nmcydc5";
 #elif RADAR_DISPLAY == DISPLAY_ZLX2_320x240
     return "zlx2";
+#elif RADAR_DISPLAY == DISPLAY_EPD_400x300
+    return "epd400";
+#elif RADAR_DISPLAY == DISPLAY_EPD_792x272
+    return "epd792";
 #elif RADAR_DISPLAY == DISPLAY_CROWADV28_320x240
     return "crowadv28";
 #elif RADAR_DISPLAY == DISPLAY_CROWADV50_800x480
@@ -1188,6 +1201,26 @@ static void on_line(const char *line)
         return;
     }
     if (!strcmp(line, "OWLOS SKY OFF")) { s_sky_until = 0; return; }
+#if DISP_EPD
+    if (!strncmp(line, "OWLOS KEY ", 10)) {            // a key of the e-paper's as if pressed (ui.h KEY_*): a test needs no finger
+        const int k = atoi(line + 10);
+        if (k > KEY_NONE && k <= KEY_BACK) s_key_said = k;
+        return;
+    }
+    if (!strncmp(line, "OWLOS PAPER ", 12)) {          // the sheet's tones (paper.h paper_style), till a reset: to set two side by side
+        paper_style = atoi(line + 12) ? 1 : 0;
+        return;
+    }
+    // finding the panel's greys: the test bands; "OWLOS EPDLUT 197 81" a byte of its grey waveform (epd.c), no value: all back
+    if (!strcmp(line, "OWLOS EPDTEST")) { disp_grey_test(); return; }
+    if (!strncmp(line, "OWLOS EPDLUT ", 13)) {
+        char *end;
+        const long i = strtol(line + 13, &end, 10);
+        if (end == line + 13 || *end != ' ') { disp_lut_poke(0, -1); return; }   // no byte given: all back
+        disp_lut_poke((int)i, (int)strtol(end + 1, NULL, 16));
+        return;
+    }
+#endif
     if (!strncmp(line, "OWLOS PICK ", 11)) {           // a plane tapped on the page, 0: let go
         s_pick = (uint32_t)strtoul(line + 11, NULL, 16);
         s_pick_new = 1;
@@ -1546,7 +1579,7 @@ static void helper_set(int on)
         s_help_done = xSemaphoreCreateBinary();
     }
     if (!DISP_HELPER_HALF) {
-        s_help_cv = (canvas_t){ heap_caps_malloc(px, MALLOC_CAP_INTERNAL), 0, DISP_STRIP, 1, 0 };
+        s_help_cv = (canvas_t){ heap_caps_malloc(px, MALLOC_CAP_INTERNAL), 0, DISP_STRIP, 1, 0, 0 };
         if (!s_help_cv.px) return;
     }
     s_help_stop = 0;
@@ -1633,7 +1666,7 @@ void disp_bg_stop_fn(int (*fn)(void));                 // lcd_jc8012.c
 static void bg_task(void *arg)
 {
     (void)arg;
-    canvas_t cv = { s_bg_px, 0, DISP_STRIP, 0, UI_LAYER_BG };
+    canvas_t cv = { s_bg_px, 0, DISP_STRIP, 0, UI_LAYER_BG, 0 };
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const int64_t t0 = esp_timer_get_time();
@@ -1677,7 +1710,7 @@ static void early_task(void *arg)
     (void)arg;
     disp_flip(s_cfg.flip);
     disp_init();
-    s_top = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_INTERNAL), 0, TOP_ROWS, 0, UI_LAYER_TOP };
+    s_top = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_INTERNAL), 0, TOP_ROWS, 0, UI_LAYER_TOP, 0 };
     if (!s_top.px)                                     // (chipguyhere) the JC8012: its RAM may have no 80 KB in one piece; slower, but there
         s_top.px = heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_SPIRAM);
     s_bg_px = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint32_t), MALLOC_CAP_INTERNAL);
@@ -1853,7 +1886,7 @@ static void sc_render_step(void)
     sc_strip(s_sc_work);
     s_sc_work->now = now;
     ui_scrolled(s_sc_work, s_sc_step);
-    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG, 0 };
     for (int y = gy0 / TOP_ROWS * TOP_ROWS; y < gy1; y += TOP_ROWS) {
         sub.y0 = y;
         sub.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
@@ -1981,13 +2014,13 @@ static void sc_ring(int on)
     s_sc_work->now = now;
     if (on) { s_sc_work->t_down = s_sc_work->t_moved = 1; s_sc_work->t_x = s_ring_x; s_sc_work->t_y = s_ring_y; }
     ui_scrolled(s_sc_work, s_ring_s);
-    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG, 0 };
     for (int y = a / TOP_ROWS * TOP_ROWS; y < b; y += TOP_ROWS) {
         sub.y0 = y;
         sub.h = y + TOP_ROWS <= GFX_PH ? TOP_ROWS : GFX_PH - y;
         ui_strip(s_sc_work, &sub);
         const int r0 = y > a ? y : a, r1 = y + sub.h < b ? y + sub.h : b;
-        const canvas_t part = { sub.px + (size_t)(r0 - y) * GFX_PW, r0, r1 - r0, 0, UI_LAYER_BG };
+        const canvas_t part = { sub.px + (size_t)(r0 - y) * GFX_PW, r0, r1 - r0, 0, UI_LAYER_BG, 0 };
         disp_scroll_put(&part, GFX_Z(s_ring_s));
     }
     memset(s_top.px, 0, GFX_PW * TOP_ROWS * sizeof(uint32_t));
@@ -1998,7 +2031,7 @@ static int s_replay, s_replay_view;                    // (chipguyhere) staged b
 static void stage_turn(int nst)
 {
     for (int i = 0; i < nst; i++) {
-        const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG };
+        const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG, 0 };
         disp_page_rect(&st, s_stage_x0[i], s_stage_x1[i], 0);
     }
     if (nst) disp_page_flush();
@@ -2027,7 +2060,7 @@ static int rects_to_glass(const ui_rect_t *rc, int nrc)
     if (!s_stage) s_stage = heap_caps_malloc((size_t)STAGE_BANDS * GFX_PW * TOP_ROWS * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
     if (!s_stage) return 0;
     int nst = 0;
-    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG, 0 };
     for (int i = 0; i < nrc && nst >= 0; i++) {
         int gx0 = GFX_Z(rc[i].x0) - 2, gx1 = GFX_Z(rc[i].x1) + 3, gy0 = GFX_Z(rc[i].y0) - 2, gy1 = GFX_Z(rc[i].y1) + 3;
         if (gx0 < 0) gx0 = 0;
@@ -2101,7 +2134,7 @@ static void page_draw(uint32_t now, int poked)
     s_replay = 0;                                      // (chipguyhere) drawn whole: no change to replay
     if (fresh) disp_bg_begin();
     else disp_page_begin();
-    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };   // the moving layer's band: internal RAM, idle on a page
+    canvas_t sub = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG, 0 };   // the moving layer's band: internal RAM, idle on a page
     /* the changed bands are kept in the PSRAM till all are drawn, then turned one after another: turned as
      * each was drawn, a key reached the glass in pieces over the ~100 ms of drawing */
     if (!s_stage) s_stage = heap_caps_malloc((size_t)STAGE_BANDS * GFX_PW * TOP_ROWS * sizeof(uint32_t), MALLOC_CAP_SPIRAM);
@@ -2130,7 +2163,7 @@ static void page_draw(uint32_t now, int poked)
     {
         const int64_t ts = esp_timer_get_time();
         for (int i = 0; i < staged; i++) {
-            const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG };
+            const canvas_t st = { s_stage + (size_t)i * GFX_PW * TOP_ROWS, s_stage_y[i], s_stage_h[i], 0, UI_LAYER_BG, 0 };
             disp_page_turn(&st);
         }
         s_send_us += (uint32_t)(esp_timer_get_time() - ts);
@@ -2330,7 +2363,7 @@ static void builder_start(void)
     if (tried) return;
     tried = 1;
     s_ui_top = heap_caps_malloc(sizeof(ui_t), MALLOC_CAP_SPIRAM);
-    s_top_b = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_SPIRAM), 0, TOP_ROWS, 0, UI_LAYER_TOP };
+    s_top_b = (canvas_t){ heap_caps_calloc(GFX_PW * TOP_ROWS, sizeof(uint32_t), MALLOC_CAP_SPIRAM), 0, TOP_ROWS, 0, UI_LAYER_TOP, 0 };
     if (!s_ui_top || !s_top_b.px ||
         xTaskCreatePinnedToCoreWithCaps(builder_task, "layer", 8192, NULL, 3, &s_builder, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
         s_builder = NULL;
@@ -2492,7 +2525,7 @@ drawn:
         s_bg_busy = 1;                                 // the background task keeps off meanwhile
         s_page_down = s_ui.t_down;
         const int64_t t0 = esp_timer_get_time();
-        canvas_t cv = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG };
+        canvas_t cv = { s_top.px, 0, TOP_ROWS, 0, UI_LAYER_BG, 0 };
         const int rows = TOP_ROWS;
         disp_bg_begin();
         for (int y = 0; y < GFX_PH; y += rows) {
@@ -2531,6 +2564,27 @@ static void mem_report(void)
         at += snprintf(line + at, sizeof line - at, "%s %u%s, ", st[i].pcTaskName, (unsigned)st[i].usStackHighWaterMark,
                        esp_ptr_external_ram(st[i].pxStackBase) ? "P" : "");
     ESP_LOGI(TAG, "stacks, bytes never used (P: in the PSRAM): %s", line);
+}
+#endif
+
+#if DISP_EPD
+/* paper: a picture takes a second or more, and each one flashes the glass. one when a key or BOOT was
+ * pressed, a quarter of a second after it so a few presses go in one, and else one every disp_frame_ms():
+ * the planes' positions come every 5 s anyway. a picture with no pixel changed costs nothing (epd.c) */
+static int paper_due(uint32_t now, int pressed)
+{
+    static uint32_t s_at, s_pressed_at;
+    if (pressed) s_pressed_at = now ? now : 1;
+    if (s_pressed_at && now - s_pressed_at >= 250u) {
+        s_pressed_at = 0;
+        s_at = now;
+        return 1;
+    }
+    if (!s_at || now - s_at >= disp_frame_ms()) {
+        s_at = now ? now : 1;
+        return 1;
+    }
+    return 0;
 }
 #endif
 
@@ -2586,6 +2640,7 @@ static void ui_task(void *arg)
     ui_screen_name = disp_profile_name();              // the screen offers the other ones, by BOOT. none: the site does
 #endif
     button_init();
+    keys_init();
     esp_task_wdt_add(NULL);
     tp_init();
 #if RADAR_OVERLAY
@@ -2656,6 +2711,38 @@ static void ui_task(void *arg)
         }
 #endif
         if (ev) ui_button(&s_ui, ev == BTN_LONG ? 2 : 1, &cmd);
+        int key = keys_poll();                         // the e-paper boards' dial and keys, 0 elsewhere
+#if DISP_EPD
+        if (!key && s_key_said) {                      // or one said on the console
+            key = s_key_said;
+            s_key_said = 0;
+        }
+#endif
+#if DISP_EPD
+        /* paper: a key pressed prints its third of the keys' strip black first, drawn on top in a second; the pass
+         * after that picture takes it and the screen is printed whole ("на секунду поменять цвет... потом
+         * рефрешить экран"). keys pressed meanwhile go in with it, one print for them all */
+        if (s_key_n && s_key_shown) {
+            for (int i = 0; i < s_key_n; i++) {
+                ui_key(&s_ui, s_key_wait[i], &cmd);
+                ESP_LOGI(TAG, "key %d: look %d, view %d, range %g", s_key_wait[i], s_ui.cfg.look, s_ui.view, (double)s_ui.cfg.range);
+            }
+            s_key_n = 0;
+            s_key_shown = 0;
+            disp_full_next();
+            paper_due(now, 1);
+        }
+        if (key) {
+            if (s_key_n < (int)sizeof s_key_wait) s_key_wait[s_key_n++] = (uint8_t)key;
+            s_key_shown = 0;
+            ui_key_wait(&s_ui, key);
+        }
+#else
+        if (key) {
+            ui_key(&s_ui, key, &cmd);
+            ESP_LOGI(TAG, "key %d: look %d, view %d, range %g", key, s_ui.cfg.look, s_ui.view, (double)s_ui.cfg.range);
+        }
+#endif
         if (s_skip_align) {
             s_skip_align = 0;
             if (s_ui.view == VIEW_CAL) ui_button(&s_ui, 1, &cmd);
@@ -2666,7 +2753,7 @@ static void ui_task(void *arg)
 #endif
         int finger = 0;                                // a sample comes every frame, with a finger or without
         for (int i = 0; i < s_nts; i++) finger |= s_ts[i].down;
-        if (finger || ev) {                            // a finger or BOOT: what the LED shows is seen, it goes out
+        if (finger || ev || key) {                     // a finger, BOOT or a key: what the LED shows is seen, it goes out
             lock();
             light_touch(&s_light);
             unlock();
@@ -2930,16 +3017,29 @@ static void ui_task(void *arg)
 #elif !RADAR_OVERLAY
         const int step = DISP_STRIP;
 #endif
+#if DISP_EPD
+        if (!paper_due(now, ev || key)) {              // the rest of the pass is the frame's: the log, the stats
+            esp_task_wdt_reset();
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+#endif
         int64_t t0 = esp_timer_get_time();
 #if RADAR_OVERLAY
         frame_layered(now);
 #else
         ui_frame(&s_ui, now);
+#if DISP_EPD
+        if (paper_new_sheet) {                         // a new map on the paper's sheet: printed whole, its greys too
+            paper_new_sheet = 0;
+            disp_full_next();
+        }
+#endif
 #if DISP_HELPER
         uint32_t waited = 0;                           // this frame's, for where the halves' strips are cut
 #endif
         for (int sy0 = 0; sy0 < GFX_PH; sy0 += step) {
-            canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0, 0 };
+            canvas_t cv = { work, sy0, sy0 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - sy0, 0, 0, 0 };
 #if DISP_HELPER
             const int y1 = sy0 + DISP_STRIP, under = pair && y1 < GFX_PH;
             const int half = DISP_HELPER_HALF && s_helper && cv.h > 1;
@@ -2949,10 +3049,10 @@ static void ui_task(void *arg)
                 s_help_cv.h = y1 + DISP_STRIP <= GFX_PH ? DISP_STRIP : GFX_PH - y1;
                 xSemaphoreGive(s_help_go);
             } else if (half) {                         // the lower half of this one, into this canvas
-                s_help_cv = (canvas_t){ work + top * GFX_PW, sy0 + top, cv.h - top, 1, 0 };
+                s_help_cv = (canvas_t){ work + top * GFX_PW, sy0 + top, cv.h - top, 1, 0, 0 };
                 xSemaphoreGive(s_help_go);
             }
-            canvas_t mine = { work, sy0, top, 0, 0 };  // this core's: the strip, or its upper half
+            canvas_t mine = { work, sy0, top, 0, 0, 0 };  // this core's: the strip, or its upper half
             ui_strip(&s_ui, &mine);
             if (under || half) {
                 uint32_t tw = now_us();
@@ -2984,6 +3084,9 @@ static void ui_task(void *arg)
 #endif
         busy_us += (uint32_t)(esp_timer_get_time() - t0);
         frames++;
+#if DISP_EPD
+        if (s_key_n) s_key_shown = 1;                  // the keys' thirds went out black: the next pass takes them
+#endif
         /* the weather's warnings: one that came or got worse this frame (ui_frame worked them out) lights the
          * LED, which stays lit as SET's HOW LONG says; "while it lasts" is while any is up */
         if (s_ui.alert_new) {                          // what, how much and in how many hours: nothing of where

@@ -211,6 +211,10 @@
 #define RADAR_BOARD "7\" Waveshare S3-Touch-LCD-7B"
 #elif RADAR_DISPLAY == DISPLAY_JC8012_1280x800
 #define RADAR_BOARD "10.1\" Guition JC8012P4A1C, P4"
+#elif RADAR_DISPLAY == DISPLAY_EPD_400x300
+#define RADAR_BOARD "4.2\" CrowPanel E-PAPER, S3"
+#elif RADAR_DISPLAY == DISPLAY_EPD_792x272
+#define RADAR_BOARD "5.79\" CrowPanel E-PAPER, S3"
 #else
 #define RADAR_BOARD "E-PAPER"
 #endif

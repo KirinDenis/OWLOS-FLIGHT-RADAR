@@ -12,6 +12,9 @@
 #include "../../core/demo.h"
 #include "../../core/ui.h"
 #include "../../core/ui_int.h"
+#if RADAR_EPAPER
+#include "../../core/paper.h"
+#endif
 
 #include "png.inc"
 #include "ground.inc"
@@ -45,16 +48,26 @@ static void fly(int seconds)
 #define STRIP 24
 static uint32_t strip_px[GFX_PW * STRIP];
 static uint16_t frame565[GFX_PW * GFX_PH];
+#if RADAR_EPAPER
+static uint8_t paper_fb[PAPER_STRIDE * GFX_H];       // the e-paper's 4 greys, 2 bits a pixel, as epd.c gets them
+#endif
+
+static int no_tiles;                                  // 1: as a board with no WiFi and no tiles kept, no map at all
 
 static void render(void)
 {
     make_ground(&ui);
+    if (no_tiles) ui.map = NULL;
     ui.snap = sky;
-    ui_frame(&ui, t_ms);
+    ui_frame(&ui, t_ms);                               // on paper it says which inks the strips are in (paper_inks)
     for (int y = 0; y < GFX_PH; y += STRIP) {
         canvas_t cv = { strip_px, y, y + STRIP <= GFX_PH ? STRIP : GFX_PH - y, 0 };
         ui_strip(&ui, &cv);
+#if RADAR_EPAPER
+        paper_pack(&cv, paper_fb);
+#else
         gfx_pack565(&cv, frame565 + y * GFX_PW);
+#endif
     }
 }
 
@@ -65,6 +78,13 @@ static void shot(const char *name)
     uint8_t *rgb = malloc((size_t)w * h * 3);
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
+#if RADAR_EPAPER
+            // the glass's own greys, as the panel shows each 2-bit code (paper.h PAPER_LEVEL)
+            int px = x / zoom, code = paper_fb[(y / zoom) * PAPER_STRIDE + (px >> 2)] >> (6 - 2 * (px & 3)) & 3;
+            uint8_t *g = rgb + ((size_t)y * w + x) * 3;
+            g[0] = g[1] = g[2] = PAPER_LEVEL[code];
+            continue;
+#endif
             uint16_t v = frame565[(y / zoom) * GFX_PW + x / zoom];
             if (!RADAR_RGB_BUS) v = (uint16_t)((v >> 8) | (v << 8));
             uint8_t *o = rgb + ((size_t)y * w + x) * 3;
@@ -293,6 +313,40 @@ int main(int argc, char **argv)
     shot("22-classic-10");
     ui.cfg.range = 50;
     shot("23-classic");
+#if RADAR_EPAPER
+    {
+        // the paper's own screen (ui_paper.c) by its keys: the tab of the key pressed prints inverted
+        ui_cmd_t kc;
+        memset(&kc, 0, sizeof kc);
+        ui_key(&ui, KEY_OK, &kc);                    // the dial pressed: the nearest plane
+        shot("60-paper-picked");
+        ui_key(&ui, KEY_OK_LONG, &kc);               // held: onto the watch list
+        shot("61-paper-watched");
+        ui_key(&ui, KEY_OK_LONG, &kc);               // and off it again
+        ui_key(&ui, KEY_BACK, &kc);                  // EXIT: let go
+        ui_key(&ui, KEY_UP, &kc);                    // the dial up: nearer, 25 km
+        shot("62-paper-nearer");
+        ui.cfg.range = 50;
+        demo.emergency = 1;
+        fly(10);
+        shot("63-paper-emergency");
+        demo.emergency = 0;
+        ui.key_at = 0;
+        ui.net.demo = 1;                             // no WiFi set and no tiles kept: the demo sky on white paper
+        no_tiles = 1;
+        shot("64-paper-no-wifi");
+        no_tiles = 0;
+        ui.net.demo = 0;
+        paper_style = 0;                             // the sheet in the 4 inks and black and white patterns, to set beside 22 and 23
+        ui.cfg.range = 10;
+        fly(5);
+        shot("65-paper-plain-10");
+        ui.cfg.range = 50;
+        fly(5);
+        shot("66-paper-plain");
+        paper_style = 1;
+    }
+#endif
 #if RADAR_ROUND
     ui.menu_until = t_ms + ROUND_MENU_MS;            // the classic look's menu: paper buttons
     shot("28-classic-menu");
@@ -503,6 +557,37 @@ int main(int argc, char **argv)
         fly(1);
         shot("56-alert-weather-storm");
         ui.alerts = WXA_ALL;
+#if RADAR_EPAPER
+        ui.wx_page = WXP_DIAL;                       // the paper's own first page (ui_weather.c weather_paper)
+        paper_style = 0;                             // the card of words before the dial
+        fly(1);
+        shot("67-paper-weather");
+        ui.alerts = 0;                               // no warnings: the words, then the hours
+        fly(1);
+        shot("68-paper-weather-calm");
+        ui.alerts = WXA_ALL;
+        paper_style = 1;
+        for (int k = 0; k < WX_PAST; k++) {          // yesterday: from 11 degrees, a night of 4, rain in the morning; the pressure falling
+            const int hb = WX_PAST - k, lh = (17 - hb + 48) % 24;
+            wx.past_t10[k] = (int16_t)(75 + 35 * cosf((float)(lh - 14) * 0.2618f));
+            wx.past_hpa10[k] = (uint16_t)(10190 - k * 45 / 10);
+            wx.past_rain10[k] = (uint16_t)(lh >= 6 && lh <= 9 ? 3 + (lh % 3) * 2 : 0);
+            wx.past_kind[k] = (uint8_t)(lh >= 6 && lh <= 9 ? WX_RAIN : lh > 9 && lh < 15 ? WX_PARTLY : WX_CLOUDY);
+        }
+        fly(1);
+        shot("71-paper-dial");                       // the printed dial: the coming day round a clock
+        ui.alerts = 0;
+        fly(1);
+        shot("72-paper-dial-calm");
+        ui.alerts = WXA_ALL;
+        ui.wx_page = WXP_PRESSURE;                   // the graphs printed, the falling pressure warned
+        fly(1);
+        shot("69-paper-pressure");
+        ui.wx_page = WXP_TEMP;
+        fly(1);
+        shot("70-paper-temp");
+        ui.wx_page = WXP_DIAL;
+#endif
         ui.cfg.look = LOOK_RADAR;
         ui.wx = NULL;
         fly(1);

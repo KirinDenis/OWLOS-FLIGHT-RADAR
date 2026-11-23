@@ -177,6 +177,24 @@ static const glyph_t *glyph_or_fallback(const font_t *f, uint32_t cp)
     return g;
 }
 
+#if RADAR_EPAPER
+#include "paper.h"
+#endif
+
+/* paper, its letters printed whole (cv->soft): the edges in the panel's greys (paper.c paper_soft) */
+static inline void put_px(const canvas_t *cv, uint32_t *p, uint32_t c, int k)
+{
+#if RADAR_EPAPER
+    if (cv->soft) {
+        *p = paper_soft(*p, c, k);
+        return;
+    }
+#else
+    (void)cv;
+#endif
+    *p = gfx_mix(*p, c, (uint32_t)k);
+}
+
 /* text loop for all baked fonts, on the glass. limit = first column that must stay clear (or big
  * number). NOTE: cut names fade out over the last FADE px instead of "...", at six pixels
  * ellipsis looks like underscore and "Byt_Sokol_" could be a real network name */
@@ -206,7 +224,7 @@ CORE_HOT static int draw_glass(canvas_t *cv, const font_t *f, int x, int y, cons
                     // paper: the soft edges stay, paper.c rounds them to the panel's two greys
                     // (no dither), that is the halftone smoothing. no fade there, see font_text_clip
                     if (!RADAR_EPAPER && fade && px > limit - FADE) k = k * (limit - px) / FADE;
-                    if (k > 0) row[px] = gfx_mix(row[px], c, (uint32_t)k);
+                    if (k > 0) put_px(cv, &row[px], c, k);
                 }
             }
         }
@@ -245,6 +263,30 @@ int font_text_clip(canvas_t *cv, const font_t *f, int x, int y, const char *utf8
         return w + ew;
     }
     return draw_text(cv, f, x, y, utf8, c, a, x + maxw, cut);
+}
+
+/* the same turned a quarter clockwise, read downwards, the letters' tops to the right: x the right edge of its
+ * line, the pen going down from y. back: how far down. the glass's own pixels (the paper's key strip) */
+int font_text_down(canvas_t *cv, const font_t *f, int x, int y, const char *utf8, uint32_t c)
+{
+    int pen = 0;
+    while (*utf8) {
+        const glyph_t *g = glyph_or_fallback(f, utf8_next(&utf8));
+        if (!g) continue;
+        const int stride = (g->w + 1) >> 1;
+        const uint8_t *bits = f->bitmap + g->off;
+        for (int col = 0; col < g->w; col++) {
+            uint32_t *row = gfx_row(cv, y + pen + g->xo + col);
+            if (!row) continue;
+            for (int r = 0; r < g->h; r++) {
+                const unsigned v = (bits[r * stride + (col >> 1)] >> ((col & 1) ? 0 : 4)) & 15;
+                const int px = x - (g->yo + r);
+                if (v && px >= 0 && px < GFX_PW) put_px(cv, &row[px], c, (int)(v * 17 + 1));
+            }
+        }
+        pen += g->adv;
+    }
+    return pen;
 }
 
 int font_width(const font_t *f, const char *utf8)

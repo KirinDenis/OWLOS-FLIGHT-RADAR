@@ -96,7 +96,7 @@ void disp_strip(const canvas_t *cv)
     }
     static CORE_BIG uint16_t line[GFX_PW];                      // turned over: last row first, each back to front
     for (int r = 0; r < cv->h; r++) {
-        const canvas_t one = { cv->px + r * GFX_PW, cv->y0 + r, 1, 0, 0 };
+        const canvas_t one = { cv->px + r * GFX_PW, cv->y0 + r, 1, 0, 0, 0 };
         gfx_pack565(&one, line);
         uint16_t *to = fb + (GFX_PH - 1 - one.y0) * GFX_PW;
         for (int x = 0; x < GFX_PW; x++) to[GFX_PW - 1 - x] = line[x];

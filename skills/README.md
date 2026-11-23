@@ -50,6 +50,9 @@ descriptions, opens the `SKILL.md` that fits the job, and then only the referenc
 - [esp32-flash-and-settings](esp32-flash-and-settings/SKILL.md): local flashing with a chip and MAC check, the
   browser flasher over Web Serial, settings over USB and the site's console, NVS, CI, versions, the beta channel,
   the archive of old versions.
+- [github-fork-build-publish](github-fork-build-publish/SKILL.md): a project of your own from ours. Fork it, build
+  one board or all in GitHub Actions, publish your own flasher on GitHub Pages, and send the work back. What a fork
+  must change so it stops talking to the parent. Not tied to ESP32.
 - [esp32-data-sources](esp32-data-sources/SKILL.md): the web services, one file each (flight data, weather, air,
   maps, geocoding, time and more), the sensors, one file each, and how a small board reads them.
 

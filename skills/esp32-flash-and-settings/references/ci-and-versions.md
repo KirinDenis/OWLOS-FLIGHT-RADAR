@@ -55,7 +55,10 @@ concurrency:
   cancel-in-progress: true
 ```
 
-- `workflow_dispatch`: the Run workflow button, for a rebuild with no commit.
+- `workflow_dispatch`: the Run workflow button, for a rebuild with no commit. Since 2026-11-23 it takes a `board`
+  input that builds one board only, published only in a fork, and the site job has a fork path (no seeds, no beta
+  on an empty site). The excerpt above is from before it; `files/flight-radar/pages.yml` is current, and the road
+  for a fork is the skill [github-fork-build-publish](../../github-fork-build-publish/SKILL.md) [built].
 - `pull_request`: a contributor's PR builds every board on GitHub before it is merged (measured: the PR that
   brought the plain CrowPanel 5.0 was green on every board before the merge). The site job is skipped for it
   (below).

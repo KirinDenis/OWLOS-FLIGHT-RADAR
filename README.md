@@ -474,7 +474,9 @@ and a PC preview.
 - `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012`,
   `crow70` and `crow50`.
 - `.github/workflows/pages.yml` builds them all in Espressif's ESP-IDF image and publishes the site
-  with them on GitHub Pages, on every push to main.
+  with them on GitHub Pages, on every push to main. Run workflow with a board's build name in "board" builds that
+  board only, in a few minutes: in a fork it becomes the fork's own flasher site, here it is built and never
+  published. The road for a fork of your own: `skills/github-fork-build-publish`.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site
   publishes it in `version.json` for the boards and shows the file as its history. A new version is a new
   section at the top of that file.

@@ -16,7 +16,15 @@ on:
   # site job below), and the firmware stays with the run as its artifacts
   pull_request:
     branches: [ main ]
+  # Run workflow by hand. "board" builds one board only, in a couple of minutes instead of all of them:
+  # in a fork it is published as that fork's site, here it is built and kept with the run, never published
+  # (the site would lose the other boards)
   workflow_dispatch:
+    inputs:
+      board:
+        description: "One board only, by its build name (ili9341, st7796, gc9a01 ...). Empty: every board"
+        required: false
+        default: ""
 
 # each job asks for what it needs on top of this
 permissions:
@@ -53,10 +61,13 @@ jobs:
           - { disp: wave7b, num: 16, target: esp32s3 }
           - { disp: jc8012, num: 17, target: esp32p4 }
           - { disp: crow50, num: 18, target: esp32s3 }
+    # a run by hand for one board: the other boards' jobs pass over every step and end at once
     steps:
       - uses: actions/checkout@v4
+        if: ${{ !inputs.board || inputs.board == matrix.disp }}
 
       - name: Build
+        if: ${{ !inputs.board || inputs.board == matrix.disp }}
         # the whole repo goes in, firmware/ pulls ../core. git inside the container runs as
         # root on files that aren't root's, hence the safe.directory line
         run: |
@@ -68,6 +79,7 @@ jobs:
                        -DIDF_TARGET=${{ matrix.target }} -DRADAR_DISPLAY=${{ matrix.num }} build"
 
       - name: Collect the binaries
+        if: ${{ !inputs.board || inputs.board == matrix.disp }}
         # flash_args is written by the build: where each part goes
         run: |
           B=firmware/build_${{ matrix.disp }}
@@ -77,6 +89,7 @@ jobs:
           ls -l out/${{ matrix.disp }}
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.board || inputs.board == matrix.disp }}
         with:
           name: fw-${{ matrix.disp }}
           path: out
@@ -84,6 +97,7 @@ jobs:
       # not for the site: the ELF turns a crash backtrace from a board flashed off the
       # site into file and line. a locally built ELF doesn't match
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.board || inputs.board == matrix.disp }}
         with:
           name: elf-${{ matrix.disp }}
           path: |
@@ -95,6 +109,7 @@ jobs:
   # radar/ on the site
   web:
     name: Radar in the browser
+    if: ${{ !inputs.board }}  # not in a run for one board: the site goes out without its radar page
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,11 +142,11 @@ jobs:
   # push cancelled. the older versions come from the site as it is: a version it has and this run
   # can't fetch, or a lower number than one it has, stops here and the site stays as it was.
   # a version's firmware is replaced by each build of it: to keep a build, give the next one a new
-  # number in CHANGES.md
+  # number in CHANGES.md. a run for one board publishes only in a fork, where that board is the site
   site:
     name: Flasher site
     needs: [ firmware, web ]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.board || github.event.repository.fork) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -170,15 +185,29 @@ jobs:
         # fw/ (archive.sh). version.json is what the boards ask for: "version" the stable, which every board
         # reads, "beta" the beta, which only a beta board follows. CHANGES.md is the history the page shows.
         # the older versions go to fw/<version>/, fw/versions.json lists them all for the page
+        # a fork's site starts empty: no stable for a beta to stand beside, and the runs in
+        # archive-seed.txt are this repository's, a fork can't fetch them. so in a fork each build is its
+        # site's newest version, the page still says "beta" where CHANGES.md does, and there are no seeds
         env:
           SITE: ${{ steps.pages.outputs.base_url }}
+          BOARD: ${{ inputs.board }}
+          FORK: ${{ github.event.repository.fork }}
         run: |
+          if [ -n "$BOARD" ] && [ ! -f "public/fw/$BOARD/flash_args" ]; then
+            echo "no board \"$BOARD\" was built: the names are the firmware job's, ili9341, st7796, gc9a01 ..." >&2
+            exit 1
+          fi
           HEAD=$(grep -m 1 '^## ' CHANGES.md || true)
           VER=$(printf '%s\n' "$HEAD" | sed -n 's/^## \([0-9][0-9.]*\).*/\1/p')
           [ -n "$VER" ] || { echo "no version in CHANGES.md: its first '## ' line should be one" >&2; exit 1; }
           BETA=0
           WORD=""
           case "$HEAD" in *'(beta)'*) BETA=1; WORD=' beta' ;; esac
+          SEEDS=.github/archive-seed.txt
+          if [ "$FORK" = true ]; then
+            BETA=0
+            SEEDS=/dev/null
+          fi
           VERSION="$VER$WORD, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
           cp -r site/. public/
           cp CHANGES.md public/
@@ -197,7 +226,7 @@ jobs:
           else
             bash .github/make-manifests.sh public/fw "$VERSION"
           fi
-          bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" .github/archive-seed.txt "$BETA"
+          bash .github/archive.sh public/fw "$VER" "$VERSION" "$SITE" "$SEEDS" "$BETA"
           # the stable is the list's first, as archive.sh wrote it: a beta's run did not build it
           STABLE=$(grep -v '"beta":' public/fw/versions.json | sed -n 's/.*"version": "\([^"]*\)", "text": "\([^"]*\)".*/\1|\2/p' | head -n 1)
           [ -n "$STABLE" ] || { echo "fw/versions.json has no stable version" >&2; exit 1; }

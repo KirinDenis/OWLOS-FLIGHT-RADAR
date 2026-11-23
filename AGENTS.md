@@ -18,6 +18,8 @@ measured fact, check the others.
 - `esp32-runtime`: tasks, watchdogs, memory, WiFi and TLS, crashes, testing without a person.
 - `esp32-flash-and-settings`: flashing, the browser flasher, the settings over USB, CI, versions.
 - `esp32-data-sources`: the web services and sensors, one file each.
+- `github-fork-build-publish`: your own fork, one board built in Actions, your own flasher site on Pages, and the
+  pull request back.
 
 Read the skill your task needs before you open the code. When your work teaches something new, say it in your
 pull request: it goes back into the skills.

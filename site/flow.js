@@ -13,6 +13,7 @@ import { Terminal } from './term.js';
 import { Desk } from './win.js';
 import { BoardPaths, BOARD_GROUPS, boardCommands } from './board-console.js';
 import { startStats, askHelp, helpAnswer, onHelp, reportFlash, reportCable } from './stats.js';
+import { startHistory } from './history.js';
 
 const $ = (id) => document.getElementById(id);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2042,6 +2043,7 @@ fetch('version.json').then((r) => r.json()).then(async (v) => {
 }).catch((e) => console.warn(e));
 setInterval(showStates, 10000);                        // an answer that stopped coming shows by itself
 startStats(BOARDS);                                    // the boards out there, when our server answers
+startHistory(BOARDS, CHIP_NAME, desk);                 // how it grew: a window at the bottom, from CHANGES.md, fw/versions.json, history.txt
 setInterval(() => reportCable(here().length), 5 * 60000);   // how many are on this page's cable, when allowed
 hero.start().then(() => {
   requestAnimationFrame(tickAll);

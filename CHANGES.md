@@ -5,84 +5,11 @@ version: the firmware is built with it, the site publishes it, and a board compa
 The site keeps the firmware of each version: a new number here keeps the one before it as it was.
 A version marked (beta) is offered on the site beside the stable one, which stays what the site flashes
 unless the beta is picked. Only a board that runs a beta hears of a newer beta.
+The line under each heading says the version in a few words, for the dial of versions on the site.
 
-## 0.16.2 (beta)
+## 0.16
 
-- The planes move smoothly. The board hears where each plane is every 5 seconds from the free networks
-  and every 20 from FR24, and flies it on by itself in between; when the next position came, a plane
-  that had gone a little wrong jumped to it. Now it slides there, eased at both ends, in two seconds, or
-  longer where two would be faster than the plane itself flies: a light one circling does not swim half
-  a kilometre sideways. Its nose turns to the new heading as smoothly, where it snapped round. One that
-  stood still on the screen, unheard for longer than a guess goes, still jumps to where it is, and so
-  does one more than 3 km from where the board had it.
-- Each position is placed at the moment the server made its answer. The free networks write that moment
-  in each answer, and the board took the moment it asked instead: an answer is made somewhere in a
-  question of 2.5 to 4 seconds, never at the same point of it, so each new position came a hundred
-  metres or so ahead or behind, and a plane sped up and slowed down with every answer. FR24's positions
-  are placed by their own times.
-- A plane in a turn flies on round its curve for 5 seconds, and its shape turns with it: how fast it
-  turns comes from its last two positions. Then straight on: a turn is often over by the time two
-  positions show it, and one flown on further turned the noses more than the planes turned.
-- On FR24 the planes stood still for a moment before each answer and then jumped ahead: a guess went 20
-  seconds at most, and FR24's answers come 20 seconds apart and a little more. Now they fly on till the
-  next one comes, and through one that does not come, 60 seconds, where they went and came back. The
-  RADAR look's LOST greys a plane on FR24 after 32 seconds, not 12: it greyed them all between two
-  answers.
-- Measured on 12 minutes of real sky round a busy airport, replayed through the board's own code as the
-  free networks give it: a plane steps back a pixel 0.6 times a minute where 0.16.1 did 6.6 times, no
-  frame moves it more than 17 m off the way it flew where 0.16.1 jumped up to 600 m, and it is drawn 54 m
-  from where it is on average, 289 m before. At FR24's pace 0.16.1 jumped up to 2.3 km; now 17 m.
-- The map is easier to see on the dark looks. On these screens the land was one or two steps of 32 above
-  black and the woods three, where the glass shows next to nothing, least of all from the side: the
-  steps of its kinds are now even to the eye, the land and the woods lifted, the water left dark. Water
-  and towns have a bright edge inside them, so a coast, a river, a lake and a town stand out by their
-  outline: the eye reads where things end more than what fills them. The woods have none, the country is
-  woods in pieces and every piece outlined rippled over the whole map. The classic look keeps its own
-  colours and outlines only the water, a deeper blue.
-- A road, a river or a stream one pixel wide on the map's tiles came out dashed: a point of the map is up
-  to 1.4 pixels of a tile and was read at one of them. Now it keeps whichever of its pixels would be lost,
-  the road and not the field beside it, and the lines run whole. The names on the classic look no longer
-  lose letters the same way.
-- The map's own names, the towns and villages, read on the dark looks. The tiles write them dark in a
-  light halo, made for a light map, and here they were a dark hole with a glow round it: now the letters
-  are near white and the halo dark. They are found by their colours, which OpenStreetMap keeps the same:
-  a grey under 100 is a letter, a lighter grey within three pixels of one is its soft edge; read one
-  pixel at a time they went to a town, a road or a rail, and a name came out eaten. A letter comes before
-  anything else under it, as it does on the tiles.
-- Each name is copied word by word, pixel for pixel, as the tiles write it; only where it stands is
-  scaled. The tiles write a town's name some 9 pixels high for their own scale, and stretched or shrunk to
-  the screen's a stroke came out one pixel here and two there: "Trenčín" read "Trenć'n", its háček an
-  accent and its í gone. The thin stem of an í, a lighter grey with no dark pixel of its own, is now part
-  of its word, and a name split between two tiles meets itself again. The classic look gets the same.
-  The words are gathered in a buffer the board already had for asking OpenStreetMap a town's name, now
-  1.1 KB bigger; taken from the free memory beside the tile's own, they cost the 2.8" a third of its maps.
-- Light letters on the dark glass looked fatter than the same letters dark on paper, and a small name ran
-  into a blot: the soft edge was as bright as the letter. Now it is dimmer, and SET, VIEW, **MAP NAMES**
-  says how much: SOFT, half as bright (what a board starts with), THIN, a quarter, or BOLD, as bright. The site's console
-  says it as `names`. The classic look is as it was.
-- The height legend in the corner of the map and the radar says the height's unit: in metres (SET, UNITS)
-  it reads <3KM and <7.6KM, where it read <10K and <25K whatever was set. The colours stay where they
-  were, at 10 000 and 25 000 ft.
-- The plain greys of a town were taken for an airport's apron and lit up as runways: they are a town now.
-- The small roads are quieter the wider the range: from 25 km out the tiles have every lane in the
-  country, and whole they were a net over the map.
-- The cards under the writing on the map, the planes' names, the degrees, the ring's numbers on the
-  radar, the place on the round glass, are solid: the map showed through the letters, more so now it is
-  brighter.
-- The outlines take some 5 ms a frame on the 3.5" in the MAP and CLASSIC looks, 10 frames a second to 9,
-  and nothing to speak of in RADAR; on the round glass a few ms of a frame of 250 or more.
-- The site's console writes a board's config as it reads it: each line NAME=VALUE goes to the live board as
-  `set` sends it. `echo theme=amber > config` sets one thing, and `cat /boards/a/config > /boards/b/config`
-  gives one board all another one has. A line a board does not take, a light that does not dim, is said and
-  left; the rest are set. The other files of a board, its info, wifi and log, only show what it says.
-- The console's `set` takes as many settings as are given: `set look=radar theme=amber backlight=25 --all`.
-  An alias of it is a whole setup in one word.
-- A build for the ZLX-ESP32-2 (`zlx2`): an ESP32-C5 board, ST7789 320x240, resistive touch. Experimental:
-  the pins come from its maker's pin list and factory test, and it has not run on one yet. Its speaker's
-  amplifier is held off. The stable has no build for it, so the site flashes it the beta, with no row to
-  pick the stable.
-
-## 0.16.1 (beta)
+WEATHER, the fourth look, your own units, a screen that dims at night, planes that glide, a clearer map.
 
 - A fourth look, WEATHER: the next 24 hours on the radar's own dial, noon at the top and midnight at
   the bottom, a hand at now as a clock has, and in the middle the temperature now over the home's clock.
@@ -109,8 +36,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   pages is up, the warnings and the units. A page turned on the board turns on the site too, and the
   other way round: the board says `OWLOS WXPAGE` and the page's number. A board before 0.16 keeps its
   three looks there.
-- Back to 0.15 from this beta: a board left on WEATHER shows MAP there, and the LED's settings start
-  from their defaults. Everything else stays, and flashed to 0.16.1 again the board has all of it back.
+- Back to 0.15 from 0.16: a board left on WEATHER shows MAP there, and the LED's settings start
+  from their defaults. Everything else stays, and flashed to 0.16 again the board has all of it back.
 - Behind the dial two more pages, a tap on it to each, or BOOT: the pressure and the temperature as
   graphs on one time axis, 14 hours back on the left and the next day on the right, so now stands at
   about the golden section of the width, in the same place on both, a line up to a dot that pulses.
@@ -169,8 +96,83 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 - A board already on the site picks its version too: in its window SETTINGS, BOARD, Version, STABLE or
   BETA, then FLASH, its settings kept. Before, only a new board could pick the beta as it was flashed,
   and a board on the beta had no button back to the stable.
+- The planes move smoothly. The board hears where each plane is every 5 seconds from the free networks
+  and every 20 from FR24, and flies it on by itself in between; when the next position came, a plane
+  that had gone a little wrong jumped to it. Now it slides there, eased at both ends, in two seconds, or
+  longer where two would be faster than the plane itself flies: a light one circling does not swim half
+  a kilometre sideways. Its nose turns to the new heading as smoothly, where it snapped round. One that
+  stood still on the screen, unheard for longer than a guess goes, still jumps to where it is, and so
+  does one more than 3 km from where the board had it.
+- Each position is placed at the moment the server made its answer. The free networks write that moment
+  in each answer, and the board took the moment it asked instead: an answer is made somewhere in a
+  question of 2.5 to 4 seconds, never at the same point of it, so each new position came a hundred
+  metres or so ahead or behind, and a plane sped up and slowed down with every answer. FR24's positions
+  are placed by their own times.
+- A plane in a turn flies on round its curve for 5 seconds, and its shape turns with it: how fast it
+  turns comes from its last two positions. Then straight on: a turn is often over by the time two
+  positions show it, and one flown on further turned the noses more than the planes turned.
+- On FR24 the planes stood still for a moment before each answer and then jumped ahead: a guess went 20
+  seconds at most, and FR24's answers come 20 seconds apart and a little more. Now they fly on till the
+  next one comes, and through one that does not come, 60 seconds, where they went and came back. The
+  RADAR look's LOST greys a plane on FR24 after 32 seconds, not 12: it greyed them all between two
+  answers.
+- Measured on 12 minutes of real sky round a busy airport, replayed through the board's own code as the
+  free networks give it: a plane steps back a pixel 0.6 times a minute where the 0.16.1 beta did 6.6
+  times, no frame moves it more than 17 m off the way it flew where that beta jumped up to 600 m, and it is
+  drawn 54 m from where it is on average, 289 m before. At FR24's pace that beta jumped up to 2.3 km; now
+  17 m.
+- The map is easier to see on the dark looks. On these screens the land was one or two steps of 32 above
+  black and the woods three, where the glass shows next to nothing, least of all from the side: the
+  steps of its kinds are now even to the eye, the land and the woods lifted, the water left dark. Water
+  and towns have a bright edge inside them, so a coast, a river, a lake and a town stand out by their
+  outline: the eye reads where things end more than what fills them. The woods have none, the country is
+  woods in pieces and every piece outlined rippled over the whole map. The classic look keeps its own
+  colours and outlines only the water, a deeper blue.
+- A road, a river or a stream one pixel wide on the map's tiles came out dashed: a point of the map is up
+  to 1.4 pixels of a tile and was read at one of them. Now it keeps whichever of its pixels would be lost,
+  the road and not the field beside it, and the lines run whole. The names on the classic look no longer
+  lose letters the same way.
+- The map's own names, the towns and villages, read on the dark looks. The tiles write them dark in a
+  light halo, made for a light map, and here they were a dark hole with a glow round it: now the letters
+  are near white and the halo dark. They are found by their colours, which OpenStreetMap keeps the same:
+  a grey under 100 is a letter, a lighter grey within three pixels of one is its soft edge; read one
+  pixel at a time they went to a town, a road or a rail, and a name came out eaten. A letter comes before
+  anything else under it, as it does on the tiles.
+- Each name is copied word by word, pixel for pixel, as the tiles write it; only where it stands is
+  scaled. The tiles write a town's name some 9 pixels high for their own scale, and stretched or shrunk to
+  the screen's a stroke came out one pixel here and two there: "Trenčín" read "Trenć'n", its háček an
+  accent and its í gone. The thin stem of an í, a lighter grey with no dark pixel of its own, is now part
+  of its word, and a name split between two tiles meets itself again. The classic look gets the same.
+  The words are gathered in a buffer the board already had for asking OpenStreetMap a town's name, now
+  1.1 KB bigger; taken from the free memory beside the tile's own, they cost the 2.8" a third of its maps.
+- Light letters on the dark glass looked fatter than the same letters dark on paper, and a small name ran
+  into a blot: the soft edge was as bright as the letter. Now it is dimmer, and SET, VIEW, **MAP NAMES**
+  says how much: SOFT, half as bright (what a board starts with), THIN, a quarter, or BOLD, as bright. The site's console
+  says it as `names`. The classic look is as it was.
+- The height legend in the corner of the map and the radar says the height's unit: in metres (SET, UNITS)
+  it reads <3KM and <7.6KM, where it read <10K and <25K whatever was set. The colours stay where they
+  were, at 10 000 and 25 000 ft.
+- The plain greys of a town were taken for an airport's apron and lit up as runways: they are a town now.
+- The small roads are quieter the wider the range: from 25 km out the tiles have every lane in the
+  country, and whole they were a net over the map.
+- The cards under the writing on the map, the planes' names, the degrees, the ring's numbers on the
+  radar, the place on the round glass, are solid: the map showed through the letters, more so now it is
+  brighter.
+- The outlines take some 5 ms a frame on the 3.5" in the MAP and CLASSIC looks, 10 frames a second to 9,
+  and nothing to speak of in RADAR; on the round glass a few ms of a frame of 250 or more.
+- The site's console writes a board's config as it reads it: each line NAME=VALUE goes to the live board as
+  `set` sends it. `echo theme=amber > config` sets one thing, and `cat /boards/a/config > /boards/b/config`
+  gives one board all another one has. A line a board does not take, a light that does not dim, is said and
+  left; the rest are set. The other files of a board, its info, wifi and log, only show what it says.
+- The console's `set` takes as many settings as are given: `set look=radar theme=amber backlight=25 --all`.
+  An alias of it is a whole setup in one word.
+- A build for the ZLX-ESP32-2 (`zlx2`): an ESP32-C5 board, ST7789 320x240, resistive touch. Experimental:
+  the pins come from its maker's pin list and factory test, and it has not run on one yet. Its speaker's
+  amplifier is held off.
 
 ## 0.15
+
+The plain CrowPanel 5.0 and ESP-IDF 6, by Bert van Mullem.
 
 - The plain Elecrow CrowPanel 5.0 (DIS07050H), not the Advance: `crow50`. ESP32-S3, 800x480, GT911.
   Its picture pins and its touch (I2C on GPIO 19 and 20, a PCA9557 at 0x18, backlight on GPIO 2) are
@@ -182,6 +184,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 - On every other board 0.15 changes only when the time is asked: there is no need to flash it again.
 
 ## 0.14
+
+Three boards from Michael Caldwell-Waller's fork, and the map with no more holes in it.
 
 - Three new boards, by Michael Caldwell-Waller (chipguyhere), from the fork
   chipguyhere/OWLOS-FLIGHT-RADAR-7-7B: the Waveshare ESP32-S3-Touch-LCD-7 and -7B, and the 10.1" Guition
@@ -208,6 +212,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
 ## 0.13
 
+The radar without its panel, and bigger letters on the bigger screens.
+
 - The radar can do without its panel: the three dots in the top right corner take it away and the scope
   moves to the middle of the screen. A picked plane brings the panel back while it is picked; the dots
   take it away again, and the plane with it. Tapped once more, they bring the panel back to stay. The
@@ -217,6 +223,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   2.8" keeps its letters; over the radar its panel's title says the picked plane's kind.
 
 ## 0.12
+
+The map of boards on the site, counted only when you allow it.
 
 - At a home in Rusia the board asks for no planes and no map: the screen says NOT AVAILABLE IN RUSIA.
   The country is the one OpenStreetMap gives for the home's point, asked once a home. Crimea and the other
@@ -229,11 +237,15 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
 ## 0.11
 
+Elecrow's CrowPanel 7.0.
+
 - Elecrow's CrowPanel 7.0, the plain one (DIS08070H), experimental: ESP32-S3, an 800x480 screen on the RGB
   bus, capacitive touch, the 5" boards' layout. Asked for in our group by an owner who tests it; not run on
   one here yet. Its BOOT button is the screen's clock line: do not press it while the screen runs.
 
 ## 0.10
+
+The map no longer restarts a board or goes from the screen.
 
 - Fixed: a board could restart on the map, most often right after the range changed. When a map tile came
   only in part, the next one was asked for on a connection that was already broken.
@@ -242,6 +254,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   it adds the missing tiles to the map that is there.
 
 ## 0.9
+
+The page shows your boards' own screens, live, and the 4.3" ESP32-4827S043C.
 
 - A beta. The screens on the page are your boards' own, live, and say so: LIVE over each one. Click one
   and the board does the same.
@@ -252,6 +266,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   with a layout of its own. Asked for in our group; not run on one here yet. Tell us how it goes.
 
 ## 0.8
+
+Five WiFi networks, a page with all your boards at once, and the M5Stack Tab5.
 
 - The board remembers five WiFi networks and joins whichever it finds. A saved one joins with a tap on the
   WiFi page, and the site shows them, each with FORGET.
@@ -264,6 +280,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
 ## 0.7
 
+The radar in your browser: the same code as on the board.
+
 - The radar in your browser, on the site's radar page: the same screen code as on the board. A demo sky at
   first. Connect a board over USB in Chrome or Edge and the page shows its planes, and a tap on either side
   goes to the other: the look, the colours, the range, turning the map, the options, the picked plane.
@@ -271,6 +289,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   picture, TLS and the WiFi's buffers now lie in its PSRAM.
 
 ## 0.6
+
+The radar's options under a gear, and the first two 5" boards.
 
 - The radar look has its small ring back. The pin stays on the two maps, where it is needed.
 - A gear under the radar opens its options, also in SET's new RADAR tab and on the site, all off until you
@@ -289,6 +309,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
 ## 0.5
 
+Home is a pin, and adsb.fi at its new address.
+
 - Home is a pin now, in a colour nothing else on the screen has, with a dark edge, over the planes. The
   ring it used to be got lost on a map full of white roads and white planes.
 - The planes from adsb.fi come from its new address: the old one is on its way out.
@@ -296,6 +318,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   the screen had been touched, so only TEST ever showed.
 
 ## 0.4
+
+Three boards people asked for, and every version kept on the site.
 
 - Three more boards, each asked for by people who have one, none run here yet: the LCDWIKI ES3C28P
   (ESP32-S3, ILI9341V, capacitive touch), the NM-CYD-C5 (ESP32-C5, ST7789, resistive touch) and
@@ -307,6 +331,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   wrong on.
 
 ## 0.3
+
+Home and a watch list set on the board itself, the LED, SET in tabs and ABOUT.
 
 - Planes on the ground can be left out: SET, DATA, ON GROUND, or the site. Next to an airport the parked
   ones no longer fill the list.
@@ -326,6 +352,8 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 - Fixed: a setting the site sent the moment the board said it was ready could be lost.
 
 ## 0.2
+
+The first public version: a radar over the map, on four boards.
 
 - The first public version. A radar scope over the map, a plain square map, or the map in
   OpenStreetMap's own colours. Planes from the free community ADS-B networks (adsb.lol, adsb.fi) or

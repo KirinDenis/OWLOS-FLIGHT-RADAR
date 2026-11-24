@@ -248,6 +248,148 @@
   #boardstats .meter { position: absolute; left: 6px; bottom: 2px; height: 2px; max-width: calc(100% - 12px); background: var(--prim); box-shadow: 0 0 6px var(--prim); opacity: .8; }
   @media (max-width: 860px) { .worldgrid { grid-template-columns: minmax(0, 1fr); } }
 
+  /* the versions on the radar's dial (history.js): a ring a version, a line a board, its colour its chip */
+  #histdial, #histgrow { position: relative; }
+  .histscope { position: relative; max-width: 560px; margin: 0 auto; }
+  .histscope svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; cursor: crosshair; }
+  .histscope svg:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+  #histdial .tick { stroke: var(--line); stroke-width: 1; opacity: .7; }
+  #histdial .tick.big { stroke: var(--dim); opacity: .45; }
+  #histdial .ring { fill: none; stroke: #2a6aa5; stroke-width: 1; opacity: 0; }
+  #histdial .ring.beta { stroke-dasharray: 3 4; }
+  #histdial .edge { fill: none; stroke: #bff3ff; stroke-width: 1.6; }
+  #histdial .board { stroke-width: 2.4; stroke-linecap: round; }
+  #histdial .dot { stroke: #06142c; stroke-width: 1.5; }
+  #histdial .ping { fill: none; stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+  #histdial .ping.go { animation: histping .9s ease-out; }
+  @keyframes histping { from { opacity: .9; transform: scale(1); } to { opacity: 0; transform: scale(3.2); } }
+  /* the beam: a cone of light turning, bright at its edge and fading behind, and each line flaring as it passes */
+  .histbeam {
+    position: absolute; border-radius: 50%; pointer-events: none; mix-blend-mode: screen; opacity: 0; transition: opacity 1.2s;
+    background: conic-gradient(from 0deg, rgba(92, 225, 255, 0) 0deg 270deg, rgba(92, 225, 255, .04) 315deg, rgba(92, 225, 255, .14) 350deg,
+      rgba(190, 245, 255, .4) 359.4deg, rgba(92, 225, 255, 0) 360deg);
+  }
+  .histscope.sweep .histbeam { opacity: 1; animation: histturn var(--sweep) linear infinite; }
+  @keyframes histturn { to { transform: rotate(360deg); } }
+  #histdial .flare { stroke-width: 3.4; stroke-linecap: round; opacity: 0; }
+  .histscope.sweep .flare { animation: histflare var(--sweep) linear infinite; }
+  @keyframes histflare { 0% { opacity: .9; } 8% { opacity: .4; } 30%, 100% { opacity: 0; } }
+  #histdial .num, #histdial .inch { font: 400 10px var(--mono); fill: var(--dim); opacity: 0; paint-order: stroke; stroke: #06142c; stroke-width: 3px; }
+  #histdial .num.now { fill: var(--focus); font-weight: 700; }
+  /* the code growing (growth.js) */
+  #histgrow canvas { display: block; width: 100%; touch-action: pan-y; }
+  .growbar { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; color: var(--dim); font: 400 12px var(--mono); }
+  .growbar button {
+    flex: none; min-width: 96px; padding: 3px 8px; color: var(--prim); background: rgba(3, 8, 26, .6); border: 1px solid var(--line);
+    border-radius: 4px; font: 700 12px var(--mono); cursor: pointer;
+  }
+  .growbar button:hover { border-color: var(--prim); }
+  .growbar input { flex: 1 1 auto; min-width: 0; accent-color: var(--prim); }
+  .growwhen { flex: none; white-space: nowrap; }
+  #histtabs { display: flex; gap: 6px; margin: 0 0 10px; }
+  /* the history is one window of the page's own, docked in its section: maximized it covers the page */
+  #history > .win { position: relative; width: 100%; max-width: none; }
+  #history > .win.maxed {
+    position: fixed !important; left: 12px !important; right: 12px; top: 44px !important; bottom: 12px; width: auto; max-width: none;
+    max-height: none; transform: none;
+  }
+  .win.history .winbody { padding: 12px 14px 14px; }
+  .win.maxed.history .winbody { display: flex; overflow: hidden; }
+  .historygrid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  .win.maxed .historygrid { flex: 1; min-height: 0; align-items: stretch; }
+  .histview { min-width: 0; }
+  .histmenu { padding-left: 16px; border-left: 1px solid rgba(29, 74, 120, .55); }
+  .win.maxed .histmenu { overflow-y: auto; }
+  .win.maxed .histscope { max-width: min(100%, calc(100vh - 170px)); }
+  .win.maxed canvas { touch-action: none; }
+  @media (max-width: 860px) {
+    .historygrid { grid-template-columns: minmax(0, 1fr); }
+    .histmenu { padding: 12px 0 0; border-left: 0; border-top: 1px solid rgba(29, 74, 120, .55); }
+    .win.maxed .histmenu { display: none; }
+  }
+  .histparts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--dim); font: 400 11px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+  .histparts span { margin-right: 4px; }
+  .histparts button {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; color: var(--dim); background: rgba(3, 8, 26, .6); border: 1px solid var(--line);
+    border-radius: 4px; font: 400 12px var(--mono); text-transform: none; letter-spacing: 0; cursor: pointer;
+  }
+  .histparts button i { width: 8px; height: 8px; border-radius: 2px; }
+  .histparts button:hover { color: var(--focus); border-color: var(--prim); }
+  .histparts button[aria-pressed="true"] { color: var(--focus); border-color: var(--prim); background: rgba(92, 225, 255, .12); }
+  .histall {
+    display: block; width: 100%; margin: 14px 0 0; padding: 6px 10px; color: #03081a; background: var(--prim); border: 0; border-radius: 4px;
+    font: 700 12px var(--mono); letter-spacing: 1.5px; cursor: pointer;
+  }
+  .histall:hover { box-shadow: 0 0 12px rgba(92, 225, 255, .5); }
+  #histopen { display: block; margin: 0 auto; font: 400 14px var(--mono); }
+  .growhint { margin: 6px 0 0; color: var(--dim); font: 400 11px var(--mono); opacity: .8; }
+  .towerpart, .towerfloor { pointer-events: auto; cursor: pointer; background: none; border: 0; padding: 2px 4px; }
+  .towerpart.off { opacity: .35; }
+  .towerfloor:hover, .towerpart:hover { color: var(--prim); }
+  #histtabs button {
+    padding: 3px 12px; color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 4px;
+    font: 700 12px var(--mono); letter-spacing: 1.5px; cursor: pointer;
+  }
+  #histtabs button:hover { color: var(--focus); border-color: var(--prim); }
+  #histtabs button[aria-selected="true"] { color: #03081a; background: var(--prim); border-color: var(--prim); }
+  /* the tower of time (tower.js): the words laid over the WebGL picture */
+  #histtower { position: relative; min-height: 320px; }
+  #histtower.loading::before { content: "LOADING THE TOWER"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font: 400 12px var(--mono); letter-spacing: 2px; }
+  #histtower canvas { display: block; width: 100%; touch-action: pan-y; cursor: grab; }
+  #histtower canvas:active { cursor: grabbing; }
+  .towerlabels { position: absolute; left: 0; top: 0; width: 100%; height: 0; pointer-events: none; }
+  .towerpart, .towerfloor { position: absolute; left: 0; top: 0; white-space: nowrap; font: 400 11px var(--mono); text-shadow: 0 0 4px #03081a, 0 0 8px #03081a; will-change: transform; }
+  .towerpart { display: flex; align-items: center; gap: 5px; color: var(--focus); }
+  .towerpart i { width: 8px; height: 8px; border-radius: 2px; }
+  .towerpart small { color: var(--dim); font-size: 10px; }
+  .towerfloor { color: var(--dim); padding-right: 6px; transition: opacity .4s; }
+  .towerfloor.now { color: var(--prim); font-weight: 700; }
+  .towercaption { position: absolute; left: 0; right: 0; top: 0; padding: 10px 14px 18px; pointer-events: none; font-size: 13px; line-height: 1.45;
+    background: linear-gradient(to bottom, rgba(3, 8, 26, .88), rgba(3, 8, 26, 0)); }
+  .towercaption:empty { display: none; }
+  .tcwhen { color: var(--dim); font: 400 11px var(--mono); letter-spacing: 1px; }
+  .tcwords { color: var(--focus); max-width: 52em; }
+  .tcparts { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px; color: var(--dim); font: 400 11px var(--mono); }
+  .tcparts span { display: inline-flex; align-items: center; gap: 5px; }
+  .tcparts i { width: 8px; height: 8px; border-radius: 2px; }
+  .growtip small { color: var(--dim); }
+  @media (max-width: 560px) { .towerpart small { display: none; } .towercaption { padding: 8px 10px 14px; font-size: 12px; } }
+  .growtip { white-space: normal; max-width: 300px; }
+  #histpanel > * { animation: histin .35s ease-out both; }
+  @keyframes histin { from { opacity: 0; transform: translateY(4px); } }
+  #histtip, .growtip { position: absolute; z-index: 2; padding: 4px 8px; pointer-events: none; color: var(--dim); background: #050e22; border: 1px solid var(--prim); font: 400 12px var(--mono); white-space: nowrap; }
+  #histtip b, .growtip b { color: var(--focus); }
+  #histlegend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 10px 0 0; color: var(--dim); font: 400 12px var(--mono); }
+  #histlegend span { display: inline-flex; align-items: center; gap: 5px; }
+  #histlegend i, .histnew i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  #histlegend .plain { margin-left: auto; font: 400 12px var(--mono); }
+  .histver { display: flex; align-items: baseline; gap: 10px; }
+  .histver b { color: var(--prim); font: 700 44px/1.1 var(--mono); text-shadow: 0 0 22px rgba(92, 225, 255, .4); }
+  .histver span { color: var(--dim); font: 400 12px var(--mono); letter-spacing: 1.5px; text-transform: uppercase; }
+  .histhead { margin: 8px 0 14px; color: var(--focus); font-size: 16px; }
+  .histnums { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 12px; color: var(--dim); font: 400 12px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+  .histnums b { margin-right: 6px; color: var(--focus); font-size: 20px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  .histnew { margin: 0 0 12px; padding: 0; list-style: none; font: 400 13px var(--mono); }
+  .histnew li { display: flex; align-items: center; gap: 8px; padding: 3px 0; color: var(--focus); }
+  .histnew li.picked { color: var(--prim); }
+  .histnew small { color: var(--dim); }
+  #histpanel details { margin: 0 0 8px; color: var(--dim); font-size: 14px; }
+  #histpanel summary { color: var(--prim); font: 400 13px var(--mono); cursor: pointer; }
+  #histpanel details ul { margin: 8px 0 0; padding-left: 18px; }
+  #histpanel details li { margin: 0 0 6px; }
+  #histpanel code { color: var(--focus); font: 400 13px var(--mono); }
+  .histnote { margin: 8px 0 0; color: var(--dim); font-size: 13px; }
+  .histvers { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid rgba(29, 74, 120, .55); }
+  .histvers button {
+    min-width: 44px; padding: 3px 8px; color: var(--dim); background: rgba(3, 8, 26, .6); border: 1px solid var(--line);
+    border-radius: 4px; font: 400 12px var(--mono); cursor: pointer;
+  }
+  .histvers button:hover { color: var(--focus); border-color: var(--prim); }
+  .histvers button[aria-current="true"] { color: #03081a; background: var(--prim); border-color: var(--prim); font-weight: 700; }
+  /* the dial's letters are in its own units: on a phone it is drawn at two thirds and they would be 6 px */
+  @media (max-width: 560px) { #histdial .num, #histdial .inch { font-size: 15px; } }
+  @media (prefers-reduced-motion: reduce) { #histdial .ping.go, .histscope.sweep .flare, #histpanel > * { animation: none; } .histbeam { display: none; } }
+
   footer { max-width: 1180px; margin: 0 auto; padding: 18px 16px 30px; color: var(--dim); font-size: 15px; border-top: 1px solid rgba(29, 74, 120, .55); }
 
   footer p { margin: 0 0 8px; }
@@ -361,6 +503,7 @@
   @media (max-width: 719px) {
     #desk { margin: 6px 12px 0; }
     .win { position: static !important; width: auto; max-width: none; margin-bottom: 12px; }
+    #history > .win.maxed { position: fixed !important; left: 6px !important; right: 6px; top: 40px !important; bottom: 6px; margin: 0; }
     .sky > .win { margin: 0 12px 12px; }
     .bw { flex-direction: column; }
     .bw .side { width: 100%; }
@@ -434,6 +577,20 @@
   </div>
 </section>
 
+<section class="world" id="history" hidden aria-label="How the radar grew, version by version">
+  <button class="plain" id="histopen" hidden>Show how the radar grew</button>
+  <div class="historygrid">
+    <div class="histview">
+      <div id="histtabs" role="tablist" hidden><button role="tab" data-view="tower" aria-selected="false">TOWER</button><button role="tab" data-view="code" aria-selected="true">CODE</button><button role="tab" data-view="boards" aria-selected="false">BOARDS</button></div>
+      <div id="histtower" hidden></div>
+      <div id="histgrow" hidden></div>
+      <div id="histdial"></div>
+      <div id="histlegend"></div>
+    </div>
+    <div class="histmenu" id="histpanel" aria-live="polite"></div>
+  </div>
+</section>
+
 <aside class="helpask" id="helpask" hidden role="dialog" aria-labelledby="helphead">
   <h3 id="helphead">Help us make OWLOS Flight Radar better</h3>
   <p>May this page and your boards tell our server their country, their board type and their firmware version?
@@ -456,7 +613,7 @@
     National Oceanic and Atmospheric Administration. Mexico terrain data source: INEGI, Continental relief, 2016. New Zealand terrain data Copyright 2011 Crown copyright (c) Land
     Information New Zealand and the New Zealand Government (All rights reserved). Norway terrain data &copy; Kartverket. United Kingdom terrain data &copy; Environment Agency
     copyright and/or database right 2015. All rights reserved. United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey.
-    Flashing: <a href="https://github.com/espressif/esptool-js">esptool-js</a>, Apache 2.0.
+    Flashing: <a href="https://github.com/espressif/esptool-js">esptool-js</a>, Apache 2.0. The tower of versions: <a href="https://threejs.org/">three.js</a>, MIT.
     Countries on the map of boards: <a href="https://www.naturalearthdata.com/">Natural Earth</a>, public domain, with Crimea drawn as part of Ukraine.</p>
 </footer>
 

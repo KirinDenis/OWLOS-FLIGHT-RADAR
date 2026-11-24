@@ -182,6 +182,9 @@ jobs:
           VERSION="$VER$WORD, build $(git rev-list --count HEAD) ($(git rev-parse --short HEAD))"
           cp -r site/. public/
           cp CHANGES.md public/
+          # the commits for the code growing at the bottom of the page (site/growth.js). without it the page shows
+          # the dial of versions alone, so a history that would not come out does not stop the site
+          bash .github/history.sh > public/history.txt || { echo "no history.txt this time" >&2; rm -f public/history.txt; }
           # where boards are counted for the map of boards (server/): server/public-url.txt, empty = nowhere.
           # the page and the boards both read it here, so the counting starts and stops with this file
           STATS=$(tr -d ' \r\n' < server/public-url.txt 2>/dev/null || true)

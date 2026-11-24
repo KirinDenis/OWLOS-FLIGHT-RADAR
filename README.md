@@ -471,7 +471,24 @@ and a PC preview.
   with them on GitHub Pages, on every push to main.
 - The version is the first `## ` line of `CHANGES.md`: the firmware is built with it, and the site
   publishes it in `version.json` for the boards and shows the file as its history. A new version is a new
-  section at the top of that file.
+  section at the top of that file, with a line under its heading that says it in a few words.
+- At the bottom of the page the radar's history, one window of the page's own windows (`site/win.js`) with
+  three views and a menu on its right: the version, its versions, the parts of the product, and SHOW ALL AGAIN.
+  Its maximize button opens it over the whole page, where the wheel comes closer and a drag turns the tower or
+  moves the code; on the page it is ctrl and the wheel. TOWER, `site/tower.js`, WebGL with three.js
+  (`site/vendor`, MIT, loaded only when the window is seen): the floor is the radar's dial cut into the parts
+  of the product, time rises, a file is a thread as thick as the lines changed in it, a commit a bead on the
+  axis with curved light to the files it changed, its words, author and lines on the pointer, a version a glass
+  floor. One version is lit at a time, the rest stands dimmer: while it plays the one being written, then the
+  one picked by its floor's number or the menu, and picked again it lets go; a part's name, on the ground or in
+  the menu, leaves that part alone. CODE, `site/growth.js`: the files growing commit by commit in
+  the manner of Gource, a folder a branch, a file a dot in the colour of its kind, whoever wrote a commit flying
+  to the files it touched. Both read `history.txt`, which the workflow writes from git log with
+  `.github/history.sh`: each commit's subject and lines, of the people their names only. A version comes in its
+  turn: a branch written before its merge takes the version of its time. BOARDS, `site/history.js`: the
+  versions on the radar's own dial, a ring a version, a line a board,
+  coloured by its chip. What each version brought comes from `CHANGES.md`, the line under the heading first,
+  and which boards it had from `fw/versions.json`: a new version draws itself.
 - `(beta)` on that line makes it a beta, `## 0.16.1 (beta)`. The site keeps it beside the stable, in
   `fw/<version>/<board>/`, and offers it as a choice when flashing, and in a connected board's BOARD tab; the stable stays in `fw/<board>/` and
   is still what the site flashes unless the beta is picked. `version.json` says both: `version` is the

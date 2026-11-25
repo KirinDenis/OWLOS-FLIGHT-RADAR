@@ -673,7 +673,7 @@ export function startGrowth(box, text, hooks) {
   let last = 0;
   let quietFor = 0;
   function frame(ms) {
-    const dt = Math.min(0.05, (ms - last) / 1000 || 0.016);
+    const dt = Math.max(0, Math.min(0.05, (ms - last) / 1000 || 0.016));   // a frame stamped before the loop woke: no step back
     last = ms;
     step(dt, playing);
     if (playing && now >= END) {
@@ -896,6 +896,7 @@ export function startGrowth(box, text, hooks) {
         }
         return;
       }
+      refit();                                         // made hidden, its box had no width then
       if (!started) {
         started = true;
         if (still) {

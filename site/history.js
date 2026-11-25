@@ -362,7 +362,7 @@ export async function startHistory(BOARDS, CHIP_NAME, desk) {
   let raf = 0;
   let lastMs = 0;
   function run(ms) {
-    const dt = Math.min(0.05, (ms - lastMs) / 1000 || 0.016);
+    const dt = Math.max(0, Math.min(0.05, (ms - lastMs) / 1000 || 0.016));   // a frame stamped before the loop woke: no step back
     lastMs = ms;
     if (intro) {
       const k = clamp((ms - intro.t0) / (Math.max(1, intro.to) * INTRO_S * 1000), 0, 1);

@@ -36,7 +36,8 @@ descriptions, opens the `SKILL.md` that fits the job, and then only the referenc
 ## The skills
 
 - [esp32-project-playbook](esp32-project-playbook/SKILL.md): start here. The order of work, the repo layout,
-  public text and privacy, people's board requests, contributions, the beta and stable releases, the build PC.
+  public text and privacy, people's board requests, contributions, the beta and stable releases, the build PC, and
+  how a maintainer and an AI agent work together (working-with-an-agent.md).
 - [esp32-boards](esp32-boards/SKILL.md): the chips (ESP32, S3, C3, C5, P4), one file each, and the boards, one
   file each, with pins, the board.h block and sdkconfig. How to port a new board, how to research one nobody has
   on the desk, how to tell which board is plugged in.
@@ -55,6 +56,10 @@ descriptions, opens the `SKILL.md` that fits the job, and then only the referenc
   must change so it stops talking to the parent. Not tied to ESP32.
 - [esp32-data-sources](esp32-data-sources/SKILL.md): the web services, one file each (flight data, weather, air,
   maps, geocoding, time and more), the sensors, one file each, and how a small board reads them.
+- [project-showcase](project-showcase/SKILL.md): showing the project to people. Its history drawn from git on its
+  site (a tower of time in WebGL, the code growing as in Gource, a dial of versions), the release film made from
+  the firmware's own drawing code, filming a page frame by frame in a hidden browser, the release post and replies
+  to questions. Not tied to ESP32.
 
 ## Ideas talked about, not built
 
@@ -64,3 +69,15 @@ Kept so they are not lost. None of them is a decision.
 - The twin as a remote: the browser twin of Flight Radar is built (`web/` there, the same C in WebAssembly, in step
   with a board over USB). Not built yet: the same over the network, UDP from the board to a server and WebRTC on
   to the browser, so the board needs nothing but UDP.
+- Bring your own AI to Flight Radar, in three levels: a page of one's own on the site (an INI file of menus and
+  buttons that are console lines, or a whole HTML look), written by the person's own AI through a chat with their
+  own key or over MCP; then a fork whose Actions build their own firmware (github-fork-build-publish). Free models
+  for the pages, stronger ones for firmware C. Every action that deletes, flashes or changes a setup waits for the
+  person's Yes; a WiFi password or a key is never readable. Planned for 0.17.
+- Routes for the free networks: the open route data looked up by callsign for the one plane tapped, shown only when
+  the plane flies along it (esp32-data-sources, apis/vrs-standing-data.md). Asked twice by people.
+- A portal for ESP32 firmware, ours and other people's: the board in the centre (find yours or plug it in, see what
+  runs on it, flash it from the browser), detection in tiers (USB IDs, then chip, flash and MAC, then the firmware's
+  own hello), a person's boards remembered in their browser only, every firmware with its own versions and only the
+  changed ones rebuilt (a build key from the hash of its files, its board file, sdkconfig and the IDF version).
+  Similar things exist only in parts (a maker's own burner, project lists in the CYD repositories).

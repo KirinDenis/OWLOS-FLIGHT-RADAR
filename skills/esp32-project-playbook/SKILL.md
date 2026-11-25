@@ -19,6 +19,14 @@ technique. Written 2026-11-04, brought up to date 2026-11-23.
   archive of versions, a new board's list of places, publishing in order, CI on pull requests.
 - [references/build-pc.md](references/build-pc.md): ESP-IDF, PlatformIO, Emscripten, boards on the desk, the browser
   pane, small traps.
+- [references/working-with-an-agent.md](references/working-with-an-agent.md): how a maintainer and an AI agent make
+  these projects together. The loop from a wish to a handed-over working tree, design done in the open (mockups to
+  pick from, the maintainer's remarks turned into rules, the golden section), measuring instead of believing, the
+  agent testing boards over the serial port and the site in its own browser, several agents with one brief, what
+  was learned written into the skills the same day.
+
+Showing the project to people (the history window on the site, the release film, the post, replies to questions):
+[project-showcase](../project-showcase/SKILL.md).
 
 The technique: [esp32-boards](../esp32-boards/SKILL.md) (chips, every board, porting and researching one),
 [esp32-lcd-touch](../esp32-lcd-touch/SKILL.md) (panels, buses, touch, e-paper),

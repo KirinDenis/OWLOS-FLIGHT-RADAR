@@ -50,6 +50,9 @@ black square (M).
 
 ## A longer film, the way it was made (technique)
 
+The short form. The release film step by step, with its scripts, renderer and slide maker, is in project-showcase:
+release-film.md and `files/film/`.
+
 1. **Scenario first.** Beats, each with a visual note and the voice line, given for approval before anything is built.
    The script is a plain file, one line a beat: `id|caption|voice`.
 2. **Screens by the board's own code on the PC.** A film program built per display with the same sources as the

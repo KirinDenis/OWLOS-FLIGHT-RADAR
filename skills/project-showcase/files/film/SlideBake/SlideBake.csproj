@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- the QR code of the end card comes from the radar's own QR maker. RADAR: an OWLOS-FLIGHT-RADAR checkout, read
+       from the environment (set RADAR=C:\path\to\it before dotnet build) -->
+  <ItemGroup>
+    <Compile Include="$(RADAR)\tools\QrBake\Qr.cs" />
+  </ItemGroup>
+
+</Project>

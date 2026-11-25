@@ -1,0 +1,21 @@
+01|OWLOS Flight Radar 0.16|Owlos Flight Radar zero point sixteen is out. The weather on the radar's own dial, a map you can read, planes that glide, and a console for your boards.
+02|WEATHER: the next 24 hours|A fourth look, weather. The next twenty four hours on the radar's dial: noon at the top, midnight at the bottom, a hand at now.
+03|Sky, temperature, wind|The ring is the sky hour by hour, with its clouds, rain and stars. The loop inside is the temperature, and the arrows are the wind.
+04|Now, in words|The panel says it in words: how it feels, humidity, wind, pressure, the air and the U V, each with a little scale.
+05|Pressure and temperature|Tap the dial for the pressure, fourteen hours back and the next day. Tap again for the temperature, with the rain in bars.
+06|Warnings on every look|Warnings show on every look: a storm, a fast change of pressure, poor air. A chip under the town says it, and a tap opens it.
+07|SET, UNITS|Set has a units tab: Celsius or Fahrenheit, hectopascals, inches or millimetres of mercury, and four kinds of wind. Auto is what your country uses.
+08|The screen's light|The screen's light goes down to fifty, twenty five or ten per cent. Night turns it down from dusk till dawn, by the sun over your home.
+09|A map you can read|The map reads now on a small glass. Its steps are even to the eye, and water and towns show by a bright edge.
+10|Roads whole, names read|Every road runs whole, and the map's own names read: light letters with a dark edge, found in the tiles by their colours.
+11|The planes glide|The planes glide. A new position used to make a plane jump. Now it slides there, and in a turn it follows its curve.
+12|Both cores draw|Both cores draw now, on every board that has two. On the cheap yellow display the radar went from nine to twelve frames a second.
+13|All of it from the browser|The site does it all over the cable: the look, the weather page, the warnings, the units, the light. A page turned on one side turns on the other.
+14|The site's console|The site has a console. Each board is a folder, its config a file: read it, write it, or give one board all the settings of another.
+15|Set, home, firmware|Set changes a setting on one board or on all. Home moves the radar to a town, and even the firmware is one command.
+16|Seventeen boards|Seventeen boards, from a round one point two eight inch to a ten inch tablet. New and experimental: the Z L X board, with an E S P thirty two C five.
+17|How it grew|And the project now shows how it grows. At the bottom of the site, its history: every file a thread, every commit with its own words.
+18|Follow every version|Pick a version to light it alone, or watch the code grow commit by commit. Every new version draws itself there.
+19|The stable version|It is the stable version now. Every board flashed from the site gets it, and a board on zero point fifteen shows new version.
+20|Coming in 0.17|Coming in zero point seventeen: a new weather display for the two point eight and three point five inch boards.
+21|Free and open|Free and open. Flash it from the site: the link and a QR code are on the screen. Tell us how it works for you in the group.

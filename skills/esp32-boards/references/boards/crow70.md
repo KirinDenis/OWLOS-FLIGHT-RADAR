@@ -11,6 +11,21 @@ socket and likely a backlight chip as on the Advance 5.0 (not checked, not built
 - 2026-11-10 the asker flashed the CrowPanel Advance 5" build on it: WiFi set up and planes on the site, the screen
   dark. As expected: other pins for the screen and the backlight. It proved the chip, the USB and the firmware's core
   on this board (measured by the asker).
+- 2026-11-24 an owner ran 0.16.2 on it: "it works", with a photo of the WEATHER dial. **The circles are not round:
+  about 7 mm wider than tall** (measured by the owner; "not a problem" to them).
+
+## Pixels that are not square
+
+The cause, reasoned, not measured here: a 7" 800x480 TN glass is about 154 x 86 mm, so a pixel is about 0.193 mm
+wide and 0.179 mm tall, 7.7% wider than tall. A circle of about 440 px comes out about 6 mm wider than tall, as the
+owner saw. Every round thing is stretched: the radar's scope, the weather dial, the rings; the map tiles too
+(distances across differ from distances up and down).
+
+- The 5" 800x480 boards, the Tab5 and the 10.1" have square pixels (reasoned from their glass sizes). wave7 (800x480
+  7") is likely the same as this board; wave7b (1024x600 7") about 5% wide.
+- Planned for 0.17, not built: a pixel aspect per board in board.h, and the round things drawn as ellipses (x scaled
+  by about 0.93). The map's stretch is a separate question.
+- The general point: never assume square pixels on a glass whose size you have not divided by its resolution.
 
 ## Chip, flash, PSRAM, USB
 

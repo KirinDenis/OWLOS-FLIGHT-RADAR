@@ -30,6 +30,28 @@ How sure: [measured] seen happen here, [built] in the code but not seen, [docs] 
 - Beta steps get their own numbers (0.16.1, 0.16.2): each is a build people may hold, and each is kept on the site.
 - **The channels go in first.** CI, the archive script and the site must know beta from stable before the first
   push of a beta, or that push reaches every board as a plain update [reasoned, and so it was planned and done].
+- **Each heading has a summary line** right under it, plain, no bullet: "WEATHER, the fourth look, your own units, a
+  screen that dims at night, planes that glide, a clearer map." The site's history window shows it as the version's
+  headline (project-showcase, history-from-git.md); older readers of the file skip it [measured].
+
+## Betas merged into one stable, with no beta after it
+
+The way 0.16 went out (2026-11-24). The 0.16.1 and 0.16.2 betas had been held and found good; the maintainer wanted
+the stable now, no new beta for a while, and the next version worked on in its own branch. And the number "0.16",
+not "0.16.2".
+
+1. On main, CHANGES.md gets one `## 0.16` entry in place of the betas' two: its summary line, the first beta's points
+   first and then the second's, each point kept as people read it. A measurement that said "in 0.16.1" now says "in
+   the 0.16.1 beta". Lines that only made sense while it was a beta go ("the stable has no build for it").
+2. No `(beta)` on the line: the run is a stable run. `archive.sh` ends the live beta ("beta 0.16.2: ends, CHANGES.md
+   opens with a stable version"), the beta's files are not kept, and 0.16 becomes the newest stable [built; the
+   rule was in archive.sh from the channels' start].
+3. A stable is checked only against the stables the site has, so 0.16 may stand below the beta's 0.16.2 [built].
+4. **Who gets what**: a board on 0.15 sees NEW VERSION 0.16. A board on the 0.16.2 beta compares 0.16 with 0.16.2 and
+   sees nothing until 0.17, which is right: it already runs everything 0.16 has [reasoned].
+5. The next version lives on its own branch (`0.17`), merged from main when main moves, so the release can get a
+   fix without the new work.
+6. Then the film, the post and the replies (project-showcase).
 
 ## Holding a beta
 

@@ -110,6 +110,10 @@ const fwDir = (build, ver) => (ver === newest ? `fw/${build}` : `fw/${ver}/${bui
    their NEW VERSION note, boards on that beta are already on it.
 5. Something went wrong: the stable is one flash away for every beta board, and the beta can be replaced by a
    higher one.
+6. Several betas found good may go out as one stable under a shorter number, with no beta after it: 0.16.1 and
+   0.16.2 went out as 0.16. One CHANGES.md entry for both, no `(beta)`: the stable run ends the live beta, and a
+   stable is checked only against the site's stables, so 0.16 may sit below 0.16.2. Boards on the 0.16.2 beta see no
+   note until 0.17 (esp32-project-playbook, releases.md, "Betas merged into one stable").
 
 Downgrades are told honestly in CHANGES.md: what a board that goes back to the stable keeps and what it loses
 (`nvs-settings.md`).

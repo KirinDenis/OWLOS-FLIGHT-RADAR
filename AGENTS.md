@@ -12,14 +12,20 @@ measured fact, check the others.
 
 - `skills/README.md`: the index.
 - `esp32-project-playbook`: start here. The order of work, public text, people's requests, the release routine.
+  Its `references/working-with-an-agent.md` is how this project was made by a maintainer and an agent: choices
+  shown as mockups, remarks turned into rules, measuring instead of believing, the agent testing everything itself.
 - `esp32-boards`: the chips and every board, one file each, and how to port a new one.
 - `esp32-lcd-touch`: the panels, the buses, the touch chips and the e-papers, one file each.
 - `esp32-ui-drawing`: the renderer, fonts, themes, layouts, the e-paper design, the dials, the preview.
-- `esp32-runtime`: tasks, watchdogs, memory, WiFi and TLS, crashes, testing without a person.
+- `esp32-runtime`: tasks, watchdogs, memory, WiFi and TLS, crashes, testing without a person. Debugging a board
+  over its USB serial port, with the bench rigs in its `files/bench/`: `references/bench-rigs.md`.
 - `esp32-flash-and-settings`: flashing, the browser flasher, the settings over USB, CI, versions.
 - `esp32-data-sources`: the web services and sensors, one file each.
 - `github-fork-build-publish`: your own fork, one board built in Actions, your own flasher site on Pages, and the
   pull request back.
+- `project-showcase`: the history window at the bottom of the site (`site/history.js`, `growth.js`, `tower.js`,
+  `.github/history.sh`), the release film made from `core/` on a PC, filming a page frame by frame, the release
+  post and replies to people.
 
 Read the skill your task needs before you open the code. When your work teaches something new, say it in your
 pull request: it goes back into the skills.
@@ -42,14 +48,20 @@ pull request: it goes back into the skills.
    committed. No home point, town, network name or LAN address in code, shots, logs or text.
 8. Public text (README, CHANGES, the site) is plain English: no emoji, no tables, no long dashes. A board that
    was built but never run is "New: not run on one here yet", never "supported".
-9. The version is the first `## ` line of `CHANGES.md`. `(beta)` on that line makes it a beta.
+9. The version is the first `## ` line of `CHANGES.md`. `(beta)` on that line makes it a beta. Under each heading
+   one plain line says the version in a few words: the site's history window shows it.
+10. Test it yourself, never ask the person to click and report: the preview for the screens, the site in your own
+    browser against a made-up board, a real board over its serial port with the rigs. Ask a person only for what no
+    tool can see (a photo of the glass, the colour of an LED), and say exactly what to send.
 
 ## Where things are
 
 - `core/`: plain C shared by the firmware, the PC preview and the browser: the sky, the map, the drawing, the
   fonts, the pages, the touch.
 - `firmware/`: the boards, the screens, the touch chips, WiFi and HTTPS, the settings, the USB console.
-- `site/`: the page that flashes the boards, its console, the map of boards.
+- `site/`: the page that flashes the boards, its console, the map of boards, its windows (`win.js`), and since 0.16
+  the history window at the bottom (`history.js`, `growth.js`, `tower.js` with three.js in `vendor/`), fed by
+  `.github/history.sh` in the site's workflow.
 - `web/`: the radar in a web page, built with Emscripten.
 - `tools/`: the PC preview, the font and map bakers, the guide arrows.
 - `server/`: RadarStats, the counts behind the map of boards.

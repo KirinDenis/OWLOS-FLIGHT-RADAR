@@ -101,7 +101,9 @@ These are what was kept, every time, on every screen. Most came from a person lo
 
 1. **Look at what the product is.** Which instrument is this screen part of, which mark will move, what will a person
    read first, what is unknown or made up. Pick the form people already know (an analyser's humps, a clock, a
-   barometer) so it needs no manual.
+   barometer) so it needs no manual. For a new screen, show the maintainer two or three mockups to pick from before
+   building (the weather look was chosen so, from instruments, a sky and a 24-hour dial), and turn each remark into
+   a rule here (esp32-project-playbook, working-with-an-agent.md, "Design is done in the open").
 2. **Draw it in the preview first.** A scripted session that reaches the board's real state (trails grown, a day of
    weather), a shot per state. Show a picture early and let the picture answer questions.
 3. **Plan once a frame, draw per strip.** Put every computed thing in the frame's plan; in the strip guard each element
@@ -186,7 +188,9 @@ Topic files (read the one you need):
 - [references/pc-preview-tool.md](references/pc-preview-tool.md): tools/preview, the session script, shots, proving a
   change, the WASM twin, tools/Guide, QrBake, agents in the loop.
 - [references/films-and-stills.md](references/films-and-stills.md): the tour film, the finger, captions, a promo, first
-  frame not black, how a longer film is assembled.
+  frame not black, how a longer film is assembled. The whole release film with its kit, the history window on the
+  site (a WebGL tower, the code growing, a dial of versions) and filming a page frame by frame are in
+  [project-showcase](../project-showcase/SKILL.md).
 
 Code copies, verbatim (linked from the topic files):
 

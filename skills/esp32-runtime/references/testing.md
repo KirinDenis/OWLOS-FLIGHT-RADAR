@@ -204,7 +204,10 @@ site itself.
 
 ## The bench: flashing as a regression test
 
-For a change that touches the board. A rig, not a person. The rules behind a flash script:
+For a change that touches the board. A rig, not a person. The rigs themselves, one by one, with the console's
+lines and the order of a session: [bench-rigs.md](bench-rigs.md), the files in `../files/bench/`.
+
+The rules behind a flash script:
 
 ```powershell
 $out = cmd /c "firmware\BUILD.BAT $Disp" 2>&1

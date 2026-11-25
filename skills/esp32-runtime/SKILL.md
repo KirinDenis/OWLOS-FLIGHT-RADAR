@@ -26,6 +26,8 @@ decisions, the numbers, the stories in a line. The copyable detail is in `refere
   the stories, the log line by line.
 - [references/testing.md](references/testing.md): the PC preview, the WebAssembly twin, the site against a fake
   board, bench rigs, flashing as a regression test, what needs a person.
+- [references/bench-rigs.md](references/bench-rigs.md): debugging a board over its serial port, the order of a
+  bench session, and each rig of `files/bench/` (settings, looks, logs, soak, e-paper) with what it found.
 - [references/traps.md](references/traps.md): about 120 traps: symptom, cause, fix.
 - `references/code/`: whole files to copy, as they were on 2026-11-04: `net.c`, `tiles.c`, `histstore.c`,
   `png_decode.c` (the older 4 KB-piece version, see memory.md), `radio.c`, `i2c_bus.c`.

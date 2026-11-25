@@ -18,6 +18,8 @@ tools/WorldBake/bin/
 tools/WorldBake/obj/
 server/bin/
 server/obj/
+skills/**/bin/
+skills/**/obj/
 server/data/
 server/publish/
 web/twin*.js

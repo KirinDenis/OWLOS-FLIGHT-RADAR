@@ -13,6 +13,9 @@ public sealed class StatsOptions
     /// <summary>DB-IP's free IP to Country Lite, its CSV. Missing: every country is "ZZ", the counts go on.</summary>
     public string CountryFile { get; set; } = "data/dbip-country-lite.csv";
 
+    /// <summary>The site's fw/versions.json: a flash is counted only for a version in it (Published.cs). Empty: not read.</summary>
+    public string VersionsUrl { get; set; } = "";
+
     /// <summary>The firmware builds a report may name, as the site's BOARDS have them.</summary>
     public string[] Builds { get; set; } = Array.Empty<string>();
 

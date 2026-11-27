@@ -306,12 +306,17 @@ class Screen {
     if (!url) {
       return;
     }
-    const answer = await fetch(url);
+    /* 15 s at most: one that never came held the map's making open, and a new home or range never got its map
+     * till a reload (the 2026-11-27 review) */
+    const answer = await fetch(url, AbortSignal.timeout ? { signal: AbortSignal.timeout(15000) } : {});
     if (!answer.ok) {
       return;
     }
     const bytes = new Uint8Array(await answer.arrayBuffer());
     const at = m._malloc(bytes.length);
+    if (!at) {                                         // the twin's memory full: this tile left out
+      return;
+    }
     m.HEAPU8.set(bytes, at);
     m._twin_map_tile(k, at, bytes.length);
     m._free(at);
@@ -416,7 +421,21 @@ function remember() {
 function addUnit({ mac, name, build, online = false, zoom = 1, usb = null }) {
   const screen = new Screen(BOARDS[build].twin);
   screen.zoom = zoom;
-  const u = { mac, name, build, online, usb, version: '', wifi: null, nets: [], port: null, link: null, planes: 0, sky: [], screen, ready: screen.start() };
+  const u = { mac, name, build, online, usb, version: '', wifi: null, nets: [], port: null, link: null, planes: 0, sky: [], screen };
+  /* its twin started when first waited for (attach, its window): at load every board this browser knows started one,
+   * 16 MB of WebAssembly each, the ones not on the cable too (the 2026-11-27 review). rebuild sets a new one */
+  let ready = null;
+  Object.defineProperty(u, 'ready', {
+    get() {
+      if (!ready) {
+        ready = u.screen.start();
+      }
+      return ready;
+    },
+    set(p) {
+      ready = p;
+    },
+  });
   app.units.push(u);
   return u;
 }
@@ -448,18 +467,18 @@ function barState() {
   } else if (app.view === 'unit' && app.cur?.online) {
     const u = app.cur;
     text = browned(u) ? `${usbName(u.port)} / ${esc(BOARDS[u.build].name)} / TOO LITTLE POWER`
-      : `${usbName(u.port)} / ${esc(BOARDS[u.build].name)} / ${u.version} / ${u.wifi ? 'WIFI' : 'NO WIFI'} / ${u.planes} PLANES`;
+      : `${usbName(u.port)} / ${esc(BOARDS[u.build].name)} / ${esc(u.version)} / ${u.wifi ? 'WIFI' : 'NO WIFI'} / ${u.planes} PLANES`;
   } else if (app.view === 'unit' && app.cur) {
     text = 'NOT CONNECTED';
   } else {
     text = `${here().length} OF ${app.units.length} CONNECTED`;
   }
   if (old) {
-    text += ` <button class="baract" data-update="${old.mac}">${esc(old.name.toUpperCase())} RUNS ${old.version}: UPDATE</button>`;
+    text += ` <button class="baract" data-update="${esc(old.mac)}">${esc(old.name.toUpperCase())} RUNS ${esc(old.version)}: UPDATE</button>`;
   }
   const waits = here().find((u) => u.aligning);
   if (waits) {
-    text += ` <button class="baract" data-skip="${waits.mac}">${esc(waits.name.toUpperCase())}: SKIP THE CROSSES</button>`;
+    text += ` <button class="baract" data-skip="${esc(waits.mac)}">${esc(waits.name.toUpperCase())}: SKIP THE CROSSES</button>`;
   }
   return text;
 }
@@ -569,7 +588,7 @@ function renderBar() {
     chips.push(`<button class="uchip" data-all aria-pressed="${app.view === 'all'}">ALL</button>`);
   }
   for (const u of app.units) {
-    chips.push(`<button class="uchip${u.online ? '' : ' off'}" data-u="${u.mac}" aria-pressed="${app.view === 'unit' && app.cur === u}"><i></i>${esc(u.name.toUpperCase())}</button>`);
+    chips.push(`<button class="uchip${u.online ? '' : ' off'}" data-u="${esc(u.mac)}" aria-pressed="${app.view === 'unit' && app.cur === u}"><i></i>${esc(u.name.toUpperCase())}</button>`);
   }
   if ('serial' in navigator) {
     chips.push('<button class="uchip add" data-add>+ ADD A BOARD</button>');
@@ -747,6 +766,9 @@ function setOne(u, name, value) {
 const FILES = {
   info: (u) => unitFacts(u).map(([k, v]) => `${k}: ${v}`),
   config: (u) => {
+    if (!u.screen.m) {                                 // its twin not started yet: nothing to read from
+      return u.online ? ['(starting, ask again)'] : ['(not connected)'];
+    }
     const c = u.screen.cfg();
     return [`theme=${THEMES[c.theme]}`, `look=${LOOKS[c.look]}`, `range=${Math.round(c.range)}`, `flip=${u.cfg?.flip ? 'on' : 'off'}`,
       ...(u.cfg?.backlight !== undefined ? [`backlight=${BACKLIGHTS[u.cfg.backlight]}`] : []),
@@ -1376,6 +1398,9 @@ async function update(u, ver = follows(u)) {
   if (!u.link) {
     throw new Error(`${u.name} is not connected`);
   }
+  if (app.busy || app.settling) {                      // two at once took each other's place on the page
+    throw new Error(`${app.busy ? app.busy.name : 'a board'} is being flashed: one at a time`);
+  }
   manage();
   const port = u.port;
   app.port = port;                                     // the connect window is about this port now
@@ -1398,8 +1423,14 @@ async function updateThen(u, ver = follows(u)) {
 }
 
 async function updateAll() {
-  for (const u of here().filter((v) => older(v.version, follows(v)))) {
-    await update(u);
+  try {
+    for (const u of here().filter((v) => older(v.version, follows(v)))) {
+      await update(u);
+    }
+  } catch (e) {                                        // one that failed: said, not "Flashing 37%" left up for good
+    console.warn(e);
+    trouble('Flashing stopped', `${e.message}. The boards after it were not flashed.`);
+    return;
   }
   showAll();
 }
@@ -1542,7 +1573,10 @@ function panePart(u, tab) {
       <button class="btn quiet save">SEND TO THE BOARD</button>
       <small class="saved">They go to the board over the cable, never to a server of ours. A town is looked up on OpenStreetMap.</small>`;
     pane.querySelectorAll('[data-forget]').forEach((el) => {
-      el.addEventListener('click', () => term.run(`wifi forget --board ${short(u)} ${el.dataset.forget}`));
+      /* the name in single quotes, its own ' as '\'': pasted bare, "Name's iPhone" was a quote not closed and a
+       * network named x;flash ran flash (the 2026-11-27 review) */
+      const quoted = `'${el.dataset.forget.replaceAll("'", "'\\''")}'`;
+      el.addEventListener('click', () => term.run(`wifi forget --board ${short(u)} ${quoted}`));
     });
     pane.querySelector('.save').addEventListener('click', async () => {
       const set = {};
@@ -1946,13 +1980,39 @@ addEventListener('keydown', (e) => {
 
 /* --- start --- */
 
+/* a board's screen on the page's view now: told by an observer, so one scrolled away is not drawn. drawn till told.
+ * every board's twin was drawn at 15 frames a second while its window was open, off the view too, a 1280x800 one
+ * 4 MB a frame (the 2026-11-27 review) */
+const inSight = new WeakMap();
+const sightWatch = 'IntersectionObserver' in window
+  ? new IntersectionObserver((seen) => {
+    for (const e of seen) {
+      inSight.set(e.target, e.isIntersecting);
+    }
+  })
+  : null;
+
+function inView(canvas) {
+  if (!sightWatch) {
+    return true;
+  }
+  if (!inSight.has(canvas)) {
+    inSight.set(canvas, true);
+    sightWatch.observe(canvas);
+  }
+  return inSight.get(canvas);
+}
+
 function tickAll(now) {
   requestAnimationFrame(tickAll);
-  if (hero.m && (scene.isShown() || (hero.canvas.isConnected && !desk.get('demo')?.root.hidden))) {
+  // the demo's: for the scene only while it shows no board's own picture
+  const heroInScene = scene.isShown() && !skyUnit?.screen.drawn;
+  if (hero.m && (heroInScene || (hero.canvas.isConnected && !desk.get('demo')?.root.hidden && inView(hero.canvas)))) {
     hero.frame(now);
   }
   for (const u of app.units) {
-    if (u.screen.m && ((u.screen.canvas.isConnected && !desk.get(u.mac)?.root.hidden) || (u === skyUnit && scene.isShown()))) {
+    const shown = u.screen.canvas.isConnected && !desk.get(u.mac)?.root.hidden && inView(u.screen.canvas);
+    if (u.screen.m && (shown || (u === skyUnit && scene.isShown()))) {
       u.screen.frame(now);
     }
   }
@@ -1992,7 +2052,7 @@ async function comeBack() {
     console.warn(e);
   }
   for (const k of kept) {
-    if (BOARDS[k.build]) {
+    if (BOARDS[k.build] && /^[0-9a-f]{12}$/i.test(k.mac ?? '')) {   // one kept by a page before the READY check: its MAC in shape
       addUnit(k);
     }
   }

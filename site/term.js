@@ -188,13 +188,25 @@ export class Terminal {
     this.toggle(true);
     this.promptBox.textContent = question;
     this.input.type = secret ? 'password' : 'text';
-    return new Promise((done) => {
+    return new Promise((done, fail) => {
       this.asking = (answer) => {
         this.asking = null;
+        this.cancelAsk = null;
         this.input.type = 'text';
         this.write(`${question}${secret ? '' : answer}\r\n`);
         this.refresh();
         done(answer);
+      };
+      /* Escape or Ctrl+C: the question goes, the command with it. without this it stayed: every button that runs a
+       * line waited behind it, and the next line typed, a command too, went to the board as the password (the
+       * 2026-11-27 review) */
+      this.cancelAsk = () => {
+        this.asking = null;
+        this.cancelAsk = null;
+        this.input.type = 'text';
+        this.write(`${question}^C\r\n`);
+        this.refresh();
+        fail(new Error('not asked any more'));
       };
     });
   }
@@ -246,11 +258,21 @@ export class Terminal {
     } else if (e.ctrlKey && e.key.toLowerCase() === 'c' && !input.selectionEnd !== input.selectionStart) {
       if (input.selectionStart === input.selectionEnd) {
         e.preventDefault();
+        if (this.cancelAsk) {                          // a password typed so far is not echoed
+          input.value = '';
+          this.cancelAsk();
+          return;
+        }
         this.stop?.abort();
         this.echo(`${input.value}^C`);
         input.value = '';
       }
     } else if (e.key === 'Escape') {
+      if (this.cancelAsk) {
+        input.value = '';
+        this.cancelAsk();
+        return;
+      }
       this.toggle(false);
     }
   }

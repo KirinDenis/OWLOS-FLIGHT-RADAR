@@ -126,6 +126,9 @@ static const uint8_t *widen(const st_t *s, uint8_t *c)
 
 static void put(st_t *s, int b)
 {
+    /* a row that would not unfilter left filled at rowlen: one more byte went past the row (found 2026-11-27, a
+     * filter byte of 5 in a tile; a stored block then wrote up to 64 KB past it, at every start, the tile kept) */
+    if (s->bad) return;
     s->win[(s->out / WIN_PIECE) % WIN_PIECES][s->out % WIN_PIECE] = (uint8_t)b;
     s->out++;
     if (s->y >= s->info.h) return;                     // past the picture: the stream's tail
@@ -199,6 +202,7 @@ static int codes(st_t *s)
     for (;;) {
         int sym = decode(s, &s->lencode);
         if (sym < 0 || s->bad) return 0;
+        if (s->y >= s->info.h) return 1;               // the picture is out: the rest of the stream is not needed
         if (sym < 256) {
             put(s, sym);
         } else if (sym == 256) {
@@ -232,6 +236,8 @@ static int stored(st_t *s)
         int c = idat_byte(s);
         if (c < 0) return 0;
         put(s, c);
+        if (s->bad) return 0;
+        if (s->y >= s->info.h) return 1;               // the picture is out
     }
     return !s->bad;
 }

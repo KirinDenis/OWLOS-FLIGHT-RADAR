@@ -50,6 +50,7 @@ void light_hold(light_t *l, int ev, int on, uint32_t now);    /* a state: lights
 void light_sky(light_t *l, const light_cfg_t *c, const sky_t *s, float unit_km, uint32_t now);
 void light_touch(light_t *l);                                 /* the screen was touched: all of it goes out */
 void light_test(light_t *l, uint32_t now);                    /* red, green, blue in turn */
+void light_expire(light_t *l, uint32_t now);                  /* each frame: what is over is forgotten */
 /* what the LED shows now, 0..255 a colour, the brightness in it */
 void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t rgb[3]);
 /* the same on the screen (SET's ON SCREEN, core/ui.c ui_alarm): the event in the lit part of its blink, -1 none or

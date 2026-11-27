@@ -72,25 +72,37 @@ export async function detect(port, say) {
   }
 }
 
+/* the build's parts and the chip it is for (the manifest's chipFamily, as esptool names chips: ESP32, ESP32-S3..) */
 async function parts(dir) {
-  const manifest = await (await fetch(`${dir}/manifest.json`)).json();
-  const list = manifest.builds[0].parts;
-  return Promise.all(list.map(async (p) => {
+  const got = await fetch(`${dir}/manifest.json`);
+  if (!got.ok) {                                       // a board the site has no build of: say so, not "Unexpected token <"
+    throw new Error(`${dir}/manifest.json: the site answered ${got.status}`);
+  }
+  const build = (await got.json()).builds[0];
+  const fileArray = await Promise.all(build.parts.map(async (p) => {
     const answer = await fetch(`${dir}/${p.path}`);
     if (!answer.ok) {
       throw new Error(`${p.path}: the site answered ${answer.status}`);
     }
     return { data: new Uint8Array(await answer.arrayBuffer()), address: p.offset };
   }));
+  return { fileArray, family: build.chipFamily };
 }
 
 /* dir: the board's folder of the version, fw/<board> for the stable, fw/<version>/<board> for the beta.
  * erase: everything goes, for a board that had something else on it. settings stay without it */
 export async function flash(port, dir, erase, progress, say) {
-  const fileArray = await parts(dir);
+  const { fileArray, family } = await parts(dir);
   const total = fileArray.reduce((sum, f) => sum + f.data.length, 0);
   const { transport, esp } = await loader(port, say);
   try {
+    /* the build must be for the chip on the cable: picked from "show all boards", an S3 build went into an ESP32,
+     * the MD5 matched what was written and the board stayed dark (the 2026-11-27 review). nothing is written */
+    const chip = esp.chip.CHIP_NAME;
+    if (family && chip !== family) {
+      await restart(transport);
+      throw new Error(`this build is for an ${family}, the board on this cable is an ${chip}: nothing was written`);
+    }
     let before = 0;
     await esp.writeFlash({
       fileArray,

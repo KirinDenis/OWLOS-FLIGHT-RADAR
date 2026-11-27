@@ -232,7 +232,10 @@ static int read_value(jc_t *c, jv_t *v)
         char *e;
         v->num = strtod(c->p, &e);
         c->p = e > c->end ? c->end : e;
-        v->is_num = 1;
+        /* strtod takes -nan, inf, 1e999 and hex: none is a plane's number. a NaN plane held its slot for good and
+         * counted as near for the LED, and a cast of 1e30 to an int is undefined (the 2026-11-27 review). numbers
+         * past ten million are none of a plane's either; the field is left as not heard */
+        v->is_num = isfinite(v->num) && fabs(v->num) < 1e7;
         return 1;
     }
     return skip_value(c);                              // object, array, true, false, null: not wanted
@@ -384,6 +387,9 @@ static void copy(char *dst, int cap, const char *src)
     dst[n] = 0;
 }
 
+// a number cut to what its field holds: a cast past that is undefined in C
+static long cut(double v, long lo, long hi) { return v < (double)lo ? lo : v > (double)hi ? hi : lround(v); }
+
 // a direction as 1..360: 0 is left to mean not heard
 static uint16_t degrees(double v)
 {
@@ -407,14 +413,14 @@ static void adsbx_field(plane_t *p, const char *k, const jv_t *v, int *have, flo
     else if (!strcmp(k, "alt_geom") && v->is_num && !p->has_alt) { p->alt = (int32_t)v->num; p->has_alt = 1; }
     else if (!strcmp(k, "gs") && v->is_num) { p->gs = (float)v->num; p->has_spd = 1; }
     else if (!strcmp(k, "track") && v->is_num) p->track = (float)v->num;
-    else if (!strcmp(k, "baro_rate") && v->is_num) p->vrate = (int16_t)v->num;
-    else if (!strcmp(k, "geom_rate") && v->is_num && !p->vrate) p->vrate = (int16_t)v->num;
+    else if (!strcmp(k, "baro_rate") && v->is_num) p->vrate = (int16_t)cut(v->num, -32000, 32000);
+    else if (!strcmp(k, "geom_rate") && v->is_num && !p->vrate) p->vrate = (int16_t)cut(v->num, -32000, 32000);
     else if (!strcmp(k, "squawk") && v->is_str) p->squawk = (uint16_t)atoi(v->s);
     else if (!strcmp(k, "seen_pos") && v->is_num) *age = (float)v->num;
-    else if (!strcmp(k, "nav_altitude_mcp") && v->is_num) p->sel_fl = (int16_t)lround(v->num / 100.0);   // 32992 comes for 33000
+    else if (!strcmp(k, "nav_altitude_mcp") && v->is_num) p->sel_fl = (int16_t)cut(v->num / 100.0, -32000, 32000);   // 32992 comes for 33000
     else if (!strcmp(k, "nav_heading") && v->is_num) p->sel_hdg = degrees(v->num);
-    else if (!strcmp(k, "ias") && v->is_num) p->ias = (uint16_t)lround(v->num);
-    else if (!strcmp(k, "mach") && v->is_num) p->mach = (uint16_t)lround(v->num * 1000.0);
+    else if (!strcmp(k, "ias") && v->is_num) p->ias = (uint16_t)cut(v->num, 0, 65535);
+    else if (!strcmp(k, "mach") && v->is_num) p->mach = (uint16_t)cut(v->num * 1000.0, 0, 65535);
     else if (!strcmp(k, "wd") && v->is_num) p->wind_dir = degrees(v->num);
     else if (!strcmp(k, "ws") && v->is_num) p->wind_kt = (uint8_t)(v->num > 255.0 ? 255 : lround(v->num));
 }
@@ -460,7 +466,7 @@ static void fr24_field(plane_t *p, const char *k, const jv_t *v, int *have, uint
     else if (!strcmp(k, "alt") && v->is_num) { p->alt = (int32_t)v->num; p->has_alt = 1; p->ground = p->alt <= 0; }
     else if (!strcmp(k, "gspeed") && v->is_num) { p->gs = (float)v->num; p->has_spd = 1; }
     else if (!strcmp(k, "track") && v->is_num) p->track = (float)v->num;
-    else if (!strcmp(k, "vspeed") && v->is_num) p->vrate = (int16_t)v->num;
+    else if (!strcmp(k, "vspeed") && v->is_num) p->vrate = (int16_t)cut(v->num, -32000, 32000);
     else if (!strcmp(k, "squawk") && v->is_str) p->squawk = (uint16_t)atoi(v->s);
 }
 
@@ -489,6 +495,9 @@ static int parse_plane(sky_reader_t *r, plane_t *p)
         else adsbx_field(p, key, &v, &have, &age);
     }
     if (have != 3 || !p->icao) return 0;               // lat and lon both there
+    if (fabsf(p->lat) > 90.0f || fabsf(p->lon) > 180.0f) return 0;   // and on the Earth
+    if (age > 86400.0f) age = 86400.0f;                // a day at most either way: age * 1000 must fit the ms clock
+    if (age < -86400.0f) age = -86400.0f;
     if (fix) {                                         // FR24: how much older than the answer's first position, s
         if (!r->fix0) r->fix0 = fix;
         int32_t d = (int32_t)(r->fix0 - fix);

@@ -81,6 +81,16 @@ void light_touch(light_t *l) { memset(l->since, 0, sizeof l->since); }
 
 void light_test(light_t *l, uint32_t now) { l->test = now ? now : 1; }
 
+void light_expire(light_t *l, uint32_t now)
+{
+    /* past the longest window (a minute) a moment is over: forgotten, or 2^32 ms on, 49.7 days, its age came round
+     * under a minute and an old emergency lit red again (the 2026-11-27 review). a state still there keeps its
+     * time: WHILE lights by the state, and blinks from when it came */
+    for (int ev = 0; ev < LIGHT_EVENTS; ev++)
+        if (l->since[ev] && !l->holds[ev] && now - l->since[ev] >= 60000u) l->since[ev] = 0;
+    if (l->test && now - l->test >= LIGHT_TEST_MS) l->test = 0;
+}
+
 // lit now: switched on, and still within its time. take-off and landing are moments, not states
 static int lit(const light_t *l, const light_cfg_t *c, int ev, uint32_t now)
 {

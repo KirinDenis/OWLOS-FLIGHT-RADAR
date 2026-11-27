@@ -74,9 +74,13 @@ export class Link {
               console.warn('a line the page could not take', e);   // the page's fault, not the cable's
             }
           }
+          if (text.length > 16384) {                    // no line end for 16 KB: not a line of ours, let go
+            text = '';
+          }
         }
       } catch (e) {
         if (LINE_ERRORS.includes(e.name)) {
+          text = '';                                   // what came before the break is not the start of the next line
           this.take(`(${e.name} on the line)`);
         } else {
           console.warn('the port went away', e);
@@ -143,7 +147,11 @@ export class Link {
       const line = await this.expect('OWLOS READY', 800);
       if (line) {
         const [, , what, version, build, mac] = line.split(' ');
-        return what === 'flight-radar' ? { version, build, mac } : null;
+        /* each in its own shape, or it is not ours: they go into the page and the mac into localStorage, and a
+         * device that said `"><svg onload=...>` ran it there at every visit (the 2026-11-27 review) */
+        const shaped = /^\d+(\.\d+)*$/.test(version ?? '') && (build === undefined || /^[a-z0-9_]+$/.test(build)) &&
+          (mac === undefined || /^[0-9a-f]{12}$/i.test(mac));
+        return what === 'flight-radar' && shaped ? { version, build, mac } : null;
       }
     }
     return null;

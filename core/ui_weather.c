@@ -328,12 +328,20 @@ static int make(const ui_t *u, const weather_t *w)
         if (w->hour[i].t10 > W.tmax10) W.tmax10 = w->hour[i].t10;
     }
     if (W.tmax10 - W.tmin10 < 40) W.tmax10 = (int16_t)(W.tmin10 + 40);   // a flat day stays a ring, not a scribble
+    /* the sun at each whole hour ahead, the degrees between drawn straight from them: under half a degree off, and
+     * the table keeps whole ones. 360 of sun_elevation's double sines a minute stopped a frame ~30 ms on the CYD and
+     * ~100 on the C3 (the 2026-11-27 review); the rise and set below are still worked out exactly */
+    float sun_h[25];
+    for (int h = 0; h <= 24; h++) sun_h[h] = sun_elevation(u->cfg.lat, u->cfg.lon, utc + (uint32_t)h * 3600u);
     for (int d = 0; d < 360; d++) {
         const float ah = ahead_h((float)d, W.now_deg);
-        W.t->el[d] = (int8_t)clampf(sun_elevation(u->cfg.lat, u->cfg.lon, utc + (uint32_t)(ah * 3600.0f)), -90, 90);
+        const int h0 = ah >= 24.0f ? 23 : (int)ah;
+        const float sun = sun_h[h0] + (sun_h[h0 + 1] - sun_h[h0]) * (ah - (float)h0);
+        W.t->el[d] = (int8_t)clampf(sun, -90, 90);
         W.t->sky[d] = sky_colour((float)W.t->el[d]);
         // the hour's temperature, between the forecast's hours (hour[0] is the hour now began)
-        float at = ah + (float)(utc - w->at) / 3600.0f;
+        float at = ah + (float)((int64_t)utc - (int64_t)w->at) / 3600.0f;   // signed: a clock behind the forecast
+        if (at < 0.0f) at = 0.0f;                     // wrapped the unsigned one to ~1.2 million hours, a flat loop
         int i = (int)at;
         float f = at - (float)i;
         if (i >= WX_HOURS - 1) { i = WX_HOURS - 2; f = 1.0f; }
@@ -1187,6 +1195,11 @@ static uint32_t baro_colour(float f) { return gfx_mix(gfx_mix(C_GLASS, C_PRIM, 9
 static int hud_baro(canvas_t *cv, const weather_t *w, float xc, int y, float r)
 {
     const float yc = (float)y + r + 7.0f;
+    {   /* none of it in this strip: its height alone. the warnings and the 46 pressures below were worked out for
+         * every strip of the frame, 54 on the 3.5" (the 2026-11-27 review) */
+        const int end = (int)yc + 5 + FONT_LINE_H(&FONT_MEDIUM) + 1 + FONT_LINE_H(&FONT_SMALL) + 3;
+        if (!gfx_touches(cv, (int)(yc - r) - 9, end)) return end;
+    }
     float lo, span;
     const float now = p_of(w->now_hpa10, w->now_t10);
     if (W.pu == PRES_INHG) {

@@ -98,18 +98,28 @@ void silhouette(canvas_t *cv, int kind, float x, float y, float heading, float s
  * it comes from that line's sine and cosine */
 
 static uint8_t *s_phi8;                  /* angle from straight up, 1/256 of 90 degrees, dx <= dy only */
-static uint16_t s_tri[G_RQ];             /* where row dy starts in it */
+/* where row dy starts in it. 32 bits: the 10.1"'s triangle is 74,305 long, and 16 bits wrapped past row 361, the
+ * angle wrong in four bands round N, E, S and W wherever the disc is drawn whole (the 2026-11-27 review) */
+static uint32_t s_tri[G_RQ];
 static CORE_BIG uint8_t s_ring[G_RQ * 16], s_dash[G_RQ * 16], s_glass[G_RQ + 1];
+/* the beam's afterglow and the ground's echo by how far behind the beam, built once: they were built again in every
+ * strip, 514 steps and half a kilobyte of the deepest stack */
+static uint8_t s_trail_lut[257], s_echo_lut[257];
 
 static float cover(float r, float R, float w) { return clampf(w * 0.5f + 0.5f - fabsf(r - R), 0, 1); }
 
 int scope_init(void)
 {
+    for (int i = 0; i <= 256; i++) {
+        const int f = 256 - i;
+        s_trail_lut[i] = (uint8_t)(80 * f * f >> 16);          // by distance behind the beam: no divide a pixel
+        s_echo_lut[i] = (uint8_t)(110 + (146 * f * f >> 16));   // the radar's ground: lit by the beam, then fading
+    }
     if (!s_phi8) s_phi8 = malloc(G_RQ * (G_RQ + 1) / 2);
     if (!s_phi8) return 0;
     int at = 0;
     for (int dy = 0; dy < G_RQ; dy++) {
-        s_tri[dy] = (uint16_t)at;
+        s_tri[dy] = (uint32_t)at;
         for (int dx = 0; dx <= dy; dx++) {
             float a = atan2f((float)dx, (float)dy) / (0.5f * 3.14159265f) * 256.0f;
             s_phi8[at++] = (uint8_t)(a + 0.5f > 255.0f ? 255.0f : a + 0.5f);
@@ -238,7 +248,8 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
     /* which texel lies under a pixel: the map is north up and a texel a pixel at the range it
      * was made for, the scope turns and stretches it. 1/65536 texel, a step per pixel along x */
     uint32_t gcol[GROUND_N], gpaint[GROUND_N];     // gpaint: what a texel adds, or is (classic), off the beam's trail
-    uint8_t  glev[GROUND_N], echo_lut[257];
+    uint8_t  glev[GROUND_N];
+    const uint8_t *const echo_lut = s_echo_lut, *const trail_lut = s_trail_lut;   // scope_init's
     float    gk = 0, gcu = 1, gsu = 0;
     int32_t  gdu = 0, gdv = 0, gmu = 0, gmv = 0;
     if (m) {
@@ -252,10 +263,6 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
         ground_paint(u, gcol, glev);
         for (int i = 0; i < GROUND_N; i++)
             gpaint[i] = classic ? gcol[i] : gfx_scale(gcol[i], radar ? glev[i] * 110u >> 8 : glev[i]);
-        for (int i = 0; i <= 256; i++) {               // the radar's ground: lit by the beam, then fading
-            int f = 256 - i;
-            echo_lut[i] = (uint8_t)(110 + (146 * f * f >> 16));
-        }
     }
     const uint16_t beam = (uint16_t)(u->beam / 360.0f * 65536.0f);
     const uint16_t up16 = (uint16_t)((uint32_t)u->cfg.up * 65536u / 360u);
@@ -263,11 +270,6 @@ static ALWAYS_INLINE void disc_pass(ui_t *u, canvas_t *cv, const int radar, cons
     const uint32_t RP16 = G_PR * 16, RQ16 = G_RQ * 16, RIM16 = G_SR * 16 + 4;
     const uint32_t glass = C_GLASS, prim = C_PRIM, focus = C_FOCUS;
     const int32_t bc = (int32_t)lroundf(cosf(u->beam * D2R) * 16384.0f), bs = (int32_t)lroundf(sinf(u->beam * D2R) * 16384.0f);
-    uint8_t trail_lut[257];                                        // by distance behind the beam: no divide a pixel
-    for (int i = 0; i <= 256; i++) {
-        int f = 256 - i;
-        trail_lut[i] = (uint8_t)(80 * f * f >> 16);
-    }
     const uint32_t trail_k = (256u << 16) / trail;
     /* the ground of a row is looked up first, in a loop of its own: the pixel loop below has
      * all the registers it can use already */
@@ -610,11 +612,15 @@ static void conflicts(ui_t *u)
         for (int i = 0; i < s->n; i++) u->spot[i].alert = 0;
         return;
     }
-    /* an answer puts the planes in another order: the pairs are numbers in it, so a new answer is
-     * looked at at once. kept for up to a second, a red line joined two other planes meanwhile */
-    if (u->now - at < 1000u && s->updated == seen) return;
+    /* an answer puts the planes in another order: the pairs are numbers in it, so a new order is
+     * looked at at once. kept for up to a second, a red line joined two other planes meanwhile. the
+     * order is told by the planes themselves: one forgotten (sky_forget) moves the last into its slot
+     * with `updated` as it was, and a pair joined the wrong planes for a second (the 2026-11-27 review) */
+    uint32_t order = s->updated ^ (uint32_t)s->n;
+    for (int i = 0; i < s->n; i++) order = order * 31u + s->p[i].icao;
+    if (u->now - at < 1000u && order == seen) return;
     at = u->now;
-    seen = s->updated;
+    seen = order;
     for (int i = 0; i < s->n; i++) {
         const plane_t *p = &s->p[i];
         float km_s = p->gs * 1.852f / 3600.0f;
@@ -1297,6 +1303,22 @@ static void planes(ui_t *u, canvas_t *cv)
         const plane_t *p = &s->p[i];
         const spot_t *sp = &u->spot[i];
         if (!sp->vis) continue;
+        if (p->icao != u->sel) {                        // the picked one's line runs to the middle: not cut
+            /* the rows anything of it may reach: its glow and shape, its trail, its speed line, its pair's line.
+             * none in this strip: none of the work below, done for every plane in every strip, 54 strips a frame on
+             * the 3.5" (the 2026-11-27 review) */
+            int ya = sp->y - 26, yb = sp->y + 26;
+            if (sp->tn && sp->ty0 - 2 < ya) ya = sp->ty0 - 2;
+            if (sp->tn && sp->ty1 + 2 > yb) yb = sp->ty1 + 2;
+            if (sp->vy - 2 < ya) ya = sp->vy - 2;
+            if (sp->vy + 2 > yb) yb = sp->vy + 2;
+            if (sp->alert > i + 1 && sp->alert <= s->n) {
+                const spot_t *o = &u->spot[sp->alert - 1];
+                if (o->y - 2 < ya) ya = o->y - 2;
+                if (o->y + 2 > yb) yb = o->y + 2;
+            }
+            if (!gfx_touches(cv, ya, yb)) continue;
+        }
         uint32_t col = spot_colour(u, p, sp);
         const int gone = plane_lost(u, p);
         if (sp->alert > i + 1 && sp->alert <= s->n) {   // the pair: one line, from the first of the two
@@ -1455,7 +1477,7 @@ static uint32_t demo_why_col(const ui_t *u)
 // pick one (boot_banner): the demo's card waits till then, the two would cover each other
 static int demo_shown(const ui_t *u)
 {
-    return u->net.demo && !(ui_screen_name && u->now < UI_SCREEN_PICK_MS);
+    return u->net.demo && !(ui_screen_name && !u->started);
 }
 
 #if !RADAR_ROUND
@@ -2024,7 +2046,18 @@ static void alarm_rim(const ui_t *u, canvas_t *cv)
 {
     uint32_t fill, ink;
     if (!alarm_colours(u, 0, &fill, &ink)) return;
-    gfx_arc(cv, (float)SCX, (float)SCY, GFX_W / 2.0f - 3.0f, 0.0f, 360.0f, 4.0f, fill, 255);
+    /* the band, 5 px, as two spans a row, mirrored: two square roots a row. the whole circle through gfx_arc cost
+     * ~180 sines and cosines in every strip, the C3's soft float (the 2026-11-27 review) */
+    const float ro = GFX_W / 2.0f, ri = ro - 5.0f;
+    for (int y = cv->y0; y < cv->y0 + cv->h; y++) {
+        const float dy = (float)y + 0.5f - (float)SCY, d2 = dy * dy;   // from the middle, at the row's middle
+        if (d2 >= ro * ro) continue;
+        const float xo = gfx_sqrt(ro * ro - d2), xi = d2 < ri * ri ? gfx_sqrt(ri * ri - d2) : 0.0f;
+        const int a = (int)ceilf((float)SCX - xo - 0.5f), b = (int)floorf((float)SCX - xi - 0.5f);   // the left span
+        if (a > b) continue;
+        gfx_hline(cv, a, b, y, fill, 256);
+        gfx_hline(cv, 2 * SCX - 1 - b, 2 * SCX - 1 - a, y, fill, 256);   // the right one, the left's mirror
+    }
 }
 #endif
 
@@ -2207,14 +2240,14 @@ void boot_banner(ui_t *u, canvas_t *cv)
 {
     uint32_t t = u->now - u->boot;
     const int cx = panel_shown(u) ? SCX : GFX_W / 2;   // beside the panel (the radar's, or the map's slid in), or the screen's middle
-    if (t < 1800u) {
+    if (!u->started && t < 1800u) {                   // not again when the clock comes round, 49.7 days on
         float f = (float)t / 1800.0f;
         gfx_ring(cv, (float)cx, SCY, 8.0f + SR * f, 2.0f, C_FOCUS, (int)(230 * (1.0f - f)));
         int w = micro_width(RADAR_NAME, 2);
         gfx_fill(cv, cx - w / 2 - 4, SCY + 14, w + 8, 18, C_BG0, (int)(200 * (1.0f - f * f)));
         micro_text(cv, cx - w / 2, SCY + 18, RADAR_NAME, C_FOCUS, (int)(255 * (1.0f - f * f)), 2);
     }
-    if (!ui_screen_name || u->now >= UI_SCREEN_PICK_MS || u->view != VIEW_MAIN) return;
+    if (!ui_screen_name || u->started || u->now >= UI_SCREEN_PICK_MS || u->view != VIEW_MAIN) return;
     const int bw = 156, bh = 32, bx = cx - bw / 2, by = SCY + 40;
     if (!gfx_touches(cv, by, by + bh)) return;
     chamfer_box(cv, bx, by, bw, bh, C_BG0, 220, C_FOCUS, 230);

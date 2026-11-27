@@ -64,14 +64,6 @@ void disp_init(void)
         return;
     }
     s_panel = h.panel;
-    s_line[0] = heap_caps_aligned_alloc(64, GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    s_line[1] = heap_caps_aligned_alloc(64, GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    s_col  = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    if (!s_line[0] || !s_line[1] || !s_col) {
-        ESP_LOGE(TAG, "no memory for a strip");
-        s_panel = NULL;
-        return;
-    }
     /* the P4 has a block turner in hardware (the PPA): it reads the strip, turns it and writes it
      * into the frame, cache and all, while this core goes on. without it the strip is turned by
      * hand and the driver copies it in line by line, 1280 lines a strip */
@@ -82,6 +74,16 @@ void disp_init(void)
     } else {
         s_ppa = NULL;
         ESP_LOGW(TAG, "no PPA: the strips are turned by hand");
+        /* the hand's strips, 92 KB of the internal RAM: only without the PPA. taken always, they were unused, and
+         * one short of memory left the screen dark though the PPA needs none of them (the 2026-11-27 review) */
+        s_line[0] = heap_caps_aligned_alloc(64, GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+        s_line[1] = heap_caps_aligned_alloc(64, GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+        s_col  = heap_caps_malloc(GFX_PW * DISP_STRIP * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+        if (!s_line[0] || !s_line[1] || !s_col) {
+            ESP_LOGE(TAG, "no memory for a strip");
+            s_panel = NULL;
+            return;
+        }
     }
     esp_lcd_panel_disp_on_off(s_panel, true);
     bsp_display_brightness_set(0);                     // the package set the backlight's PWM up with the panel                     // main.c brings it up once the first frames are in
@@ -119,9 +121,14 @@ static void put(const canvas_t *cv)
         };
         esp_err_t e = ppa_do_scale_rotate_mirror(s_ppa, &op);
         if (e == ESP_OK) return;
+        if (!s_col) {                                  // no hand's strips: this strip is lost, the PPA asked again next time
+            ESP_LOGW(TAG, "the PPA refused a strip: %s", esp_err_to_name(e));
+            return;
+        }
         ESP_LOGW(TAG, "the PPA refused a strip: %s, turning by hand from now on", esp_err_to_name(e));
         s_ppa = NULL;
     }
+    if (!s_col) return;
     uint16_t *line = s_line[k];
     gfx_pack565(cv, line);                             // h rows of GFX_PW pixels, the picture's way
     /* the picture's row y goes to the frame's column 719 - y and its x down the frame: the rows of

@@ -31,6 +31,8 @@ builder.Services.AddSingleton((sp) => Countries.Load(
     sp.GetRequiredService<IOptions<StatsOptions>>().Value.CountryFile,
     sp.GetRequiredService<ILoggerFactory>().CreateLogger<Countries>()));
 builder.Services.AddHostedService<CountsSaver>();
+builder.Services.AddSingleton<Published>();            // the site's versions, for the flashes
+builder.Services.AddHostedService((sp) => sp.GetRequiredService<Published>());
 
 builder.WebHost.ConfigureKestrel((k) => k.Limits.MaxRequestBodySize = 1024);   // a report is a few dozen bytes
 builder.Services.Configure<ForwardedHeadersOptions>((o) =>
@@ -46,9 +48,29 @@ builder.Services.AddRateLimiter((o) =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     // the address is the limiter's key for one minute, in memory: it is not kept past that, nor written
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>((ctx) => RateLimitPartition.GetFixedWindowLimiter(
-        ctx.Connection.RemoteIpAddress?.ToString() ?? "-",
+        LimiterKey(ctx.Connection.RemoteIpAddress),
         (_) => new FixedWindowRateLimiterOptions { PermitLimit = settings.RequestsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
+
+// an IPv6 address by its /64, the network one home or one phone gets: by the whole address, one machine stepping
+// through its own 2^64 went past the limit at will (the 2026-11-27 review). IPv4, and IPv4 in IPv6, as it is
+static string LimiterKey(IPAddress? a)
+{
+    if (a == null)
+    {
+        return "-";
+    }
+    if (a.IsIPv4MappedToIPv6)
+    {
+        return a.MapToIPv4().ToString();
+    }
+    if (a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+    {
+        return a.ToString();
+    }
+    byte[] b = a.GetAddressBytes();
+    return Convert.ToHexString(b, 0, 8) + "::/64";
+}
 
 WebApplication app = builder.Build();
 app.Services.GetRequiredService<Countries>();          // the table read at start, not on the first report
@@ -64,9 +86,9 @@ string CountryOf(HttpContext ctx, Countries countries) => countries.Of(ctx.Conne
 app.MapGet("/api/stats", (Counts counts) => Results.Ok(counts.Answer()));
 
 // the page, once a flash it made went through and its owner allowed counting it
-app.MapPost("/api/flash", (BoardReport r, HttpContext ctx, Counts counts, Countries countries) =>
+app.MapPost("/api/flash", (BoardReport r, HttpContext ctx, Counts counts, Countries countries, Published published) =>
 {
-    if (!Known(r))
+    if (!Known(r) || !published.Has(r.Version!))     // only what the site has published: the page flashes nothing else
     {
         return Results.BadRequest();
     }

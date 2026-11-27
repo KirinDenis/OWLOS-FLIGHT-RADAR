@@ -76,6 +76,9 @@ int demo_json(demo_t *d, float home_lat, float home_lon, float range_km, uint32_
 {
     if (d->t) {
         float dt = (float)(now - d->t) / 1000.0f;
+        /* two minutes at most: the last demo may be days back (the WiFi was there meanwhile), and stepping all of
+         * it, 17,280 steps a day, before the first answer could run past the task watchdog on the C3 */
+        if (dt > 120.0f) dt = 120.0f;
         while (dt > 0) {                               // in steps, so a long gap still curves right
             float s = dt > 5.0f ? 5.0f : dt;
             step(d, range_km, s);

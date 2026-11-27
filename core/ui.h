@@ -228,6 +228,9 @@ typedef struct {
     uint8_t  alert_new;    /* the kinds that came or got worse this frame (1 << WXA_*): the firmware lights the LED */
     /* the LED's events on the screen too (an owner's idea: the CYDs' LED is on the back, out of sight). the look's
      * button lights in the event's colour, the round glass's rim; paper and the site's radar show none */
+    uint8_t  started;      /* the first UI_SCREEN_PICK_MS after power on are over, latched by ui_frame: tested as
+                              now < 8000 they came back with the ms clock's wrap every 49.7 days, BOOT then
+                              switched and kept another LCD profile (the 2026-11-27 review) */
     uint8_t  screen_alarm; /* SET's ON SCREEN, 1 at first. the firmware keeps it */
     uint8_t  alarm;        /* what lights now: LIGHT_* + 1, in the lit part of its blink; 0 none. ui_alarm, each frame */
     uint32_t prof[6];      /* us spent a layer, summed till the firmware logs them: background, disc,

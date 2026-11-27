@@ -8,6 +8,8 @@
 #define WX_HOURS 24
 #define WX_DAYS  4
 #define WX_PAST  24           /* hours before now, for the graphs behind the dial */
+#define WX_STALE_S (2 * 3600) /* a forecast whose first hour is older is shown as none (ui.c ui_frame): asked for
+                                 every 30 minutes, a good one is at most about an hour and a half old */
 
 enum { WX_CLEAR, WX_PARTLY, WX_CLOUDY, WX_FOG, WX_DRIZZLE, WX_RAIN, WX_SNOW, WX_STORM, WX_KINDS };
 

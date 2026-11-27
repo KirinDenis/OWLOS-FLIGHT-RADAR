@@ -134,6 +134,7 @@ export function options(words, valued = []) {
 
 /** The nearest names to a mistyped one: the ones a letter or two away. */
 function nearest(name, names) {
+  if (name.length > 40) return [];                     // a pasted page is no command's typo: the table froze the tab
   const d = (a, b) => {
     const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
     for (let j = 1; j <= b.length; j++) m[0][j] = j;

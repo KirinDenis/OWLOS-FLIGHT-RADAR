@@ -505,6 +505,11 @@ void ui_frame(ui_t *u, uint32_t now)
     fling_step(u, now);
     if (RADAR_EPAPER && u->cfg.look == LOOK_MAP) u->cfg.look = LOOK_CLASSIC;   // paper has no flat map, CLASSIC is its map
     u->now = now;
+    if (!u->started && now >= UI_SCREEN_PICK_MS) u->started = 1;   // once: the clock's wrap never opens it again
+    /* a forecast past WX_STALE_S is none: its hour 0 was taken as now, so with the WiFi or the server gone for hours
+     * the warnings spoke of hours already past and NOW stood an hour or more wrong (the 2026-11-27 review). it is
+     * asked for every 30 minutes, so a good one is never this old. signed: a clock behind the forecast is not old */
+    if (u->wx && u->net.utc && (int64_t)u->net.utc - (int64_t)u->wx->at > WX_STALE_S) u->wx = NULL;
     weather_frame(u);                                       // the WEATHER look's page, and what its strips will read
     if (!ui_until(u->toast_until, now)) u->toast_until = 0;    // passed: let go, see ui_until
     alerts_frame(u);
@@ -513,6 +518,11 @@ void ui_frame(ui_t *u, uint32_t now)
     if (u->sel && !sel_plane(u)) u->sel = 0;                // it flew away
     grid_columns(scope_glass_cx(u));                        // the background's grid through the scope's middle
     scope_frame(u);
+    {   /* a list grown shorter under its scroll (planes gone) back to its end: scrolled past every row the page stood
+         * empty, with no NOTHING IN RANGE either, till a drag (the 2026-11-27 review) */
+        int maxs, *sp = list_scroll_of(u, &maxs);
+        if (sp && !u->t_down && !u->fling && *sp > maxs) *sp = maxs;
+    }
 #if RADAR_EPAPER
     paper_frame(u);                                         // the paper's own main screen, when it is the one shown
 #endif

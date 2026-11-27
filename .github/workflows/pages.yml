@@ -144,10 +144,12 @@ jobs:
   # can't fetch, or a lower number than one it has, stops here and the site stays as it was.
   # a version's firmware is replaced by each build of it: to keep a build, give the next one a new
   # number in CHANGES.md. a run for one board publishes only in a fork, where that board is the site
+  # but not without the radar page in a full run: the page connects every board through it, and with
+  # radar/twin*.js missing no board could be connected at all (the 2026-11-27 review)
   site:
     name: Flasher site
     needs: [ firmware, web ]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.board || github.event.repository.fork) }}
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && (!inputs.board || github.event.repository.fork) && (inputs.board || needs.web.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -172,7 +174,7 @@ jobs:
           merge-multiple: true
 
       - uses: actions/download-artifact@v4
-        continue-on-error: true   # no radar page this time: the flasher still goes out
+        continue-on-error: true   # a run for one board has no radar page: its fork's flasher still goes out
         with:
           name: web
           path: public/radar

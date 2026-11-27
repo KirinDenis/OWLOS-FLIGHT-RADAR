@@ -28,10 +28,16 @@ enum {
     M_NONE = 15                        /* nothing known there (yet) */
 };
 
-#define MAP_W_MAX     (GFX_SCALED ? GFX_PW : 480)   /* texels: the whole screen at most */
+/* texels: the whole screen at most. the 5.79" paper is 792 wide unscaled: at 480 its plan was cut and every tile
+ * was refused against the map's 792, dropped and asked again each 15 s (the 2026-11-27 review) */
+#define MAP_W_MAX     (GFX_SCALED || GFX_PW > 480 ? GFX_PW : 480)
 #define MAP_H_MAX     (GFX_SCALED ? GFX_PH : 320)
 #define MAP_BAND      8                /* rows a piece */
-#define MAP_TILES_MAX (GFX_SCALED ? 32 : 16)
+/* the square looks of the biggest glasses need up to 49 (the 10.1" at some ranges, the Tab5 43): 32 left the
+ * edges empty */
+#define MAP_TILES_MAX (GFX_SCALED ? 64 : 16)
+/* map_tile: the map and the plan do not match (a new plan meanwhile): nothing read, the tile itself is fine */
+#define MAP_NOT_NOW   (-2)
 
 typedef struct { int z; int32_t x, y; } tile_id_t;   /* x may run off the world's edge: map_url wraps it */
 
@@ -64,7 +70,7 @@ extern void *(*map_mem)(size_t bytes);
 /* map_tile's working rows while a tile is read (the names, word by word): MAP_SCRATCH bytes lent, or
  * NULL: malloc. the heap is shortest just then, the PNG's window takes 32 KB of it, so the firmware
  * lends a buffer of its own that nothing uses while the map is read */
-#define MAP_SCRATCH 3584
+#define MAP_SCRATCH 3968               /* map.c's ring of 25 rows, a row of kinds, the stack */
 extern void  *map_scratch;
 
 /* the zoom whose tile pixels come nearest a texel: 2 .. 17 */

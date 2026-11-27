@@ -723,16 +723,19 @@ export function startScene(canvas, getRadar, onPick) {
     return { x: b.x, y: b.y, z: b.z + 34, L: b.L, h };
   }
 
-  const smallOnes = new Map();
+  /* one canvas a step of the halving, resized in place. kept by their sizes, a new one came for every few pixels of a
+   * window being resized, up to a megabyte each, and none went (the 2026-11-27 review) */
+  const smallOnes = [];
 
-  function step(from, w, h) {
-    const key = `${w}x${h}`;
-    let c = smallOnes.get(key);
+  function step(level, from, w, h) {
+    let c = smallOnes[level];
     if (!c) {
       c = document.createElement('canvas');
+      smallOnes[level] = c;
+    }
+    if (c.width !== w || c.height !== h) {
       c.width = w;
       c.height = h;
-      smallOnes.set(key, c);
     }
     const p = c.getContext('2d');
     p.imageSmoothingEnabled = true;
@@ -744,10 +747,11 @@ export function startScene(canvas, getRadar, onPick) {
   /* by halves: only Chrome filters a big step well, a half at a time comes out the same everywhere */
   function shrunk(radar, w, h) {
     let from = radar;
+    let level = 0;
     while (from.width / 2 >= w) {
-      from = step(from, Math.round(from.width / 2), Math.round(from.height / 2));
+      from = step(level++, from, Math.round(from.width / 2), Math.round(from.height / 2));
     }
-    return step(from, w, h);
+    return step(level, from, w, h);
   }
 
   function screenOn(x, y, z, L, h) {

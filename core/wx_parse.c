@@ -70,6 +70,7 @@ static int array(const char *obj, const char *name, float *out, int n)
     int i = 0;
     while (i < n && *p && *p != ']') {
         if (*p == 'n') {
+            if (strncmp(p, "null", 4)) break;          // a body cut at "nu": 4 more would step past its end
             out[i++] = NAN;
             p += 4;
         } else {
@@ -105,6 +106,10 @@ static uint8_t kind_of(float code)
 }
 
 static int16_t tenths(float v) { return isnan(v) ? 0 : (int16_t)lroundf(v * 10.0f); }
+// a pressure the dial can draw, else the one given: 800..1200 hPa, as the past's (the grid below it loops by the hPa)
+static uint16_t hpa10_or(float v, uint16_t other) { return isnan(v) || v < 800.0f || v > 1200.0f ? other : (uint16_t)lroundf(v * 10.0f); }
+// the rain of an hour, mm: never below 0 (a cast would wrap it to 6553), 500 at most
+static uint16_t rain10(float v) { return (uint16_t)(isnan(v) || v <= 0.0f ? 0 : lroundf((v > 500.0f ? 500.0f : v) * 10.0f)); }
 static uint8_t byte_of(float v) { return isnan(v) || v < 0 ? 0 : v > 254.0f ? 254 : (uint8_t)lroundf(v); }
 
 int wx_parse_forecast(const char *json, weather_t *w)
@@ -124,7 +129,7 @@ int wx_parse_forecast(const char *json, weather_t *w)
     n.feels10 = number(cur, "apparent_temperature", &v) ? tenths(v) : n.now_t10;
     if (number(cur, "relative_humidity_2m", &v)) n.humidity = byte_of(v);
     n.now_kind = number(cur, "weather_code", &v) ? kind_of(v) : WX_CLOUDY;
-    if (number(cur, "pressure_msl", &v)) n.now_hpa10 = (uint16_t)lroundf(v * 10.0f);
+    if (number(cur, "pressure_msl", &v)) n.now_hpa10 = hpa10_or(v, 0);
     if (number(cur, "wind_direction_10m", &v)) n.wind_from = (int16_t)lroundf(v);
     if (number(cur, "wind_speed_10m", &v)) n.wind_kmh = byte_of(v);
     if (number(cur, "wind_gusts_10m", &v)) n.gust_kmh = byte_of(v);
@@ -137,9 +142,9 @@ int wx_parse_forecast(const char *json, weather_t *w)
     if (array(hr, "cloud_cover", a, WX_HOURS) == WX_HOURS)
         for (int i = 0; i < WX_HOURS; i++) n.hour[i].cloud = byte_of(a[i]);
     if (array(hr, "precipitation", a, WX_HOURS) == WX_HOURS)
-        for (int i = 0; i < WX_HOURS; i++) n.hour[i].rain10 = (uint16_t)(isnan(a[i]) ? 0 : lroundf(a[i] * 10.0f));
+        for (int i = 0; i < WX_HOURS; i++) n.hour[i].rain10 = rain10(a[i]);
     if (array(hr, "pressure_msl", a, WX_HOURS) == WX_HOURS)
-        for (int i = 0; i < WX_HOURS; i++) n.hour[i].hpa10 = isnan(a[i]) ? n.now_hpa10 : (uint16_t)lroundf(a[i] * 10.0f);
+        for (int i = 0; i < WX_HOURS; i++) n.hour[i].hpa10 = hpa10_or(a[i], n.now_hpa10);
     if (array(hr, "wind_direction_10m", a, WX_HOURS) == WX_HOURS)
         for (int i = 0; i < WX_HOURS; i++) n.hour[i].wind_from2 = isnan(a[i]) ? 0 : (uint8_t)(lroundf(a[i]) % 360 / 2);
     if (array(hr, "wind_speed_10m", a, WX_HOURS) == WX_HOURS)
@@ -151,17 +156,18 @@ int wx_parse_forecast(const char *json, weather_t *w)
     for (int i = 0; i < WX_HOURS; i++) n.hour[i].aqi = WX_NONE;
     // the next days: today is the first of the daily ones, so from the second on
     float code[WX_DAYS + 1], hi[WX_DAYS + 1], lo[WX_DAYS + 1];
+    /* all the days or no answer: short, the days stayed 0 and every look drew four "MON, clear, 0/0" (the
+     * 2026-11-27 review). a cut body is asked again, the forecast before it stays meanwhile */
     const int days = array(dy, "weather_code", code, WX_DAYS + 1);
-    if (days == WX_DAYS + 1 && array(dy, "temperature_2m_max", hi, WX_DAYS + 1) == days &&
-        array(dy, "temperature_2m_min", lo, WX_DAYS + 1) == days) {
-        const uint32_t day0 = first_time(dy);          // midnight of today at home, as UTC
-        for (int i = 0; i < WX_DAYS; i++) {
-            n.day[i].kind = kind_of(code[i + 1]);
-            n.day[i].hi10 = tenths(hi[i + 1]);
-            n.day[i].lo10 = tenths(lo[i + 1]);
-            const int64_t local = (int64_t)day0 + (int64_t)n.utc_min * 60 + (int64_t)(i + 1) * 86400;
-            n.day[i].wday = (uint8_t)((local / 86400 + 3) % 7);   // 1970-01-01 was a Thursday
-        }
+    if (days != WX_DAYS + 1 || array(dy, "temperature_2m_max", hi, WX_DAYS + 1) != days ||
+        array(dy, "temperature_2m_min", lo, WX_DAYS + 1) != days) return 0;
+    const uint32_t day0 = first_time(dy);              // midnight of today at home, as UTC
+    for (int i = 0; i < WX_DAYS; i++) {
+        n.day[i].kind = kind_of(code[i + 1]);
+        n.day[i].hi10 = tenths(hi[i + 1]);
+        n.day[i].lo10 = tenths(lo[i + 1]);
+        const int64_t local = (int64_t)day0 + (int64_t)n.utc_min * 60 + (int64_t)(i + 1) * 86400;
+        n.day[i].wday = (uint8_t)((local / 86400 + 3) % 7);   // 1970-01-01 was a Thursday
     }
     *w = n;
     return 1;

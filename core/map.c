@@ -236,13 +236,15 @@ void map_end(map_t *m, const map_plan_t *p)
  * and the 2.8" CYD, its heap in pieces round the PNG's window, could not read a third of its maps in a
  * soak: the firmware lends a buffer of its own now --- */
 
-#define RING   22                      /* rows of marks kept */
+/* rows of marks kept: a word, the rows that tell it is whole, and the NEAR rows tile_row reads ahead of them.
+ * 22 forgot those last: the 3 rows a word's top reached past were the newest rows' slots (the 2026-11-27 review) */
+#define RING   25
 #define NEAR   3                       /* an edge this near a core is a letter's */
 #define GAP    5                       /* letters this far apart in a row are one word: it moves as one */
 #define WORD_H 16                      /* the tallest word copied */
 #define WORD_W 180                     /* and the widest */
 #define STACK  256                     /* pixels of a word waiting to be looked round */
-_Static_assert(RING >= WORD_H + NEAR + 3, "a word and the rows that tell it is whole fit the ring");
+_Static_assert(RING >= WORD_H + 2 * NEAR + 3, "a word, the rows that tell it is whole and the rows read ahead fit the ring");
 _Static_assert(MAP_SCRATCH == RING * 128 + 256 + STACK * 2, "map.h's MAP_SCRATCH: the ring, a row of kinds, the stack");
 
 enum { MK_NONE, MK_CORE, MK_DARK, MK_LIGHT, MK_TINT };  /* a grey under 133 (rails at 112), under 170, a tinted one */
@@ -455,7 +457,10 @@ static void texel_of(const map_plan_t *p, float wx, int32_t wy0, float wyf, floa
  * left: the scaled way */
 static int word_at(tile_ctx_t *c, int s, int x, int k, int last, int16_t *b)
 {
-    const int lo = k - RING + 1 < 0 ? 0 : k - RING + 1;
+    /* the ring holds the rows up to k + NEAR (tile_row is NEAR rows on): the oldest it still has is k + NEAR - RING
+     * + 1. with 22 rows the walk went from k - 21 all the same, and the 3 rows above the oldest were the newest
+     * rows' slots, read as if 22 rows up: holes in tall names, bits of letters 22 px off. k - 21 again, held */
+    const int lo = k + NEAR - RING + 1 < 0 ? 0 : k + NEAR - RING + 1;
     int n = 0, sp = 0, ncore = 0, over = 0;
     int x0 = x, x1 = x, y0 = s, y1 = s;
     seen_set(c, s, x);
@@ -485,7 +490,7 @@ static int word_at(tile_ctx_t *c, int s, int x, int k, int last, int16_t *b)
         }
     }
     const int whole = last || y1 <= s;
-    if (!whole && k - y0 < RING - 3) {                  // more of it may come: left for a row further down
+    if (!whole && k - y0 < RING - NEAR - 3) {           // more of it may come: left for a row further down (19, as ever)
         if (x0 < b[0]) b[0] = (int16_t)x0;
         if (x1 > b[1]) b[1] = (int16_t)x1;
         if (y0 < b[2]) b[2] = (int16_t)y0;
@@ -567,7 +572,7 @@ static void tile_row(void *ctx, const png_info_t *in, int y, const uint8_t *data
 
 int map_tile(map_t *m, const map_plan_t *p, int k, png_read_fn rd, void *rctx)
 {
-    if (k < 0 || k >= p->ntiles || !m->band[0] || m->w != p->w || m->h != p->h) return PNG_BAD;
+    if (k < 0 || k >= p->ntiles || !m->band[0] || m->w != p->w || m->h != p->h) return MAP_NOT_NOW;   // not the tile's fault
     static tile_ctx_t c;                                      // 300 bytes: off the task's stack
     memset(&c, 0, sizeof c);
     c.m = m;

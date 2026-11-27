@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -109,6 +110,21 @@ static void next_network(void)
     xSemaphoreGive(s_lock);
 }
 
+/* the next try after a lost WiFi, 2 s on: the router gets a breath. on a timer of its own, not a vTaskDelay in
+ * on_event: that held the event task, and DHCP, GOT_IP and the scans waited behind it, with a network out of
+ * reach most of the time (the 2026-11-27 review) */
+static esp_timer_handle_t s_retry;
+static volatile int       s_retry_reason;
+
+static void retry(void *arg)
+{
+    (void)arg;
+    if (s_have_ssid && s_scan != SCAN_RUNNING && !s_up) {
+        if (s_retry_reason != WIFI_REASON_ASSOC_LEAVE) next_network();   // that one is the board's own doing
+        esp_wifi_connect();
+    }
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -123,10 +139,16 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         s_why = reason == WIFI_REASON_AUTH_FAIL || reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
                 reason == WIFI_REASON_HANDSHAKE_TIMEOUT ? WHY_PASSWORD : WHY_NOT_FOUND;
         ESP_LOGW(TAG, "WiFi lost (reason %d), trying again", reason);
-        vTaskDelay(pdMS_TO_TICKS(2000));              // the event task waits, the router gets a breath
-        if (s_have_ssid && s_scan != SCAN_RUNNING) {
-            if (reason != WIFI_REASON_ASSOC_LEAVE) next_network();   // that one is the board's own doing
-            esp_wifi_connect();
+        if (!s_retry) {
+            const esp_timer_create_args_t a = { .callback = retry, .name = "wifi_retry" };
+            if (esp_timer_create(&a, &s_retry) != ESP_OK) s_retry = NULL;
+        }
+        s_retry_reason = reason;
+        if (s_retry) {
+            esp_timer_stop(s_retry);                   // one pending at most: the newest reason
+            esp_timer_start_once(s_retry, 2000000);
+        } else if (s_have_ssid && s_scan != SCAN_RUNNING) {
+            esp_wifi_connect();                        // no timer: at once, as a last resort
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
         const wifi_event_sta_scan_done_t *e = data;
@@ -261,8 +283,24 @@ uint32_t net_utc(void)
  * is the only caller */
 typedef struct { net_sink_fn sink; void *ctx; int len; } net_body_t;
 static net_body_t               s_body;
-static esp_http_client_handle_t s_keep;
+/* one kept a host, two at most, the one asked longest ago going for a third: the planes' server and the other one
+ * the watch list asks (main.c watch_lookup, the other on purpose: both on one, adsb.lol said 429). with one kept,
+ * every watch lookup moved it to the other host and back, two handshakes each 15 s (the 2026-11-27 review). TLS
+ * takes its memory from the PSRAM on these boards */
+#define KEEP_N 2
+static struct { esp_http_client_handle_t h; char host[48]; uint32_t used; } s_keep[KEEP_N];
+static uint32_t                 s_keep_tick;
 static uint32_t                 s_reused, s_fresh;     // requests on a kept connection / connections made, for the log
+
+static void host_of(const char *url, char *host, size_t cap)
+{
+    const char *p = strstr(url, "://");
+    p = p ? p + 3 : url;
+    size_t n = strcspn(p, "/:?");
+    if (n >= cap) n = cap - 1;
+    memcpy(host, p, n);
+    host[n] = 0;
+}
 
 static esp_err_t on_http(esp_http_client_event_t *e)
 {
@@ -280,10 +318,21 @@ int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, in
 {
     *status = 0;
     if (!s_up) {
-        if (s_keep) { esp_http_client_cleanup(s_keep); s_keep = NULL; }
+        for (int i = 0; i < KEEP_N; i++) {
+            if (s_keep[i].h) { esp_http_client_cleanup(s_keep[i].h); s_keep[i].h = NULL; }
+        }
         return -1;
     }
-    if (!s_keep) {
+    char host[48];
+    host_of(url, host, sizeof host);
+    int k = -1, old = 0;
+    for (int i = 0; i < KEEP_N; i++) {
+        if (s_keep[i].h && !strcmp(s_keep[i].host, host)) { k = i; break; }
+        if (!s_keep[i].h || (s_keep[old].h && s_keep[i].used < s_keep[old].used)) old = i;
+    }
+    if (k < 0) {                                       // a host not kept: a new one, in place of the one asked longest ago
+        k = old;
+        if (s_keep[k].h) { esp_http_client_cleanup(s_keep[k].h); s_keep[k].h = NULL; }
         esp_http_client_config_t c = {
             .url = url,
             .crt_bundle_attach = esp_crt_bundle_attach,
@@ -294,14 +343,16 @@ int net_get(const char *url, const char *bearer, net_sink_fn sink, void *ctx, in
             .event_handler = on_http,
             .keep_alive_enable = true,
         };
-        s_keep = esp_http_client_init(&c);
-        if (!s_keep) return -1;
-    } else if (esp_http_client_set_url(s_keep, url) != ESP_OK) {
-        esp_http_client_cleanup(s_keep);
-        s_keep = NULL;
+        s_keep[k].h = esp_http_client_init(&c);
+        if (!s_keep[k].h) return -1;
+        memcpy(s_keep[k].host, host, sizeof host);
+    } else if (esp_http_client_set_url(s_keep[k].h, url) != ESP_OK) {   // the same host: the connection stays
+        esp_http_client_cleanup(s_keep[k].h);
+        s_keep[k].h = NULL;
         return -1;
     }
-    esp_http_client_handle_t h = s_keep;
+    s_keep[k].used = ++s_keep_tick;
+    esp_http_client_handle_t h = s_keep[k].h;
     esp_http_client_set_header(h, "Accept", "application/json");
     if (bearer && bearer[0]) {
         static char auth[640];

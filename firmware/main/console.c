@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "driver/uart.h"
+#include "driver/uart_vfs.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -80,11 +81,14 @@ void console_start(console_line_fn fn)
     xTaskCreate(usb_task, "console usb", 4096, NULL, 3, NULL);
 #endif
 #if CONFIG_ESP_CONSOLE_UART
-    // the log keeps writing to UART0 as it always did, this only adds the receiving side
-    if (uart_driver_install(UART_NUM_0, 2048, 0, 0, NULL, 0) != ESP_OK) {
+    /* the receiving side, and a 4 KB ring for what goes out, which stdout now writes into: without it every
+     * printf and log line waited for the UART at 115200 baud, spinning, a GET's CFG ~90 ms and the page's planes
+     * (13 KB every 5 s) ~1.2 s of a core (the 2026-11-27 review). a full ring now blocks the task, it sleeps */
+    if (uart_driver_install(UART_NUM_0, 2048, 4096, 0, NULL, 0) != ESP_OK) {
         ESP_LOGE(TAG, "no UART driver: settings can't come from the site on UART0");
         return;
     }
+    uart_vfs_dev_use_driver(UART_NUM_0);
 #if DISP_JC8012 || DISP_WAVE7
     /* (chipguyhere) its stack in the PSRAM: no deadline, and with XIP from PSRAM nothing runs with the cache off */
     if (xTaskCreateWithCaps(uart_task, "console", 4096, NULL, 3, NULL, MALLOC_CAP_SPIRAM) != pdPASS)

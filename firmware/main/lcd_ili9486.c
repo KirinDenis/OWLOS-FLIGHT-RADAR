@@ -112,6 +112,7 @@ void disp_flip(int on)
 
 void disp_strip(const canvas_t *cv)
 {
+    if (!s_buf) return;                                // no DMA memory at the start (said then): nothing drawn, no write to 0
     gfx_pack565(cv, s_buf);
     window(0, cv->y0, GFX_W - 1, cv->y0 + cv->h - 1);
     gpio_set_level(PIN_LCD_DC, 0);

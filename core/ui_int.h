@@ -284,6 +284,7 @@ void wx_unit_text(const ui_t *u, int which, char *b, int sz);   /* SET's value: 
 void wx_unit_next(ui_t *u, int which);               /* SET's tap: the next one, AUTO after the last */
 
 /* the WiFi page and the keyboard (ui_wifi.c) */
+#if UI_WIFI_PAGE
 void wifi_open(ui_t *u, ui_cmd_t *cmd);            /* the networks, and look for them again */
 void wifi_draw(ui_t *u, canvas_t *cv);
 int  wifi_hit(const ui_t *u, int x, int y);
@@ -294,6 +295,21 @@ void watch_open(ui_t *u);                            /* the keyboard, for the wa
 void keys_draw(ui_t *u, canvas_t *cv);
 int  keys_hit(const ui_t *u, int x, int y);
 int  keys_repeats(const ui_t *u, int hit);           /* the key that rubs out goes on while held */
+void keys_act(ui_t *u, int hit, ui_cmd_t *cmd);
+#else
+/* no WiFi page here: nothing that can be reached calls these, and ui_wifi.c builds none of its own */
+static inline void wifi_open(ui_t *u, ui_cmd_t *cmd) { (void)u; (void)cmd; }
+static inline void wifi_draw(ui_t *u, canvas_t *cv) { (void)u; (void)cv; }
+static inline int  wifi_hit(const ui_t *u, int x, int y) { (void)u; (void)x; (void)y; return HIT_NONE; }
+static inline int  wifi_rows(const ui_t *u) { (void)u; return 0; }
+static inline void wifi_act(ui_t *u, int hit, ui_cmd_t *cmd) { (void)u; (void)hit; (void)cmd; }
+static inline void home_open(ui_t *u) { (void)u; }
+static inline void watch_open(ui_t *u) { (void)u; }
+static inline void keys_draw(ui_t *u, canvas_t *cv) { (void)u; (void)cv; }
+static inline int  keys_hit(const ui_t *u, int x, int y) { (void)u; (void)x; (void)y; return HIT_NONE; }
+static inline int  keys_repeats(const ui_t *u, int hit) { (void)u; (void)hit; return 0; }
+static inline void keys_act(ui_t *u, int hit, ui_cmd_t *cmd) { (void)u; (void)hit; (void)cmd; }
+#endif
 #define NET_H (GFX_H >= 320 ? 38 : 30)                /* a network's row */
 #define KB_Y0 (HEAD_H + (GFX_H >= 320 ? 50 : 42))     /* the keyboard's first row of keys */
 #define KB_RH ((BAR_Y - 4 - KB_Y0) / 4)               /* a row's height, four rows */
@@ -303,7 +319,6 @@ int  keys_repeats(const ui_t *u, int hit);           /* the key that rubs out go
 typedef struct { int x, y, w, h, bx, by, bw, bh, sc; } demo_box_t;
 demo_box_t demo_box(const ui_t *u);
 #endif
-void keys_act(ui_t *u, int hit, ui_cmd_t *cmd);
 
 /* ABOUT and the note on the main screen that the site has a newer version (ui_about.c) */
 void about_open(ui_t *u);                            /* from the view shown, BACK goes back there */

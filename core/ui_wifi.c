@@ -4,6 +4,10 @@
  * WiFi over the USB line as before */
 #include "ui_int.h"
 
+/* none of it where there is no WiFi page (UI_WIFI_PAGE: the round glass, the RPi LCD, paper, the site's radar):
+ * ui_int.h has empty ones there. built all the same, it was ~6 KB of the C3's short flash (the 2026-11-27 review) */
+#if UI_WIFI_PAGE
+
 /* --- the networks --- */
 
 static int net_y(const ui_t *u, int k) { return LIST_Y0 + k * NET_H - u->wifi_scroll; }
@@ -373,4 +377,7 @@ int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max)
     }
     return n;
 }
+#endif
+#elif RADAR_OVERLAY
+int ui_dirty_rects(const ui_t *a, const ui_t *b, ui_rect_t *r, int max) { (void)a; (void)b; (void)r; (void)max; return -1; }
 #endif

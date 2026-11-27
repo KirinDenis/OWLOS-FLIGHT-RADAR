@@ -69,6 +69,7 @@ static fr_cfg_t          s_cfg;        // the settings in use: the screen change
 static secrets_t         s_sec;
 static nets_t            s_nets;       // the networks it remembers, the first is the one in s_sec
 static SemaphoreHandle_t s_lock;
+static SemaphoreHandle_t s_say;                        // say_cfg's line, made by two tasks
 static TaskHandle_t      s_fetch;
 static CORE_BIG ui_t     s_ui;
 static volatile int      s_cfg_new;    // the site sent settings: the screen takes s_cfg
@@ -219,11 +220,11 @@ static void *iram_first(size_t bytes)
 static CORE_BIG map_t      s_map;
 static CORE_BIG map_plan_t s_plan;
 static int        s_map_read;          // tiles that went into s_map
-static uint32_t   s_map_done;          // and which of the plan's, a bit each
+static uint64_t   s_map_done;          // and which of the plan's, a bit each
 static uint32_t   s_map_try;           // when it last asked for missing ones
 static float      s_fail_kpx;          // a new picture that could not be made: its scale, and when, so it is
 static uint32_t   s_fail_at;           // asked for again 15 s on and not in every round
-_Static_assert(MAP_TILES_MAX <= 32, "a bit a tile in s_map_done");
+_Static_assert(MAP_TILES_MAX <= 64, "a bit a tile in s_map_done");
 
 static void map_service(const fr_cfg_t *c)
 {
@@ -269,16 +270,16 @@ static void map_service(const fr_cfg_t *c)
     int read = 0, oom = 0, bad = 0;
     for (int k = 0; k < s_plan.ntiles; k++) {
         tile_src_t src;
-        if (!(s_map_done & 1u << k) && tiles_open(&s_plan.tiles[k], &src)) {
-            int r = map_tile(&s_map, &s_plan, k, tiles_read, &src);
-            if (r == PNG_OK) s_map_done |= 1u << k;
+        if (!(s_map_done & 1ull << k) && tiles_open(&s_plan.tiles[k], &src)) {
+            int r = map_tile(&s_map, &s_plan, k, tiles_read, &src);   // MAP_NOT_NOW: kept, read next round
+            if (r == PNG_OK) s_map_done |= 1ull << k;
             oom |= r == PNG_NO_MEMORY;
             if (r == PNG_BAD) {                                // kept but not readable: it was asked for again
                 tiles_drop(&s_plan.tiles[k]);                  // never, and the map kept its hole for good
                 bad++;
             }
         }
-        read += (s_map_done >> k) & 1;
+        read += (int)((s_map_done >> k) & 1u);
     }
     map_end(&s_map, &s_plan);
     if (oom) ESP_LOGW(TAG, "map: no memory to read a tile in, heap %u, largest %u",
@@ -1073,10 +1074,14 @@ static const char *json_esc(const char *s, char *out, int cap)
 
 static void say_cfg(void)
 {
-    /* static, and used only under the lock: the site's line and the screen both say this. a GET says it on
+    /* static, and used only under s_say: the site's line and the screen both say this. a GET says it on
      * the console's task, 4 KB of stack, and this printf of fifty fields needs much of it: with these on
-     * the stack too, a GET overflowed it and the board restarted (2026-11-18, the CYD and the 3.5") */
+     * the stack too, a GET overflowed it and the board restarted (2026-11-18, the CYD and the 3.5").
+     * the line is made under the lock and printed after it: printed under it, the screen and the fetch
+     * waited ~90 ms at 115200 baud for every GET and every step of a held + (the 2026-11-27 review) */
     static char ssid[70], place[84], country[68], watch[WATCH_TEXT], dim[40], units[112], turns[64], nets[NETS_KEPT * 72];
+    static char line[2048];
+    if (s_say) xSemaphoreTake(s_say, portMAX_DELAY);
     lock();
     const int nt = snprintf(turns, sizeof turns, ",\"wx_for\":%d,\"look_for\":%d", s_turn_wx, s_turn_look);   // the weather's turns, minutes
     if (!RADAR_EPAPER) snprintf(turns + nt, sizeof turns - (size_t)nt, ",\"led_screen\":%d", s_screen_alarm);   // and ON SCREEN: paper has none
@@ -1094,7 +1099,7 @@ static void say_cfg(void)
         at += snprintf(nets + at, sizeof nets - (size_t)at, "%s\"%s\"", i ? "," : "", json_esc(s_nets.n[i].ssid, ssid, sizeof ssid));
     int led = 0;                                       // the LED's events as bits: 1 sos, 2 in range, 4 take-off, 8 landing, 16 near, 32 no data, 64 weather
     for (int ev = 0; ev < LIGHT_EVENTS; ev++) led |= s_light_cfg.on[ev] ? 1 << ev : 0;
-    printf("OWLOS CFG {\"ssid\":\"%s\",\"nets\":[%s],\"lat\":%.5f,\"lon\":%.5f,\"place\":\"%s\",\"country\":\"%s\",\"src\":\"%s\",\"key\":%s,"
+    snprintf(line, sizeof line, "OWLOS CFG {\"ssid\":\"%s\",\"nets\":[%s],\"lat\":%.5f,\"lon\":%.5f,\"place\":\"%s\",\"country\":\"%s\",\"src\":\"%s\",\"key\":%s,"
            "\"up\":%d,\"flip\":%d,\"theme\":%d,\"look\":%d,\"map\":%d,\"ground\":%d,\"watch\":\"%s\","
            "\"vectors\":%d,\"beam_step\":%d,\"clock\":%d,\"block\":%d,\"autopilot\":%d,\"lost\":%d,\"conflict\":%d,"
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
@@ -1108,9 +1113,11 @@ static void say_cfg(void)
            s_opt.block, s_opt.autopilot, s_opt.lost, s_opt.conflict, s_opt.fl_lo, s_opt.fl_hi,
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
-           (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
+           (unsigned)(esp_timer_get_time() / 1000000), (unsigned)s_ran_s, s_reset, s_screen,   // uptime past 49.7 days too
            (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, s_names, dim, units, turns);
     unlock();
+    fputs(line, stdout);
+    if (s_say) xSemaphoreGive(s_say);
 }
 
 /* the list changed: its first network is what the secrets keep, the others are saved here */
@@ -1181,6 +1188,68 @@ static void say_ready(void)
     printf("OWLOS READY flight-radar %s %s %02x%02x%02x%02x%02x%02x\n", FLIGHT_VERSION, board_name(), m[0], m[1], m[2], m[3], m[4], m[5]);
 }
 
+/* a SET's fields on settings: only those it names change. each is run on a copy to check and log, and again
+ * under the lock on the settings as they are then. set_cfg: 1 when it moved home (lat or lon) */
+static int set_cfg(const char *j, fr_cfg_t *c, int has_key)
+{
+    double v;
+    char src[8];
+    int home = 0;
+    if (json_num(j, "lat", &v)) { c->lat = (float)v; home = 1; }
+    if (json_num(j, "lon", &v)) { c->lon = (float)v; home = 1; }
+    const int named = json_str(j, "place", c->place, sizeof c->place);
+    const int land = json_str(j, "country", c->country, sizeof c->country);
+    if (home && !named) c->place[0] = 0;                    // a new home without a name: the board asks OSM for it
+    if (home && !land) c->country[0] = 0;
+    if (json_str(j, "src", src, sizeof src)) c->source = !strcmp(src, "fr24") ? SRC_FR24 : SRC_FREE;
+    if (c->source == SRC_FR24 && !has_key) c->source = SRC_FREE;
+    // how the screen shows it: a board without touch has no other way to these
+    if (json_num(j, "up", &v)) c->up = (int16_t)((((int)lround(v)) % 360 + 360) % 360);
+    if (json_num(j, "flip", &v)) c->flip = v != 0;
+    if (json_num(j, "theme", &v) && v >= 0 && v < UI_THEMES) c->theme = (uint8_t)v;
+    if (json_num(j, "look", &v) && v >= 0 && v < LOOKS) c->look = (uint8_t)v;
+    if (json_num(j, "map", &v)) c->map = v != 0;
+    if (json_num(j, "ground", &v)) c->ground = v != 0;
+    // what the page's radar changes besides those
+    if (json_num(j, "range", &v) && v >= RANGE_MIN && v <= RANGE_MAX) c->range = (float)v;
+    if (json_num(j, "dist_unit", &v) && v >= 0 && v <= DIST_MI) c->dist_unit = (uint8_t)v;
+    if (json_num(j, "alt_unit", &v) && v >= 0 && v <= ALT_M) c->alt_unit = (uint8_t)v;
+    if (json_num(j, "labels", &v)) c->labels = v != 0;
+    return home;
+}
+
+// the radar's options: 1 when any came
+static int set_opt(const char *j, scope_opt_t *o)
+{
+    double v;
+    int opted = 0;
+    const struct { const char *name; uint8_t *on; } SWITCHES[] = {
+        { "vectors", &o->vectors }, { "beam_step", &o->beam_step }, { "clock", &o->clock }, { "block", &o->block },
+        { "autopilot", &o->autopilot }, { "lost", &o->lost }, { "conflict", &o->conflict },
+    };
+    for (size_t i = 0; i < sizeof SWITCHES / sizeof SWITCHES[0]; i++)
+        if (json_num(j, SWITCHES[i].name, &v)) { *SWITCHES[i].on = v != 0; opted = 1; }
+    if (json_num(j, "fl_lo", &v) && v >= 0 && v <= SCOPE_FL_MAX) { o->fl_lo = (int16_t)v; opted = 1; }
+    if (json_num(j, "fl_hi", &v) && v >= 0 && v <= SCOPE_FL_MAX) { o->fl_hi = (int16_t)v; opted = 1; }
+    return opted;
+}
+
+// the LED: its events as bits (say_cfg), how bright, how long, how near, the red one's pin. 1 when any came
+static int set_light(const char *j, light_cfg_t *l)
+{
+    double v;
+    int lit = 0, k;
+    if (json_num(j, "led", &v) && v >= 0 && v < (1 << LIGHT_EVENTS)) {
+        for (int ev = 0; ev < LIGHT_EVENTS; ev++) l->on[ev] = ((int)v >> ev) & 1;
+        lit = 1;
+    }
+    if (json_num(j, "led_level", &v) && v >= 0 && v < LIGHT_LEVELS) { l->level = (uint8_t)v; lit = 1; }
+    if (json_num(j, "led_hold", &v) && v >= 0 && v < LIGHT_HOLDS) { l->hold = (uint8_t)v; lit = 1; }
+    if (json_num(j, "led_near", &v) && (k = light_near_index((int)v)) >= 0) { l->near = (uint8_t)k; lit = 1; }   // 1, 2, 5 or 10
+    if (json_num(j, "led_red", &v) && (k = light_red_index((int)v)) >= 0) { l->red = (uint8_t)k; lit = 1; }      // GPIO 4 or 22
+    return lit;
+}
+
 static void on_line(const char *line)
 {
     if (!strncmp(line, "OWLOS HELLO", 11)) { say_ready(); return; }
@@ -1238,53 +1307,30 @@ static void on_line(const char *line)
     }
     if (strncmp(line, "OWLOS SET ", 10)) return;
     const char *j = line + 10;
-    secrets_t sec;
+    /* sec and nets (below) are 1.2 KB: static, off the console task's 4 KB stack, where a GET's printf runs on top
+     * of this frame (the 2026-11-27 review). one line at a time (console.c's s_one), wiped at the end */
+    static secrets_t sec;
     fr_cfg_t c;
     lock();
     sec = s_sec;
     c = s_cfg;
     unlock();
     double v;
-    char src[8];
-    int wifi = 0, home = 0;
+    int wifi = 0;
     if (json_str(j, "ssid", sec.ssid, sizeof sec.ssid)) wifi = 1;
     if (json_str(j, "pass", sec.pass, sizeof sec.pass)) wifi = 1;
     char forget[33] = "";
     json_str(j, "forget", forget, sizeof forget);
-    json_str(j, "key", sec.key, sizeof sec.key);
-    if (json_num(j, "lat", &v)) { c.lat = (float)v; home = 1; }
-    if (json_num(j, "lon", &v)) { c.lon = (float)v; home = 1; }
-    int named = json_str(j, "place", c.place, sizeof c.place);
-    int land = json_str(j, "country", c.country, sizeof c.country);
-    if (home && !named) c.place[0] = 0;                    // a new home without a name: the board asks OSM for it
-    if (home && !land) c.country[0] = 0;
-    if (json_str(j, "src", src, sizeof src)) c.source = !strcmp(src, "fr24") ? SRC_FR24 : SRC_FREE;
-    if (c.source == SRC_FR24 && !sec.key[0]) c.source = SRC_FREE;
-    // how the screen shows it: a board without touch has no other way to these
-    if (json_num(j, "up", &v)) c.up = (int16_t)((((int)lround(v)) % 360 + 360) % 360);
-    if (json_num(j, "flip", &v)) c.flip = v != 0;
-    if (json_num(j, "theme", &v) && v >= 0 && v < UI_THEMES) c.theme = (uint8_t)v;
-    if (json_num(j, "look", &v) && v >= 0 && v < LOOKS) c.look = (uint8_t)v;
-    if (json_num(j, "map", &v)) c.map = v != 0;
-    if (json_num(j, "ground", &v)) c.ground = v != 0;
-    // what the page's radar changes besides those
-    if (json_num(j, "range", &v) && v >= RANGE_MIN && v <= RANGE_MAX) c.range = (float)v;
-    if (json_num(j, "dist_unit", &v) && v >= 0 && v <= DIST_MI) c.dist_unit = (uint8_t)v;
-    if (json_num(j, "alt_unit", &v) && v >= 0 && v <= ALT_M) c.alt_unit = (uint8_t)v;
-    if (json_num(j, "labels", &v)) c.labels = v != 0;
+    const int keyed = json_str(j, "key", sec.key, sizeof sec.key);
+    /* what the SET says is put on a copy here, to check it and to log it, and again under the lock on the settings
+     * as they are then (set_cfg, set_opt, set_light): written back whole, the copy taken here undid what another
+     * task did meanwhile - geocode's town, the screen's WiFi page (the 2026-11-27 review) */
+    const int home = set_cfg(j, &c, sec.key[0] != 0);
     scope_opt_t opt;                                   // the radar's options
     lock();
     opt = s_opt;
     unlock();
-    int opted = 0;
-    const struct { const char *name; uint8_t *on; } SWITCHES[] = {
-        { "vectors", &opt.vectors }, { "beam_step", &opt.beam_step }, { "clock", &opt.clock }, { "block", &opt.block },
-        { "autopilot", &opt.autopilot }, { "lost", &opt.lost }, { "conflict", &opt.conflict },
-    };
-    for (size_t i = 0; i < sizeof SWITCHES / sizeof SWITCHES[0]; i++)
-        if (json_num(j, SWITCHES[i].name, &v)) { *SWITCHES[i].on = v != 0; opted = 1; }
-    if (json_num(j, "fl_lo", &v) && v >= 0 && v <= SCOPE_FL_MAX) { opt.fl_lo = (int16_t)v; opted = 1; }
-    if (json_num(j, "fl_hi", &v) && v >= 0 && v <= SCOPE_FL_MAX) { opt.fl_hi = (int16_t)v; opted = 1; }
+    const int opted = set_opt(j, &opt);
     if (json_num(j, "help", &v) && v >= 0 && v <= 2) {     // the site's question, answered there
         lock();
         s_help = (uint8_t)v;
@@ -1392,17 +1438,7 @@ static void on_line(const char *line)
     lock();
     light = s_light_cfg;
     unlock();
-    int lit = 0;                                       // the LED: its events as bits (say_cfg), how bright, how long
-    if (json_num(j, "led", &v) && v >= 0 && v < (1 << LIGHT_EVENTS)) {
-        for (int ev = 0; ev < LIGHT_EVENTS; ev++) light.on[ev] = ((int)v >> ev) & 1;
-        lit = 1;
-    }
-    if (json_num(j, "led_level", &v) && v >= 0 && v < LIGHT_LEVELS) { light.level = (uint8_t)v; lit = 1; }
-    if (json_num(j, "led_hold", &v) && v >= 0 && v < LIGHT_HOLDS) { light.hold = (uint8_t)v; lit = 1; }
-    int near = -1;                                     // 1, 2, 5 or 10 of the distance unit
-    if (json_num(j, "led_near", &v) && (near = light_near_index((int)v)) >= 0) { light.near = (uint8_t)near; lit = 1; }
-    int red = -1;                                      // the red one's GPIO, 4 or 22
-    if (json_num(j, "led_red", &v) && (red = light_red_index((int)v)) >= 0) { light.red = (uint8_t)red; lit = 1; }
+    const int lit = set_light(j, &light);
     if (json_num(j, "led_test", &v) && v) s_light_test = 1;   // nothing kept: the screen task shows it
 #if LCD_PROFILES
     if (json_num(j, "screen", &v) && v >= 0 && v < LCD_PROFILES) s_screen_set = (int)v;   // the screen's start-up, board.h LCD_PROFILES: on the CYD 0 v1, 1 v2, 2 v3
@@ -1413,13 +1449,17 @@ static void on_line(const char *line)
     else if (wifi) nets_forget(&s_nets, s_sec.ssid);    // "ssid":"": the one in use goes, the next takes its place
     if (forget[0] && nets_forget(&s_nets, forget)) wifi = 1;
     if (wifi) nets_changed(&sec);
-    unlock();
-    store_save_secrets(&sec);
-    store_save_cfg(&c);
-    lock();
-    s_sec = sec;
-    if (s_cfg.lat != c.lat || s_cfg.lon != c.lon) s_home_cc[0] = 0;   // another home: its country, geocode() asks
-    s_cfg = c;
+    else if (keyed) {                                  // the key alone: the network stays as it is now
+        secrets_t now = s_sec;
+        memcpy(now.key, sec.key, sizeof now.key);
+        sec = now;
+    }
+    if (wifi || keyed) s_sec = sec;                    // the secrets only when the SET named them
+    fr_cfg_t live = s_cfg;                             // the settings as they are now, the SET's fields on them
+    set_cfg(j, &live, s_sec.key[0] != 0);
+    if (s_cfg.lat != live.lat || s_cfg.lon != live.lon) s_home_cc[0] = 0;   // another home: its country, geocode() asks
+    s_cfg = live;
+    c = live;                                          // for the log below
     s_cfg_new = 1;
     if (home) sky_home(&s_sky, c.lat, c.lon);
     if (wifi) { s_sky.n = 0; s_sky.status = SKY_CONNECTING; s_wifi_try = now_ms(); }   // the demo planes go
@@ -1429,16 +1469,23 @@ static void on_line(const char *line)
         s_watch_asked = 0;
     }
     if (lit) {
+        light = s_light_cfg;                           // as they are now, the SET's on them
+        set_light(j, &light);
         s_light_cfg = light;
         s_light_new = 1;
     }
     if (opted) {
+        opt = s_opt;
+        set_opt(j, &opt);
         s_opt = opt;
         s_opt_new = 1;
     }
-    nets_t nets = { 0 };                               // the list as it is now, taken under the lock: the screen's
-    if (wifi) nets = s_nets;                           // WiFi page may change it meanwhile on the other task
+    static nets_t nets;                                // the list as it is now, taken under the lock: the screen's
+    memset(&nets, 0, sizeof nets);                     // WiFi page may change it meanwhile on the other task
+    if (wifi) nets = s_nets;
     unlock();
+    if (wifi || keyed) store_save_secrets(&sec);      // saved after the lock: the flash writes are slow
+    store_save_cfg(&c);
     if (lit) store_save_light(&light);
     if (opted) store_save_opt(&opt);
     if (watched) {
@@ -1451,6 +1498,7 @@ static void on_line(const char *line)
     }
     ESP_LOGI(TAG, "settings from the site: network \"%s\", home %.4f %.4f, %s%s", sec.ssid, (double)c.lat, (double)c.lon,
              c.source == SRC_FR24 ? "FR24" : "free networks", sec.key[0] ? ", FR24 key stored" : "");
+    memset(&sec, 0, sizeof sec);                       // the password and the key not kept in a second place
     printf("OWLOS OK\n");
     xTaskNotifyGive(s_fetch);
 }
@@ -1541,7 +1589,7 @@ static int s_touch_lifted;                             // the glass read lifted 
 static void touch_sample(int force)
 {
     uint32_t now = now_ms();
-    if (now < TOUCH_DEAF_MS) return;
+    if (esp_timer_get_time() < (int64_t)TOUCH_DEAF_MS * 1000) return;   // since power on: now_ms() wraps every 49.7 days
     if (s_nts >= (int)(sizeof s_ts / sizeof s_ts[0]) || (!force && now - s_ts_last < 15u)) return;
     int rx = 0, ry = 0, x = 0, y = 0;
     uint32_t t0 = now_us();
@@ -1612,13 +1660,26 @@ static void helper_set(int on)
         return;
     }
     if (heap_caps_get_free_size(MALLOC_CAP_8BIT) < px + dma + HELPER_STACK + 48 * 1024) return;
+    /* the memory there in all, but not in pieces this big: not tried. it was tried every frame, its strip taken and
+     * given back and the screen's own strips let go for the doubled ones, and meanwhile TLS took the room and even
+     * single strips failed (the 2026-11-27 review). and after a try that failed, 10 s before the next */
+    static uint32_t failed;
+    if (failed && now_ms() - failed < 10000u) return;
+    if (!DISP_HELPER_HALF && (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < px ||
+                              heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) < dma / 2)) {
+        failed = now_ms() | 1u;
+        return;
+    }
     if (!s_help_go) {
         s_help_go = xSemaphoreCreateBinary();
         s_help_done = xSemaphoreCreateBinary();
     }
     if (!DISP_HELPER_HALF) {
         s_help_cv = (canvas_t){ heap_caps_malloc(px, MALLOC_CAP_INTERNAL), 0, DISP_STRIP, 1, 0, 0 };
-        if (!s_help_cv.px) return;
+        if (!s_help_cv.px) {
+            failed = now_ms() | 1u;
+            return;
+        }
     }
     s_help_stop = 0;
     if ((!DISP_HELPER_HALF && !disp_rows(2 * DISP_STRIP)) ||
@@ -1629,8 +1690,10 @@ static void helper_set(int on)
             heap_caps_free(s_help_cv.px);
             s_help_cv.px = NULL;
         }
+        failed = now_ms() | 1u;
         return;
     }
+    failed = 0;
     ESP_LOGI(TAG, "the second core draws %s, heap %u", DISP_HELPER_HALF ? "the lower half of every strip" : "every other strip",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT));
 }
@@ -2738,7 +2801,7 @@ static void ui_task(void *arg)
         /* a short BOOT press starts the screen as the next CYD revision: on the touch alignment
          * page (the first thing after flashing) or in the first seconds after power on, both say
          * so on the screen. held on the alignment page it still skips the alignment */
-        if (ev == BTN_SHORT && (s_ui.view == VIEW_CAL || now < UI_SCREEN_PICK_MS)) {
+        if (ev == BTN_SHORT && (s_ui.view == VIEW_CAL || !s_ui.started)) {   // started: latched, the clock's wrap can't reopen it
             int at = 0;
             while (at < LCD_PROFILES - 1 && ORDER[at] != screen) at++;
             screen = ORDER[(at + 1) % LCD_PROFILES];
@@ -2790,7 +2853,7 @@ static void ui_task(void *arg)
             s_key_shown = 0;
             ui_key_wait(&s_ui, key);
         }
-#else
+#elif defined(PIN_KEY_OK)                              // keys, not paper: none yet. without keys ui_key is not linked (1.4 KB)
         if (key) {
             ui_key(&s_ui, key, &cmd);
             ESP_LOGI(TAG, "key %d: look %d, view %d, range %g", key, s_ui.cfg.look, s_ui.view, (double)s_ui.cfg.range);
@@ -3057,6 +3120,7 @@ static void ui_task(void *arg)
             ESP_LOGI(TAG, "LED test from %s: red, green, blue", s_light_test ? "the site" : "the screen");
             s_light_test = 0;
         }
+        light_expire(&s_light, now);                   // what is over is forgotten: the clock's wrap can't relight it
         light_colour(&s_light, &s_ui.light, now, rgb);
         ui_alarm(&s_ui, light_shown(&s_light, &s_ui.light, now));   // and on the screen: the look's button, the round's rim
         int red = light_red_gpio(&s_ui.light);
@@ -3329,8 +3393,11 @@ static void ui_task(void *arg)
             // the 7B's backlight is said again in disp_log, with what the board reports round it
 #endif
             memset(s_ui.prof, 0, sizeof s_ui.prof);
-            if (now / 1000u - s_ran_kept >= 60u) {     // a reset from here on knows how long this run was
-                s_ran_kept = now / 1000u;
+            /* a reset from here on knows how long this run was. seconds from the 64-bit clock: now / 1000 came round
+             * after 49.7 days, and from then on was saved at every pass of this, every 10 s (the 2026-11-27 review) */
+            const uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000);
+            if (up_s - s_ran_kept >= 60u) {
+                s_ran_kept = up_s;
                 store_save_ran(s_ran_kept);
             }
             s_send_us = s_touch_us = 0;
@@ -3385,6 +3452,7 @@ void app_main(void)
              s_ran_s ? "" : " (under a minute, or not known)");
 
     s_lock = xSemaphoreCreateMutex();
+    s_say = xSemaphoreCreateMutex();
     if (!store_load_cfg(&s_cfg)) fr_cfg_defaults(&s_cfg);
     store_load_secrets(&s_sec);
     store_load_nets(&s_sec, &s_nets);

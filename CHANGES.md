@@ -34,6 +34,59 @@ unless the beta is picked. Only a board that runs a beta hears of a newer beta.
   on the site's VIEW tab and its console's `set`. The boards with no LED get the same rows on an ALARM
   tab (the round glass under DATA), so their screens say an emergency, a watched plane or a weather
   warning now too. A blink shorter than 0.4 s is 0.4 s on a screen. Not on e-paper.
+- A pass over all the code before the beta, and what it found mended:
+  - A map tile whose row said a filter PNG has not wrote past the end of the decoder's row. The tile is
+    kept, so a broken or made-up one crashed the board at every start. It is now refused like any bad tile,
+    and the decoding stops as soon as the picture is out.
+  - The site checks that a build is for the chip on the cable before it writes anything: picked from the
+    list of all boards, an S3 build could be written into an ESP32, and the board stayed dark.
+  - What a device says when the site asks who it is is taken only in its own shape. A device could put
+    markup there, and the page kept and ran it at every visit.
+  - FORGET on the site's SETUP tab quotes the network's name: one with an apostrophe failed, and a name
+    with a `;` in it ran what came after it in the site's console.
+  - The forecast's reader stopped on a cut answer only after stepping past its end. A forecast without all
+    its days is refused (the one before stays), as is a pressure outside 800 to 1200 hPa or rain under 0.
+  - A plane with no number for its place (NaN, infinity) held its slot for good and lit ANY NEAR. Such
+    numbers are now taken as not heard.
+  - On the 5.79" e-paper the map was refused tile by tile and every tile was downloaded again each 15 s.
+    The 10.1" and the Tab5 left the edges of the square map empty at some ranges: up to 64 tiles now.
+  - A tile over 160 KB was downloaded whole every 15 s and held back the tiles after it. It is left out.
+  - After 49.7 days on, the board's millisecond clock comes round: the first seconds after power on came
+    back (BOOT then switched the 2.8" CYD's screen and kept it), the touch went deaf for a moment, an old
+    alarm lit again, and how long the board had run was written to its flash every 10 seconds. None of
+    that now.
+  - The demo, after days with WiFi, stepped every 5 seconds of them when the WiFi went, all at once.
+  - The round glass's alarm rim is drawn as two spans a row, not as a circle of 90 lines in every strip.
+  - A forecast more than two hours old is shown as none. With the WiFi or the weather's server gone for
+    hours, the warnings spoke of hours already past and NOW stood an hour or more wrong.
+  - The map kept 22 rows of a tile while it gathered the names, and walked 3 rows past them, into the
+    newest rows' places: holes in tall names, lost accents, bits of letters 22 pixels off. It keeps 25.
+  - A setting sent from the site wrote all the settings back as they were when it came, and so undid what
+    happened meanwhile: the home's town just found, or a network just picked on the screen, which was
+    then gone after a restart. Now it changes only what it names.
+  - After the WiFi is lost the board waits 2 seconds before it tries again on a timer, not in the WiFi's
+    own task: the other WiFi news no longer waits behind it.
+  - The picked plane's conflict line could join two other planes for a second after a plane went.
+  - The plane list scrolled past its last row, when planes went, showed an empty page till a drag.
+  - The site: the password question of `wifi add` goes with Escape or Ctrl+C (the next line typed went
+    to the board as the password); flashing all the boards stops and says so when one fails; a second
+    flash waits for the first; a board's picture is not drawn while it is scrolled out of sight, and a
+    board's twin starts only when it is wanted (16 MB each); a map tile that never comes is given up
+    after 15 s; the page is not published without the radar picture it connects boards through.
+  - The map of boards counts a flash only for a version the site has published, and an IPv6 address by
+    its /64 in its limit: made-up versions could fill the counts and stop real ones being counted.
+  - The 5" Tab5 takes its 92 KB of spare strips only when its picture turner is not there; the RPi
+    LCD no longer writes to nothing when its strip found no memory at the start.
+  - Faster: the board's settings line is made under the lock and printed after it, and the USB line
+    has a 4 KB buffer of its own, so printing no longer holds a core while the cable takes it at
+    115200 baud; the weather dial works the sun out for 25 hours, not 360 degrees, every minute; the
+    barometer, and every plane, is passed over in the strips of the screen it is not in; the radar
+    disc's two tables are made once, not in every strip; on the big boards the watch list's server
+    keeps a connection of its own; the 3.5" no longer tries every frame to give its second core
+    memory it has not got in one piece.
+  - Smaller: the WiFi page and its keyboard are not built where they can't be reached (the round
+    glass, the RPi LCD, e-paper), nor the e-paper's keys where there are none: 5.6 KB of the round
+    board's short flash.
 
 ## 0.16.2 (beta)
 

@@ -102,18 +102,32 @@ int tiles_read(void *src, uint8_t *buf, int cap)
 
 /* --- writing one as it downloads --- */
 
-typedef struct { uint32_t start, at, erased; int bad; } writer_t;
+typedef struct { uint32_t start, at, erased; int bad, big; } writer_t;   // big: past MAX_TILE
+
+/* tiles too big to keep, the last few: not asked for again. one was downloaded whole every 15 s, said "came
+ * broken" and held back every tile after it in the plan (the 2026-11-27 review) */
+#define BIG_KEPT 8
+static tile_id_t s_big[BIG_KEPT];
+static int       s_nbig;
+
+static int is_big(const tile_id_t *t)
+{
+    for (int i = 0; i < s_nbig && i < BIG_KEPT; i++)
+        if (s_big[i].z == t->z && s_big[i].x == t->x && s_big[i].y == t->y) return 1;
+    return 0;
+}
 
 // the room for a tile: from the write point, or from the start when the end is too near
 static void w_begin(writer_t *w)
 {
     if (s_wp + HEAD + MAX_TILE > s_part->size) s_wp = 0;
-    *w = (writer_t){ s_wp, s_wp + HEAD, s_wp, 0 };
+    *w = (writer_t){ s_wp, s_wp + HEAD, s_wp, 0, 0 };
 }
 
 static int w_put(writer_t *w, const void *data, uint32_t n)
 {
-    if (w->bad || w->at + n > w->start + HEAD + MAX_TILE) { w->bad = 1; return 0; }
+    if (w->bad) return 0;
+    if (w->at + n > w->start + HEAD + MAX_TILE) { w->bad = w->big = 1; return 0; }
     while (w->erased < w->at + n) {                    // the next sector, and the tiles in it go
         for (int i = s_n - 1; i >= 0; i--)
             if (s_kept[i].off < w->erased + SECTOR && s_kept[i].off + HEAD + s_kept[i].len > w->erased) forget(i);
@@ -145,8 +159,8 @@ int tiles_fetch(const tile_id_t *t, int n)
     int got = 0, fresh = 0, stop = 0;
     for (int k = 0; k < n; k++) {
         if (tiles_have(&t[k])) { got++; continue; }
-        if (stop || !map_url(&t[k], url, sizeof url)) continue;   // after a stop the rest are counted, not asked for
-        int status = 0, whole = 0;
+        if (stop || is_big(&t[k]) || !map_url(&t[k], url, sizeof url)) continue;   // after a stop the rest are counted, not asked for
+        int status = 0, whole = 0, big = 0;
         for (int attempt = 0; attempt < 2; attempt++) {    // the server may have closed the kept connection
             if (h && esp_http_client_set_url(h, url) != ESP_OK) {
                 /* the new address not taken (no memory for it): the client would ask for the last tile
@@ -177,10 +191,16 @@ int tiles_fetch(const tile_id_t *t, int n)
                 if (status == 200) {
                     w_begin(&w);
                     int r;
-                    while ((r = esp_http_client_read(h, buf, sizeof buf)) > 0) w_put(&w, buf, (uint32_t)r);
-                    whole = esp_http_client_is_complete_data_received(h) && w_end(&w, &t[k]);
+                    while (!w.bad && (r = esp_http_client_read(h, buf, sizeof buf)) > 0) w_put(&w, buf, (uint32_t)r);
+                    whole = !w.bad && esp_http_client_is_complete_data_received(h) && w_end(&w, &t[k]);
+                    big = w.big;
                     if (whole) { got++; fresh++; }
-                    else ESP_LOGW(TAG, "%s came broken", url);
+                    else if (big) {
+                        s_big[s_nbig++ % BIG_KEPT] = t[k];
+                        ESP_LOGW(TAG, "%s is over %u KB: left out", url, MAX_TILE / 1024u);
+                    } else {
+                        ESP_LOGW(TAG, "%s came broken", url);
+                    }
                 } else {
                     esp_http_client_flush_response(h, NULL);
                     ESP_LOGW(TAG, "%s: HTTP %d", url, status);
@@ -196,7 +216,7 @@ int tiles_fetch(const tile_id_t *t, int n)
             }
             if (status) break;                              // no answer at all: once more, on the new one
         }
-        if (!status || (status == 200 && !whole) || status == 403 || status == 429) {
+        if (!status || (status == 200 && !whole && !big) || status == 403 || status == 429) {
             /* no answer twice, a tile cut short, or the server says no: the rest wait for the next round.
              * asked one by one, a server that said nothing cost 18 s a tile and held the planes back for
              * minutes, and on the 3.5" each tile cut short (TLS short of memory) cost two handshakes more */

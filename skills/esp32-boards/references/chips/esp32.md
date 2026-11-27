@@ -9,7 +9,7 @@ Boot mode notes are from Espressif's esptool docs, "Boot Mode Selection".
 
 Boards here on this chip: [ili9341](../boards/ili9341.md), [e32r28t](../boards/e32r28t.md),
 [bruce-cyd](../boards/bruce-cyd.md), [st7796](../boards/st7796.md), [e32r35t](../boards/e32r35t.md),
-[ili9486](../boards/ili9486.md), [wrover-n16r8](../boards/wrover-n16r8.md).
+[esp2432s032](../boards/esp2432s032.md), [ili9486](../boards/ili9486.md), [wrover-n16r8](../boards/wrover-n16r8.md).
 
 ## The numbers
 

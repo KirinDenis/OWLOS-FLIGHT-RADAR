@@ -93,6 +93,46 @@
 #define PIN_I2C_SDA   33
 #define PIN_I2C_SCL   32
 
+#elif RADAR_DISPLAY == DISPLAY_2432S032_320x240
+/* ESP32-2432S032, the 3.2" CYD: classic ESP32, no PSRAM, ST7789 240x320 IPS. every pin is the 3.5"'s
+ * above, only the screen differs (rzeldent/platformio-espressif32-sunton, esp32-2432S032C/R/N.json,
+ * read 2026-11-25 beside esp32-3248S035R.json; checked 2026-11-26 against the maker's own schematics,
+ * ESP32-2432S032-MCU and -LCM V1.0, and demos: every pin the same). the 3.5" build on it: garbled and
+ * flickering, its owner says. NOT run on one here: a viewer asked for it and has one. sold as R
+ * (XPT2046 on the screen's bus), C (GT911) and N (no touch): touch.c asks for the GT911 first, as on
+ * the 3.5". the screen's reset is the ESP32's EN, the backlight a MOSFET: 27 high is on */
+#define DISP_LCD_SPI   1
+#define LCD_CHIP_ST7789 1
+#define PIN_LCD_SCLK  14
+#define PIN_LCD_MOSI  13
+#define PIN_LCD_MISO  12        // only the touch reads it
+#define PIN_LCD_DC     2
+#define PIN_LCD_CS    15
+#define PIN_LCD_RST   (-1)
+#define PIN_LCD_BL    27
+/* SPI mode 3, as the maker's demos (Arduino_GFX's ST7789 on an ESP32) and rzeldent drive it; the
+ * radar's other ST7789s run 0. 40 MHz: the maker's demos ask 80, rzeldent 24 */
+#define LCD_SPI_MODE   3
+#define LCD_SPI_HZ    (40 * 1000 * 1000)
+#define LCD_MADCTL    0xA0      // MY|MV, RGB: the maker's demos' landscape (rotation 3). FLIP turns it over
+/* the 2.8" CYD's size on the same chip: its strips and the second core on half of each (see there) */
+#define DISP_STRIP    24
+#define DISP_HELPER   1
+#define DISP_HELPER_HALF 1
+/* an IPS panel, inverted (rzeldent: DISPLAY_IPS, the maker's Arduino_GFX demos: IPS). RGB in the JSONs
+ * and the maker's Arduino_GFX demos, BGR in its one TFT_eSPI file: RGB first, BGR behind BOOT */
+#define LCD_INVERT     1
+#define LCD_PROFILES   2
+#define LCD_ORDER      { 0, 1 }
+#define TOUCH_XPT_SPI 1
+#define PIN_T_CS      33
+#define PIN_T_IRQ     36
+#define PIN_BUTTON     0
+/* the C: GT911 at 0x5D on SDA 33 SCL 32 (its reset 25 and interrupt 21 left alone, as on the 3.5") */
+#define TOUCH_GT911_TOO 1
+#define PIN_I2C_SDA   33
+#define PIN_I2C_SCL   32
+
 #elif RADAR_DISPLAY == DISPLAY_ILI9486_480x320
 /* Waveshare RPi LCD (A) 3.5" on the OWLOSAirQuality board, ViewOwl's ILI9486 build.
  * NOT run on hardware yet. no touch wired that ViewOwl knows of, BOOT button only */

@@ -79,13 +79,13 @@ void list_draw(ui_t *u, canvas_t *cv)
  * BACK the last --- */
 
 enum { S_RANGE, S_GROUND, S_WATCH, S_DIST, S_ALT, S_TEMP, S_PRES, S_WIND, S_RAIN,   /* the weather's units in WXU_* order */
-       S_UP, S_FLIP, S_BACKLIGHT, S_NIGHT, S_LABELS, S_THEME, S_LOOK, S_MAP, S_NAMES,
+       S_UP, S_FLIP, S_BACKLIGHT, S_NIGHT, S_LABELS, S_THEME, S_LOOK, S_TURN_WX, S_TURN_LOOK, S_MAP, S_NAMES,
        S_FL_LO, S_FL_HI, S_BLOCK, S_AUTOPILOT, S_VECTORS, S_BEAM, S_CLOCK, S_LOST, S_CONFLICT,
        S_SOURCE, S_SERVER, S_HOME, S_WIFI, S_HELP,
        S_WX_STORM, S_WX_PRESSURE, S_WX_AIR, S_WX_RADIATION,   /* in the order of WXA_* (weather.h) */
-#if RADAR_HAS_LED
-       S_LED_SOS, S_LED_RANGE, S_LED_UP, S_LED_DOWN, S_LED_NEAR, S_LED_NEAR_KM, S_LED_NODATA, S_LED_WEATHER, S_LED_LEVEL, S_LED_HOLD,
-       S_LED_TEST,
+#if UI_EVENTS
+       S_LED_SOS, S_LED_RANGE, S_LED_UP, S_LED_DOWN, S_LED_NEAR, S_LED_NEAR_KM, S_LED_NODATA, S_LED_WEATHER, S_LED_SCREEN,
+       S_LED_LEVEL, S_LED_HOLD, S_LED_TEST,
 #if RADAR_LED_RED_PIN
        S_LED_RED,
 #endif
@@ -96,13 +96,13 @@ _Static_assert(S_ROWS <= HIT_SINC - HIT_SDEC && S_ROWS <= HIT_SBTN - HIT_SINC &&
                "more SET rows than the HIT_ ranges in ui_int.h hold");
 enum { K_NUM, K_BTN, K_INFO };
 /* the tabs, in the order of the bar. the round glass's bar has no room for a third and it has no
- * gear: the radar's rows and the units go under VIEW there */
+ * gear: the radar's rows and the units go under VIEW there, its alarms (it has no LED) under DATA */
 #if RADAR_ROUND
-enum { T_VIEW, T_DATA, T_LED, T_RADAR = T_VIEW, T_UNITS = T_VIEW };
+enum { T_VIEW, T_DATA, T_LED = T_DATA, T_RADAR = T_VIEW, T_UNITS = T_VIEW };
 #define TABS 2
 #else
 enum { T_VIEW, T_DATA, T_UNITS, T_RADAR, T_LED };
-#define TABS (RADAR_HAS_LED ? 5 : 4)
+#define TABS (UI_EVENTS ? 5 : 4)
 #endif
 
 static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = {
@@ -124,6 +124,10 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "LABELS",      "names beside the planes",      K_BTN, T_VIEW },
     { "COLOURS",     "five colour themes",           K_BTN, T_VIEW },
     { "LOOK",        "radar, two maps, the weather", K_BTN, T_VIEW },
+    /* the weather and the look take turns by themselves (ui.c ui_turn). the page's radar has no forecast of its
+     * own and turns with the board it shows */
+    { "WEATHER FOR", "comes by itself, then the look", K_NUM, RADAR_WEB ? -1 : T_VIEW },
+    { "LOOK FOR",    "then the weather again",       K_NUM, RADAR_WEB ? -1 : T_VIEW },
     { "MAP",         "OpenStreetMap under the scope", K_BTN, T_VIEW },
     { "MAP NAMES",   "town names on the dark maps",  K_BTN, T_VIEW },   /* ui.h NAMES_* */
     { "LOWEST",      "planes under this are hidden", K_NUM, T_RADAR },
@@ -147,8 +151,9 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { RADAR_ROUND ? "HPA ALERT" : "PRESSURE ALERT", "6 hPa up or down in 12 hours", K_BTN, RADAR_WEB ? -1 : T_DATA },
     { "AIR ALERT",   "the air poor or worse",        K_BTN, RADAR_WEB ? -1 : T_DATA },
     { RADAR_ROUND ? "GAMMA ALERT" : "RADIATION ALERT", "over 0.3 \xC2\xB5Sv/h near home", K_BTN, RADAR_WEB ? -1 : T_DATA },
-#if RADAR_HAS_LED
-    /* the LED on the back (core/light.h): each event on or off, in the order they win */
+#if UI_EVENTS
+    /* the LED's events (core/light.h), each on or off, in the order they win: the LED on the back lights, and the
+     * screen too (ON SCREEN). no LED: the screen alone, under ALARM (the round: DATA) */
     { "SOS",         "7500 7600 7700 round home: red", K_BTN, T_LED },
     { "IN RANGE",    "a watched plane comes: green", K_BTN, T_LED },
     { "TAKE-OFF",    "a watched plane takes off: blue", K_BTN, T_LED },
@@ -157,9 +162,12 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
     { "HOW NEAR",    "from home, for ANY NEAR",      K_BTN, T_LED },
     { "NO DATA",     "no WiFi or no answer: amber",  K_BTN, T_LED },
     { "WEATHER",     "a weather warning: yellow",    K_BTN, T_LED },
-    { "BRIGHTNESS",  "low for the night",            K_BTN, T_LED },
+    { "ON SCREEN",   RADAR_ROUND ? "the rim lights in its colour" :
+                     RADAR_HAS_LED ? "the look's button lights too" : "the look's button lights in its colour", K_BTN,
+                     UI_SCREEN_ALARM ? T_LED : -1 },
+    { "BRIGHTNESS",  "low for the night",            K_BTN, RADAR_HAS_LED ? T_LED : -1 },
     { "HOW LONG",    "till touched, 10 s, while it lasts", K_BTN, T_LED },
-    { "TEST",        "red, green, blue in turn",     K_BTN, T_LED },
+    { "TEST",        "red, green, blue in turn",     K_BTN, RADAR_HAS_LED ? T_LED : -1 },
 #if RADAR_LED_RED_PIN
     { "RED ON",      "no red in TEST: the other",    K_BTN, T_LED },   /* GPIO 4 or 22: light.h */
 #endif
@@ -203,7 +211,7 @@ int setup_hit(const ui_t *u, int x, int y)
 
 int setup_repeats(int hit) { return hit >= HIT_SDEC && hit < HIT_SBTN; }
 
-#if RADAR_HAS_LED
+#if UI_EVENTS
 // the LED event a row switches on and off, -1 for the rows that are not one
 static int led_event(int i)
 {
@@ -240,6 +248,11 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
     case S_LABELS: snprintf(b, (size_t)sz, c->labels ? "PICKED" : "ALL"); break;
     case S_THEME:  snprintf(b, (size_t)sz, "%s", UI_THEME[u->theme].name); break;
     case S_LOOK:   snprintf(b, (size_t)sz, "%s", LOOK_NAME[c->look < LOOKS ? c->look : 0]); break;
+    case S_TURN_WX:
+        if (u->turn_wx) snprintf(b, (size_t)sz, "%d MIN", u->turn_wx);
+        else snprintf(b, (size_t)sz, "OFF");
+        break;
+    case S_TURN_LOOK: snprintf(b, (size_t)sz, "%d MIN", u->turn_look); break;
     case S_MAP:    snprintf(b, (size_t)sz, c->map ? "ON" : "OFF"); break;
     case S_NAMES: {
         static const char *const NAME[NAMES_STYLES] = { "SOFT", "THIN", "BOLD" };
@@ -271,10 +284,11 @@ static void value_text(const ui_t *u, int i, char *b, int sz)
         snprintf(b, (size_t)sz, u->alerts & (1u << (i - S_WX_STORM)) ? "ON" : "OFF");
         break;
     case S_ABOUT:  if (ui_update(u)) update_text(u, b, sz, 1); else snprintf(b, (size_t)sz, "OPEN"); break;
-#if RADAR_HAS_LED
+#if UI_EVENTS
     case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA: case S_LED_WEATHER:
         snprintf(b, (size_t)sz, u->light.on[led_event(i)] ? "ON" : "OFF");
         break;
+    case S_LED_SCREEN: snprintf(b, (size_t)sz, u->screen_alarm ? "ON" : "OFF"); break;
     case S_LED_NEAR_KM: snprintf(b, (size_t)sz, "%d %s", light_near_units(&u->light), unit_name(c->dist_unit)); break;
     case S_LED_LEVEL: {
         static const char *const L[LIGHT_LEVELS] = { "LOW", "MID", "HIGH" };
@@ -374,8 +388,8 @@ void setup_draw(ui_t *u, canvas_t *cv)
 #if !RADAR_ROUND
                                      "UNITS", "RADAR",
 #endif
-#if RADAR_HAS_LED
-                                     "LED",
+#if UI_EVENTS && !RADAR_ROUND
+                                     RADAR_HAS_LED ? "LED" : "ALARM",   /* the events, lit on the screen alone */
 #endif
                                      "BACK" };
     bar(u, cv, L, TABS + 1, u->setup_tab);
@@ -453,6 +467,12 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
         ui_set_theme(u, c->theme);
         break;
     case S_LOOK:   c->look = (uint8_t)((c->look + 1) % LOOKS); u->wx_page = WXP_DIAL; cmd->refetch = 1; break;
+    case S_TURN_WX:                                    // a step of its minutes, held at OFF and at the longest
+    case S_TURN_LOOK:
+        if (i == S_TURN_WX) u->turn_wx = (uint8_t)ui_turn_step(u->turn_wx, dir, 1);
+        else u->turn_look = (uint8_t)ui_turn_step(u->turn_look, dir, 0);
+        cmd->turns = 1;                                // their own setting, not fr_cfg_t
+        return;
     case S_MAP:    c->map ^= 1; break;
     case S_NAMES:                                      // the next one, SOFT after BOLD: its own setting, not fr_cfg_t
         u->names = (uint8_t)((u->names + 1) % NAMES_STYLES);
@@ -495,10 +515,14 @@ void setup_act(ui_t *u, int hit, int longp, ui_cmd_t *cmd)
         cmd->alerts = 1;                               // its own setting, not fr_cfg_t
         return;
     case S_ABOUT:  about_open(u); return;
-#if RADAR_HAS_LED
+#if UI_EVENTS
     case S_LED_SOS: case S_LED_RANGE: case S_LED_UP: case S_LED_DOWN: case S_LED_NEAR: case S_LED_NODATA: case S_LED_WEATHER:
         u->light.on[led_event(i)] ^= 1;
         cmd->light = 1;                                // the LED's own settings, not fr_cfg_t
+        return;
+    case S_LED_SCREEN:                                 // kept by itself, not in the LED's blob: one flashed back keeps that
+        u->screen_alarm ^= 1;
+        cmd->screen_alarm = 1;
         return;
     case S_LED_NEAR_KM: u->light.near = (uint8_t)((u->light.near + 1) % LIGHT_NEARS); cmd->light = 1; return;
     case S_LED_LEVEL: u->light.level = (uint8_t)((u->light.level + 1) % LIGHT_LEVELS); cmd->light = 1; cmd->light_test = 1; return;

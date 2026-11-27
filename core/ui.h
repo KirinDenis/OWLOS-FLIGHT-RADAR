@@ -29,6 +29,9 @@ enum { WXP_DIAL, WXP_PRESSURE, WXP_TEMP, WX_PAGES };
  * quarter, or as bright as the letter. light on dark reads fatter than dark on light, and the tiles' names
  * and the screens differ: what reads best is the eye's to say. the classic look draws them as the tiles do */
 enum { NAMES_SOFT, NAMES_THIN, NAMES_BOLD, NAMES_STYLES };
+/* SET's WEATHER FOR and LOOK FOR, in minutes (ui_turn): the weather and the person's own look take turns by
+ * themselves. WEATHER FOR 0 is off. only the steps of ui_turn_step are kept or taken from the console */
+#define TURN_LOOK_DEFAULT 3
 /* the weather's units, SET's UNITS tab: 0 each the home country's own (the US's Fahrenheit, inches and mph,
  * the millimetres of mercury east of Poland...), else one of these. the pressure in hPa and inHg is at the
  * sea's level as forecasts give it, in mmHg at home's height as a barometer there reads */
@@ -133,6 +136,8 @@ typedef struct {
     uint8_t alerts;        /* ui_t.alerts changed: keep it */
     uint8_t units;         /* ui_t.units changed: keep it */
     uint8_t names;         /* ui_t.names changed: keep it */
+    uint8_t turns;         /* ui_t.turn_wx or turn_look changed: keep them */
+    uint8_t screen_alarm;  /* ui_t.screen_alarm changed: keep it */
 } ui_cmd_t;
 
 #define TRAIL_GAP INT16_MIN       /* a trail point off the scope: the trail breaks there */
@@ -213,10 +218,18 @@ typedef struct {
                               all of them at first. the firmware keeps it */
     wx_units_t units;      /* the weather's units, SET's UNITS tab: 0 each home's country's own. the firmware keeps it */
     uint8_t  names;        /* NAMES_*: the map's names on the dark looks, SET's MAP NAMES. the firmware keeps it */
+    uint8_t  turn_wx, turn_look;   /* SET's WEATHER FOR and LOOK FOR, minutes, 0 off (the weather's). the firmware keeps them */
+    uint8_t  turn_back;    /* ui_turn: the look the weather goes back to, the last one that was not the weather */
+    uint8_t  turn_was;     /* the look it counts for: another one, by any hand, starts the count again */
+    uint32_t turn_at;      /* when the count started, 0: start it again */
     char     home_cc[3];   /* home's country, its two small letters, "" not known: the firmware copies it in like net */
     wx_alert_t alert;      /* the warnings now: ui_frame works them out of wx each frame */
     uint8_t  alert_was[WXA_KINDS];   /* their levels the frame before */
     uint8_t  alert_new;    /* the kinds that came or got worse this frame (1 << WXA_*): the firmware lights the LED */
+    /* the LED's events on the screen too (an owner's idea: the CYDs' LED is on the back, out of sight). the look's
+     * button lights in the event's colour, the round glass's rim; paper and the site's radar show none */
+    uint8_t  screen_alarm; /* SET's ON SCREEN, 1 at first. the firmware keeps it */
+    uint8_t  alarm;        /* what lights now: LIGHT_* + 1, in the lit part of its blink; 0 none. ui_alarm, each frame */
     uint32_t prof[6];      /* us spent a layer, summed till the firmware logs them: background, disc,
                               compass, planes, panel, the rest */
     uint8_t  key_last;     /* the e-paper's key pressed (KEY_*) and when, till ui_key takes it: its third of */
@@ -303,6 +316,15 @@ enum { PEND_NONE, PEND_RANGE, PEND_PAGE, PEND_LOOK };
 #define PEND_MS 2000u
 int  ui_key_pend(ui_t *u, int key, uint32_t now, ui_cmd_t *cmd);
 int  ui_pend_take(ui_t *u, ui_cmd_t *cmd);
+/* SET's WEATHER FOR and LOOK FOR: the weather and the person's own look take turns. once a frame, after the
+ * finger, BOOT and the keys; busy: one of them came this frame. 1: it turned the look (cmd->cfg says so too) */
+int  ui_turn(ui_t *u, uint32_t now, int busy, ui_cmd_t *cmd);
+/* the next step of WEATHER FOR (wx 1) or LOOK FOR (wx 0) from minutes m, dir -1 or 1, held at the ends;
+ * dir 0: m itself if it is a step, -1 if not */
+int  ui_turn_step(int m, int dir, int wx);
+/* the firmware's, each frame: the event the LED shows (light_shown, -1 none). ON SCREEN off, paper or the site's
+ * radar: nothing lights */
+void ui_alarm(ui_t *u, int ev);
 static inline int ui_pend_due(const ui_t *u, uint32_t now) { return u->pend_kind && now - u->pend_at >= PEND_MS; }
 void ui_start_calibration(ui_t *u);
 void ui_set_theme(ui_t *u, int theme);

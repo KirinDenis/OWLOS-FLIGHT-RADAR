@@ -46,6 +46,12 @@ cell`).
   `_Static_assert` in ui_pages.c so it cannot happen silently again (P).
 - The weather's dial or graph is one big target (`HIT_WXPAGE`): a tap turns the page. On the round glass a tap on the
   scope in WEATHER turns the page and shows its menu row (P).
+- **One button, two ways** (0.17, an owner's idea). The look's button answers by halves: `look_hit` gives
+  `HIT_LOOK_BACK` left of its middle and `HIT_LOOK` right of it, so going back is one tap, not a whole round. It is
+  drawn as one button with a small arrow at each end (`look_button`), and the pressed half's arrow lights. It grew to
+  the left, 14 px, so the seven-letter names keep their size; on the scaled screens 18, because their smooth font
+  stands wider than the pixel font it stands in for: with 14 the arrows touched the letters on the 5" (P, the
+  preview). Boards without touch keep the old button.
 
 ## The ring under the finger
 
@@ -130,6 +136,53 @@ static const struct { const char *label, *desc; int kind, tab; } ROWS[S_ROWS] = 
 A box in the middle of the screen for about 2 s, for what a tap just did, in words: `RANGE 50 KM`, `NORTH UP`, the
 theme's name, the weather page's name. A new weather warning: a 5 s toast. On paper the toast is a framed card, and
 the paper's looks and weather pages show none: their name is in the key strip.
+
+## Screens that take turns by themselves
+
+Flight Radar 0.17, SET, VIEW, WEATHER FOR and LOOK FOR (an owner: weather for a minute, then radar for three, "and
+keeps running the cycle"). `ui_turn(u, now, busy, cmd)` runs once a frame, after the finger, BOOT and the keys:
+
+- Off until set. The minutes are fixed steps (`ui_turn_step`), two `K_NUM` rows held at their ends.
+- Anything a person does starts the count again: a finger down, a frame with BOOT or a key (`busy`), a picked
+  plane, any other page, the e-paper's gathered keys, and a look changed by any hand, on the screen or from the
+  site. The last is seen as `cfg.look != turn_was`, with no hook in each path that can change it. It never turns
+  away from what someone is doing, and the count starts from the last held frame.
+- The weather goes back to the last look that was not the weather (`turn_back`): a person's MAP stays theirs.
+- No forecast yet: the look stays a whole turn more, never an empty weather screen.
+- A turn is an ordinary look change (`cmd->cfg`): kept, told to the site, whose twin follows; the weather comes on
+  its dial; the e-paper is printed whole. The site's twin runs no turns of its own: two timers would fight over the
+  board's look.
+- Tested on the PC frame by frame, 100 ms a frame: the turns at their minutes, a touch at 2:30 moving the turn to
+  5:30, each hold, the clock's wrap after 49.7 days (P).
+
+## A light out of sight, on the screen
+
+Flight Radar 0.17, SET, LED, ON SCREEN (an owner: the CYD's LED is on the back, "use the color of the text of the
+current look"). Whatever lights the LED lights the look's button too, on every board, the ones with no LED as well:
+
+- One source: `light_shown(l, cfg, now)` (core/light.c) gives the event the LED shows, in the lit part of its blink,
+  or -1. The firmware hands it to `ui_alarm(u, ev)` each frame, which keeps `ui_t.alarm` (event + 1, 0 none). A byte
+  in `ui_t` is enough to redraw: the pages' whole-`ui_t` compare and the background's own pace see it change.
+- Letters in the event's colour, as asked first, vanish where the theme is that colour already: green on PHOSPHOR,
+  red on CRIMSON, amber on AMBER, cyan on ARCTIC. So the face fills with the colour and the name is dark (`C_BG0`).
+  Measured on the PC, dark letters on each face: 5.4 (red) to 17.9 (white). The LED's pure blue (0, 0, 255) is
+  2.3 behind dark letters; the screen's is (90, 150, 255), 6.7. `light_screen_rgb` has the screen's colours.
+- The light map (paper) keeps ink letters; its white is the paper itself, so white turns the face to ink and the
+  letters to paper.
+- The round glass shows its look's name only with its menu: the rim lights instead, a 4 px band at the edge outside
+  the disc. That edge is dark on every look, the light map's too, so the paper rule is not used there: with it the
+  first build drew an ink band on the dark rim, gone [seen in the preview].
+- A blink shorter than 400 ms is 400 ms on the screen, and so is the dark part (the LED's SOS is 120 of 250): the
+  big RGB boards draw their background a few times a second and would show a short one at random or not at all.
+  The LED's steady amber stays steady. TEST stays the LED's alone.
+- A finger on the button draws it pressed, not lit: the touch puts the light out anyway (`light_touch`).
+- The boards with no LED get the LED's rows on a tab of their own, ALARM, without BRIGHTNESS, TEST and RED ON; the
+  round glass under DATA (no room for a third tab). Paper shows none: it cannot blink. The site's twin shows none: it
+  has no events of its own. `UI_SCREEN_ALARM` and `UI_EVENTS` in ui_int.h say which.
+- ON SCREEN is kept by itself (NVS `"ledscreen"`, one byte, on at first), not as a new version of the LED's blob:
+  a board flashed back reads a newer blob as the defaults and would lose its LED settings.
+- Checked in the PC preview on six screens: every shot the same as before but the SET pages and the new ones, the
+  e-paper's all the same; the button in each event's colour, white on the four looks, green on the five themes.
 
 ## BOOT and other buttons
 

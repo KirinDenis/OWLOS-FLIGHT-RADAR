@@ -22,6 +22,7 @@ const fmt = (n) => n.toLocaleString('en-US');
 const BOARDS = {
   ili9341: { name: '2.8" CYD', spec: 'ESP32, 320x240, resistive touch', chip: 'esp32', w: 320, h: 240, inch: 2.8, touch: 'resistive', twin: 'Twin1', shot: '02-live.png', yellow: true, screens: 'three' },
   st7796: { name: '3.5" CYD', spec: 'ESP32, 480x320, touch', chip: 'esp32', w: 480, h: 320, inch: 3.5, touch: 'resistive or capacitive', twin: 'Twin2', shot: 'st7796/02-live.png', yellow: true },
+  esp2432s032: { name: '3.2" CYD', spec: 'ESP32-2432S032, 320x240 IPS, touch, experimental', chip: 'esp32', w: 320, h: 240, inch: 3.2, touch: 'resistive or capacitive', twin: 'Twin1', shot: '02-live.png', yellow: true, screens: 'two' },
   ili9486: { name: '3.5" RPi LCD', spec: 'on OWLOSAirQuality, no touch', chip: 'esp32', w: 480, h: 320, inch: 3.5, touch: 'none', twin: 'Twin2', shot: 'ili9486/03-picked-heavy.png' },
   gc9a01: { name: '1.28" round', spec: 'Elecrow CrowPanel, ESP32-C3', chip: 'c3', w: 240, h: 240, inch: 1.28, touch: 'capacitive', round: true, twin: 'Twin4', shot: 'gc9a01/03-picked-heavy.png' },
   nmcydc5: { name: '2.8" NM-CYD-C5', spec: 'ESP32-C5, 320x240, resistive touch', chip: 'c5', w: 320, h: 240, inch: 2.8, touch: 'resistive', twin: 'Twin1', shot: '02-live.png', screens: 'two' },
@@ -53,6 +54,9 @@ const SWITCHES = { vectors: 'Vectors', clock: 'UTC clock', block: 'Data block', 
 const BACKLIGHTS = [100, 50, 25, 10];                  // the board's BACKLIGHT steps, % as core/ui.h has them
 const ALERTS = ['storm', 'pressure', 'air', 'radiation'];   // the board's weather warnings: bit k is WXA_* k (core/weather.h)
 const NAMES = ['soft', 'thin', 'bold'];                // the map's names on the dark looks, core/ui.h NAMES_*, in its order
+/* the weather and the look taking turns, minutes: the steps of the board's WEATHER FOR (0 off) and LOOK FOR, core/ui.c
+ * TURN_WX and TURN_LOOK. the console's words: wx_for=off|1|2.., look_for=1|2.. */
+const TURNS = { wx_for: [0, 1, 2, 3, 5, 10], look_for: [1, 2, 3, 5, 10, 15, 30, 60] };
 /* the board's weather units: the console's words, in the order core/ui.h numbers them, 0 auto (home's country's own),
  * and what a chip says */
 const UNITS = {
@@ -698,6 +702,21 @@ function setOne(u, name, value) {
   if (name === 'names' && u && u.cfg?.names === undefined) {   // the map's names: a board before 0.16.2 draws them one way only
     return false;
   }
+  if (TURNS[name]) {                                   // the weather and the look taking turns: a board before 0.17 has none
+    const m = value === 'off' ? 0 : Number(value);
+    if (!u?.link || !TURNS[name].includes(m) || u.cfg?.[name] === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ [name]: m })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
+  if (name === 'led_screen') {                         // the LED's events on the board's screen too: a board before 0.17 has none
+    if (!u?.link || !['on', 'off'].includes(value) || u.cfg?.led_screen === undefined) {
+      return false;
+    }
+    u.link.send(`OWLOS SET ${JSON.stringify({ led_screen: value === 'on' ? 1 : 0 })}`).then(() => u.link.send('OWLOS GET')).catch((e) => console.warn(e));
+    return true;
+  }
   if (name === 'alerts') {                             // the weather's warnings on every look: a board that says none has none
     const mask = alertMask(value);
     if (!u?.link || mask < 0 || u.cfg?.alerts === undefined) {
@@ -734,6 +753,8 @@ const FILES = {
       ...(u.cfg?.night !== undefined ? [`night=${u.cfg.night ? BACKLIGHTS[u.cfg.night] : 'off'}`] : []),
       ...(u.cfg?.alerts !== undefined ? [`alerts=${alertWords(u.cfg.alerts)}`] : []),
       ...(u.cfg?.names !== undefined ? [`names=${NAMES[c.names] ?? NAMES[0]}`] : []),
+      ...Object.keys(TURNS).filter((k) => u.cfg?.[k] !== undefined).map((k) => `${k}=${u.cfg[k] || 'off'}`),
+      ...(u.cfg?.led_screen !== undefined ? [`led_screen=${u.cfg.led_screen ? 'on' : 'off'}`] : []),
       ...Object.entries(UNITS).filter(([, n]) => u.cfg?.[n.key] !== undefined).map(([name, n]) => `${name}=${n.words[u.cfg[n.key]] ?? 'auto'}`),
       ...Object.keys(SWITCHES).map((k) => `${k}=${u.screen.opts[k] ? 'on' : 'off'}`)];
   },
@@ -753,7 +774,8 @@ const boardApi = {
   settings: [...THEMES.map((v) => `theme=${v}`), ...LOOKS.map((v) => `look=${v}`), ...RANGES.map((v) => `range=${v}`), ...Object.keys(SWITCHES).flatMap((k) => [`${k}=on`, `${k}=off`]), 'flip=on', 'flip=off',
     ...BACKLIGHTS.map((p) => `backlight=${p}`), 'night=off', ...BACKLIGHTS.slice(1).map((p) => `night=${p}`),
     'alerts=all', 'alerts=none', ...ALERTS.map((a) => `alerts=${a}`), ...NAMES.map((v) => `names=${v}`),
-    ...Object.entries(UNITS).flatMap(([name, n]) => n.words.map((w) => `${name}=${w}`)), ...WX_PAGES.map((p) => `wxpage=${p}`)],
+    ...Object.entries(UNITS).flatMap(([name, n]) => n.words.map((w) => `${name}=${w}`)), ...WX_PAGES.map((p) => `wxpage=${p}`),
+    ...Object.entries(TURNS).flatMap(([k, steps]) => steps.map((m) => `${k}=${m || 'off'}`)), 'led_screen=on', 'led_screen=off'],
   set: setOne,
   async send(u, line) {
     if (!u.link) {
@@ -1552,11 +1574,13 @@ function panePart(u, tab) {
     const looks = u && u.cfg?.alerts === undefined ? LOOKS.slice(0, 3) : LOOKS;   // a board before 0.16 has no WEATHER
     pane.innerHTML = `<div class="field"><span>Look</span><div class="chips">${looks.map((l, i) => `<button class="chip" data-set="look=${l}" aria-pressed="${c.look === i}">${l.toUpperCase()}</button>`).join('')}</div></div>
       ${c.look === LOOKS.indexOf('weather') ? `<div class="field"><span>Weather page</span><div class="chips">${WX_PAGES.map((p, i) => `<button class="chip" data-set="wxpage=${p}" aria-pressed="${s.wxPage() === i}">${p.toUpperCase()}</button>`).join('')}</div></div>` : ''}
+      ${u?.cfg?.wx_for !== undefined ? `<div class="field"><span>The weather by itself, for</span><div class="chips">${TURNS.wx_for.map((m) => `<button class="chip" data-set="wx_for=${m || 'off'}" aria-pressed="${u.cfg.wx_for === m}">${m ? `${m} MIN` : 'OFF'}</button>`).join('')}</div></div>
+      <div class="field"><span>Then the look, for</span><div class="chips">${TURNS.look_for.map((m) => `<button class="chip" data-set="look_for=${m}" aria-pressed="${u.cfg.look_for === m}">${m} MIN</button>`).join('')}</div></div>` : ''}
       <div class="field"><span>Colours</span><div class="chips">${THEMES.map((t, i) => `<button class="chip" data-set="theme=${t}" aria-pressed="${c.theme === i}">${t.toUpperCase()}</button>`).join('')}</div></div>
       ${!u || u.cfg?.names !== undefined ? `<div class="field"><span>Names on the dark maps</span><div class="chips">${NAMES.map((n, i) => `<button class="chip" data-set="names=${n}" aria-pressed="${c.names === i}">${n.toUpperCase()}</button>`).join('')}</div></div>` : ''}
       <label>Range: <b class="rangeword">${Math.round(c.range)}</b> km<input type="range" class="range" min="0" max="${RANGES.length - 1}" value="${range}"></label>
       <div class="field"><span>On the radar</span><div class="chips">${Object.entries(SWITCHES).map(([k, v]) => `<button class="chip" data-set="${k}=${s.opts[k] ? 'off' : 'on'}" aria-pressed="${!!s.opts[k]}">${v.toUpperCase()}</button>`).join('')}</div></div>
-      ${u ? `<div class="field"><span>The board's screen</span><div class="chips"><button class="chip" data-set="flip=${u.cfg?.flip ? 'off' : 'on'}" aria-pressed="${!!u.cfg?.flip}">UPSIDE DOWN</button></div></div>` : ''}
+      ${u ? `<div class="field"><span>The board's screen</span><div class="chips"><button class="chip" data-set="flip=${u.cfg?.flip ? 'off' : 'on'}" aria-pressed="${!!u.cfg?.flip}">UPSIDE DOWN</button>${u.cfg?.led_screen !== undefined ? `<button class="chip" data-set="led_screen=${u.cfg.led_screen ? 'off' : 'on'}" aria-pressed="${!!u.cfg.led_screen}">LED ALERTS ON SCREEN</button>` : ''}</div></div>` : ''}
       ${u?.cfg?.backlight !== undefined ? `<div class="field"><span>Backlight</span><div class="chips">${BACKLIGHTS.map((p, i) => `<button class="chip" data-set="backlight=${p}" aria-pressed="${u.cfg.backlight === i}">${p}%</button>`).join('')}</div></div>` : ''}
       ${u?.cfg?.night !== undefined ? `<div class="field"><span>At night, from dusk till dawn at home</span><div class="chips">${BACKLIGHTS.map((p, i) => `<button class="chip" data-set="night=${i ? p : 'off'}" aria-pressed="${u.cfg.night === i}">${i ? `${p}%` : 'OFF'}</button>`).join('')}</div></div>` : ''}
       ${u?.cfg?.alerts !== undefined ? `<div class="field"><span>Weather warnings, on every look</span><div class="chips">${ALERTS.map((a, i) => `<button class="chip" data-set="alerts=${alertWords(u.cfg.alerts ^ (1 << i))}" aria-pressed="${!!(u.cfg.alerts & (1 << i))}">${a.toUpperCase()}</button>`).join('')}</div></div>` : ''}

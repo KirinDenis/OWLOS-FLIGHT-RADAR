@@ -54,7 +54,8 @@ room: more rows, a bigger scope, more labels. Geometry from the height (Flight R
 - The radar's three dots take its panel away: the scope moves to the middle of the screen, a picked plane brings the
   panel back while it is picked. The WEATHER look keeps the same dots: without the panel its dial stands in the
   middle with now's numbers either side.
-- The look button top right of the scope or of the square map (`LOOK_W` 62, 10 narrower in the radar's corner),
+- The look button top right of the scope or of the square map (`LOOK_W` 62, 10 narrower in the radar's corner;
+  with touch 14 wider since 0.17, 18 on the scaled screens, for an arrow at each end: touch-ux-and-controls.md),
   the dots 24 wide (18 on the 2.8": its title needs the room).
 - The weather's column (`WX_HUD`) is built for 480x320 and 320x240 (radial-dials.md): the 2.8" gets the same table
   with less in it (M on both).

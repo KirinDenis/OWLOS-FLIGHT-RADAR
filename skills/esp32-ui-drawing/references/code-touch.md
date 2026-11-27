@@ -151,8 +151,8 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
             return;
         }
         if (hit >= HIT_ROW && hit < HIT_ROW + SKY_MAX) { select_plane(u, u->order[hit - HIT_ROW]); return; }
-        if (hit == HIT_LOOK) {
-            next_look(u, cmd);
+        if (hit == HIT_LOOK || hit == HIT_LOOK_BACK) {   // the button's right half on, its left half back (0.17)
+            set_look(u, cmd, hit == HIT_LOOK ? ui_look_after(u->cfg.look) : ui_look_before(u->cfg.look));
             if (RADAR_ROUND) u->menu_until = u->now + ROUND_MENU_MS;   // stays up for the next look
             return;
         }
@@ -823,10 +823,10 @@ int main_hit(const ui_t *u, int x, int y)
     const int lx = look_x(u), ly = LOOK_Y + LOOK_H + 12;
     if (square_look(u)) {
         if (y < ly && x >= lx + LOOK_W + 2 && x < view_right(u)) return HIT_DOTS;
-        if (y < ly && x >= lx - 10 && x < lx + LOOK_W + 2) return HIT_LOOK;
+        if (y < ly && x >= lx - 10 && x < lx + LOOK_W + 2) return look_hit(u, x);   // HIT_LOOK_BACK left of its middle
         if (!panel_shown(u) || x < PX - 2) return HIT_SCOPE;   // the square map: all of it but the panel
     } else if (y < ly && x >= lx - 12 && x < PX - 2) {
-        return HIT_LOOK;
+        return look_hit(u, x);
     }
     if (x < PX - 2) {
         int dx = x - SCX, dy = y - SCY;

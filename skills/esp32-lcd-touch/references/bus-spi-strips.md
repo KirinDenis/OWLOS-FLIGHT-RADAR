@@ -292,7 +292,7 @@ void disp_init(void)
         .pclk_hz = LCD_SPI_HZ,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
-        .spi_mode = 0,
+        .spi_mode = LCD_SPI_MODE,                  /* board.h, 0 unless a board says: 3 on the 3.2" CYD */
         .trans_queue_depth = 4,
         .on_color_trans_done = on_strip_done,
     };

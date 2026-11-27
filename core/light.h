@@ -52,3 +52,7 @@ void light_touch(light_t *l);                                 /* the screen was 
 void light_test(light_t *l, uint32_t now);                    /* red, green, blue in turn */
 /* what the LED shows now, 0..255 a colour, the brightness in it */
 void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t rgb[3]);
+/* the same on the screen (SET's ON SCREEN, core/ui.c ui_alarm): the event in the lit part of its blink, -1 none or
+ * dark. the blink is slower where the LED's is short, the test is the LED's alone */
+int  light_shown(const light_t *l, const light_cfg_t *c, uint32_t now);
+void light_screen_rgb(int ev, uint8_t rgb[3]);                /* an event's colour on a screen */

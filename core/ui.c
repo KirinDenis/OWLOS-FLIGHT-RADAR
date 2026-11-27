@@ -418,6 +418,8 @@ int ui_init(ui_t *u, uint32_t now)
     fr_cfg_defaults(&u->cfg);
     light_defaults(&u->light);
     u->alerts = WXA_ALL;
+    u->turn_look = TURN_LOOK_DEFAULT;                  // the weather's turns off, the look's ready for them
+    u->screen_alarm = 1;                               // the LED's events on the screen too
     /* default touch alignment of the 2.8" CYD (the WiFi radar's numbers) till the user aligns */
     u->cal = (touch_cal_t){ 0.0f, -0.0894f, 333.3f, -0.0666f, 0.0f, 251.1f };
     const int in = RADAR_ROUND ? (int)(GFX_W * 0.2f) : 30;   // round glass: the corners are not there, the diagonals are
@@ -768,6 +770,112 @@ static void set_look(ui_t *u, ui_cmd_t *cmd, int look)
 
 static void next_look(ui_t *u, ui_cmd_t *cmd) { set_look(u, cmd, ui_look_after(u->cfg.look)); }
 
+/* the look's button, top right: its name, and on a touch screen an arrow at each end. the left half goes to the
+ * look before, the right half to the next (an owner's idea: back is one tap, not a whole round). main_hit tells
+ * the halves apart with look_hit. paper: the light map's own button */
+void ui_alarm(ui_t *u, int ev)
+{
+    u->alarm = (uint8_t)(UI_SCREEN_ALARM && u->screen_alarm && ev >= 0 && ev < LIGHT_EVENTS ? ev + 1 : 0);
+}
+
+/* what an alarm lights (ui_t.alarm): the face in the event's colour, the letters dark. 0: none lit now. letters in
+ * the colour, as asked first, vanished where the theme is that colour already (green on PHOSPHOR, red on CRIMSON).
+ * paper: ink letters, and ink for white, which the light map's paper is */
+int alarm_colours(const ui_t *u, int paper, uint32_t *fill, uint32_t *ink)
+{
+    if (!UI_SCREEN_ALARM || !u->alarm) return 0;
+    uint8_t c[3];
+    light_screen_rgb(u->alarm - 1, c);
+    *fill = RGB(c[0], c[1], c[2]);
+    *ink = paper ? CL_INK : C_BG0;
+    if (paper && u->alarm - 1 == LIGHT_NEAR) {
+        *fill = CL_INK;
+        *ink = CL_PAPER;
+    }
+    return 1;
+}
+
+// a button lit by an alarm: its face filled, its name dark, set as button and map_button set theirs
+static void alarm_face(canvas_t *cv, int x, int y, int w, int h, const char *label, int paper, uint32_t fill, uint32_t ink)
+{
+    if (paper) {
+        round_box(cv, x, y + 2, w, h, 6, RGB(0, 0, 0), 55);
+        round_box(cv, x, y, w, h, 6, fill, 255);
+    } else {
+        chamfer_box(cv, x, y, w, h, fill, 255, fill, 255);
+    }
+    const int sc = micro_width(label, 2) <= w - (paper ? 6 : 8) ? 2 : 1;
+    micro_text(cv, x + (w - micro_width(label, sc)) / 2, y + (h - 5 * sc) / 2, label, ink, 255, sc);
+}
+
+void look_button(const ui_t *u, canvas_t *cv, const char *name, int paper)
+{
+    const int x = look_x(u), w = look_w(u);
+    const int pressed = u->t_down && !u->t_moved && (u->t_hit == HIT_LOOK || u->t_hit == HIT_LOOK_BACK);
+    uint32_t fill = 0, ink = 0;
+    const int alarm = !pressed && alarm_colours(u, paper, &fill, &ink);   // a finger on it puts it out anyway
+    if (alarm) alarm_face(cv, x, LOOK_Y, w, LOOK_H, name, paper, fill, ink);
+    else if (paper) map_button(cv, x, LOOK_Y, w, LOOK_H, name, pressed ? 2 : 0);
+    else button(cv, x, LOOK_Y, w, LOOK_H, name, pressed ? 2 : 0);
+#if LOOK_ARROW
+    const float cy = LOOK_Y + LOOK_H / 2.0f + (paper && pressed);   // the light map's button sinks when pressed
+    for (int s = 0; s < 2; s++) {                     // s 0 the arrow back, on the left; 1 the one on
+        const int lit = pressed && u->t_hit == (s ? HIT_LOOK : HIT_LOOK_BACK);
+        const uint32_t c = alarm ? ink : paper ? (lit ? CL_BLUE : CL_INK) : (lit ? C_FOCUS : C_PRIM);
+        const float tip = s ? (float)(x + w) - 4.0f : (float)x + 4.0f, back = s ? tip - 3.0f : tip + 3.0f;
+        gfx_line(cv, back, cy - 3.5f, tip, cy, 1.5f, c, lit ? 255 : 215);
+        gfx_line(cv, tip, cy, back, cy + 3.5f, 1.5f, c, lit ? 255 : 215);
+    }
+#endif
+}
+
+// which half of the look's button x is in: the left one goes back. one way only where it has no arrows
+int look_hit(const ui_t *u, int x)
+{
+    return LOOK_ARROW && x < look_x(u) + look_w(u) / 2 ? HIT_LOOK_BACK : HIT_LOOK;
+}
+
+/* the steps of SET's WEATHER FOR and LOOK FOR, in minutes. the weather's 0 is off */
+static const uint8_t TURN_WX[] = { 0, 1, 2, 3, 5, 10 };
+static const uint8_t TURN_LOOK[] = { 1, 2, 3, 5, 10, 15, 30, 60 };
+
+int ui_turn_step(int m, int dir, int wx)
+{
+    const uint8_t *t = wx ? TURN_WX : TURN_LOOK;
+    const int n = wx ? (int)sizeof TURN_WX : (int)sizeof TURN_LOOK;
+    int i = 0;
+    while (i < n && t[i] != m) i++;
+    if (!dir) return i < n ? m : -1;
+    if (i == n) return t[wx ? 0 : 2];                 // not a step (it never is): back to off, or 3 minutes
+    i += dir;
+    return t[i < 0 ? 0 : i >= n ? n - 1 : i];
+}
+
+/* SET's WEATHER FOR and LOOK FOR (an owner's idea: "weather for a minute, then radar for 3 minutes, and keeps
+ * running the cycle"). the weather comes by itself for its minutes, then the look the person chose for its
+ * own, and round again. a finger, BOOT or a key, a picked plane, another page, or a look changed by any hand
+ * (the button, the site) starts the count again: it never turns away from what someone is doing. the look it
+ * turns to is kept as any look is, and told to the site the same way */
+int ui_turn(ui_t *u, uint32_t now, int busy, ui_cmd_t *cmd)
+{
+    const int look = u->cfg.look, wx = look == LOOK_WEATHER;
+    if (!wx) u->turn_back = (uint8_t)look;             // where the weather goes back to: the last look that was not it
+    if (!u->turn_wx || busy || u->view != VIEW_MAIN || u->t_down || u->sel || u->pend_kind || look != u->turn_was ||
+        !u->turn_at) {
+        u->turn_was = (uint8_t)look;
+        u->turn_at = now ? now : 1;                    // 0 is "start it again"
+        return 0;
+    }
+    if (now - u->turn_at < (wx ? u->turn_wx : u->turn_look) * 60000u) return 0;
+    u->turn_at = now ? now : 1;
+    if (!wx && !u->wx) return 0;                       // no forecast yet: the look stays a turn more
+    u->cfg.look = u->turn_was = (uint8_t)(wx ? u->turn_back : LOOK_WEATHER);
+    u->panel_open = 0;
+    u->wx_page = WXP_DIAL;                             // the weather comes on its dial
+    cmd->cfg = cmd->refetch = 1;                       // as a look changed by hand: kept, told, the planes asked for
+    return 1;
+}
+
 static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
 {
     if (u->view == VIEW_SETUP) { setup_act(u, hit, longp, cmd); return; }
@@ -817,8 +925,8 @@ static void act(ui_t *u, int hit, int longp, int x, int y, ui_cmd_t *cmd)
             return;
         }
         if (hit >= HIT_ROW && hit < HIT_ROW + SKY_MAX) { select_plane(u, u->order[hit - HIT_ROW]); return; }
-        if (hit == HIT_LOOK) {
-            next_look(u, cmd);
+        if (hit == HIT_LOOK || hit == HIT_LOOK_BACK) {   // the button's right half on, its left half back
+            set_look(u, cmd, hit == HIT_LOOK ? ui_look_after(u->cfg.look) : ui_look_before(u->cfg.look));
             if (RADAR_ROUND) u->menu_until = u->now + ROUND_MENU_MS;   // stays up for the next look
             return;
         }

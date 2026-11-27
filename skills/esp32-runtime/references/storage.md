@@ -125,6 +125,8 @@ read what a newer one saved: the WiFi stays, the rest may need sending again.
 - `cal`: touch alignment. `screen`: which panel profile, u8.
 - `help`, `bare`, `backlight`, `night`, `alerts`, `names`: one small value each.
 - `units`: the weather's units, a blob.
+- `turns`: WEATHER FOR and LOOK FOR, two bytes of minutes (0.17).
+- `ledscreen`: SET's ON SCREEN, one byte, 1 at first (0.17).
 - `ran`: how long the run lasted, u32, once a minute.
 
 Measured round trip, 2026-11-19: a beta build, then the live stable flashed over it with no erase, then the beta

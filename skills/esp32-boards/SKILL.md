@@ -76,6 +76,8 @@ Flight Radar's builds, by `RADAR_DISPLAY` number (core/config.h; WiFi Radar uses
 - 17 [jc8012](references/boards/jc8012.md): Guition JC8012P4A1C 10.1", P4, MIPI-DSI 1280x800. Run by its contributor.
 - 18 [crow50](references/boards/crow50.md): Elecrow CrowPanel 5.0" plain, S3, RGB 800x480. Built, experimental.
 - 19 [zlx2](references/boards/zlx2.md): ZLX-ESP32-2 2.8", C5. Built, experimental.
+- 20 [esp2432s032](references/boards/esp2432s032.md): ESP32-2432S032 3.2" CYD, ESP32, ST7789 320x240 on the 3.5"'s pins.
+  Built, experimental.
 
 Boards without a build of their own:
 

@@ -303,6 +303,22 @@ int main(int argc, char **argv)
     tap(PX - 30, 8);                                 // the look's button over the scope
 #endif
     printf("look after a tap: %s\n", LOOK_NAME[ui.cfg.look]);
+#if !RADAR_ROUND && LOOK_ARROW
+    {
+        /* the button's left half goes back: held, its arrow lights; let go, the look before. from the map, as
+         * the tap above left it: back to the radar */
+        const int bx = look_x(&ui) + 12, by = LOOK_Y + LOOK_H / 2;
+        ui_cmd_t hc;
+        memset(&hc, 0, sizeof hc);
+        ui.snap = sky;
+        ui_frame(&ui, t_ms);
+        for (int k = 0; k < 4; k++) ui_touch(&ui, 1, bx, by, 0, 0, t_ms + k * 20u, &hc);
+        shot("45-look-back-held");
+        ui_touch(&ui, 0, bx, by, 0, 0, t_ms + 100u, &hc);
+        apply(&hc);
+        printf("look after a tap on the button's left half: %s\n", LOOK_NAME[ui.cfg.look]);
+    }
+#endif
     ui.cfg.look = LOOK_MAP;
     fly(5);
     shot("20-map");
@@ -418,16 +434,24 @@ int main(int argc, char **argv)
     drag(120, 180, 120, 40);
     drag(120, 180, 120, 40);
     shot("11-setup-more");
-    const int tabs = (RADAR_ROUND ? 2 : 3) + (RADAR_HAS_LED ? 1 : 0);   // the bar: VIEW DATA (RADAR) (LED) BACK
+    // the bar: VIEW DATA (UNITS RADAR) (LED, or ALARM with no LED) BACK. the round glass: its alarms under DATA
+    const int tabs = RADAR_ROUND ? 2 : 4 + (UI_EVENTS ? 1 : 0);
     press_bar(1, tabs + 1);
     shot("10-setup-data");
+#if RADAR_ROUND && UI_EVENTS
+    for (int k = 0; k < 4; k++) drag(120, 180, 120, 40);
+    shot("10-setup-data-more");
+#endif
 #if !RADAR_ROUND
-    press_bar(2, tabs + 1);
+    press_bar(3, tabs + 1);
     shot("10-setup-radar");
 #endif
-#if RADAR_HAS_LED
-    press_bar(3, tabs + 1);
+#if !RADAR_ROUND && UI_EVENTS
+    press_bar(4, tabs + 1);
     shot("10-setup-led");
+    drag(120, 180, 120, 40);
+    drag(120, 180, 120, 40);
+    shot("10-setup-led-more");
 #endif
     press_bar(0, tabs + 1);                          // VIEW again, as it was
     press_bar(tabs, tabs + 1);                       // BACK
@@ -613,6 +637,38 @@ int main(int argc, char **argv)
         fly(1);
     }
     ui.newest[0] = 0;
+
+#if UI_SCREEN_ALARM
+    /* the LED's events on the screen (ui_t.alarm, SET's ON SCREEN): the look's button lit in the event's colour on
+     * each look, the round glass's rim; every theme with the green that PHOSPHOR is made of. no time passes */
+    {
+        static const char *const EV[LIGHT_EVENTS] = { "sos", "range", "up", "down", "near", "nodata", "weather" };
+        static const uint8_t LOOKS_[] = { LOOK_RADAR, LOOK_MAP, LOOK_CLASSIC, LOOK_WEATHER };
+        const int was_look = ui.cfg.look, was_theme = ui.theme;
+        char name[48];
+        for (int e = 0; e < LIGHT_EVENTS; e++) {
+            ui.alarm = (uint8_t)(e + 1);
+            snprintf(name, sizeof name, "80-alarm-%d-%s", e, EV[e]);
+            shot(name);
+        }
+        ui.alarm = LIGHT_NEAR + 1;                   // white, and on the light map ink instead
+        for (int k = 0; k < 4; k++) {
+            ui.cfg.look = LOOKS_[k];
+            snprintf(name, sizeof name, "81-alarm-near-%s", LOOK_NAME[LOOKS_[k]]);
+            shot(name);
+        }
+        ui.cfg.look = LOOK_RADAR;
+        ui.alarm = LIGHT_RANGE + 1;
+        for (int t = 0; t < UI_THEMES; t++) {
+            ui_set_theme(&ui, t);
+            snprintf(name, sizeof name, "82-alarm-range-%s", UI_THEME[t].name);
+            shot(name);
+        }
+        ui_set_theme(&ui, was_theme);
+        ui.alarm = 0;
+        ui.cfg.look = (uint8_t)was_look;
+    }
+#endif
 
     ui_start_calibration(&ui);
     shot("13-touch-align");

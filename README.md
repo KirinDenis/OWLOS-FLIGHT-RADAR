@@ -34,7 +34,8 @@ to start, and it starts where we stopped.
 
 - A radar scope with a sweeping beam over the map, or a plain square map, or the same map in
   OpenStreetMap's own colours, or the next 24 hours of the weather on the radar's dial. One button goes
-  round them.
+  round them, its right half on and its left half back, and the weather can take turns with the look by
+  itself: a minute of weather, three of radar, and round again.
 - The planes glide. Between two positions the board flies each plane on by itself, round its curve in a
   turn, and slides it onto the next position instead of jumping, its nose turning with it.
 - A map made to be read on a small screen: water and towns have a light edge, every road and stream runs
@@ -46,8 +47,9 @@ to start, and it starts where we stopped.
 - Next to an airport the planes parked and taxiing there can be hidden: SET, ON GROUND.
 - A watch list of up to 8 planes: the board picks one when it comes in range, and says when one takes
   off or lands anywhere in the world.
-- The RGB LED on the back of the 2.8" and 3.5" CYD lights for what happens: an emergency squawk round
-  home, a watched plane coming, taking off or landing, no data. Each one on or off.
+- The RGB LED on the back of the 2.8", 3.2" and 3.5" CYD lights for what happens: an emergency squawk round
+  home, a watched plane coming, taking off or landing, no data. Each one on or off. The look's button on the
+  screen lights in the same colour, so it is seen from the front, and on the boards with no LED too.
 - Without WiFi it flies a made-up demo sky and says DEMO in big letters. The WiFi and the home are set
   on the touch screen itself, or from the site over the USB cable.
 - It knows its version and finds out by itself when the site has a newer one: a small note on the
@@ -63,6 +65,10 @@ to start, and it starts where we stopped.
   different screens, one build fits them all (see below). Both cores draw the screen.
 - **3.5" CYD** (ESP32-3248S035, R or C version): ESP32, ST7796 480x320, resistive or capacitive touch. The
   second core draws half the radar and the weather.
+- **3.2" CYD** (ESP32-2432S032, R, C or N version): ESP32, ST7789 320x240 IPS, resistive, capacitive or no
+  touch. Experimental, never run on one here: the pins come from the maker's schematics and demos and
+  from the board files in rzeldent/platformio-espressif32-sunton, and are the 3.5" CYD's, but the screen
+  is another, so the 3.5" build garbles it.
 - LCDWIKI's ESP32-32E boards, also sold by Elegoo: the 2.8" E32R28T takes the 2.8" CYD build and the
   3.5" E32R35T the 3.5" one, the screen and the touch are on the same pins. Only the LED's red is on
   another pin, see The LED.
@@ -189,7 +195,8 @@ smaller letters and its list of the nearest planes without their heights.
 - **Drag the rim** to turn the map: match it to the way the screen stands. Back near north it snaps to
   north up.
 - **Drag inside** to zoom: away from home in, toward home out. BOOT steps through 5, 10, 25, 50, 100 and 200.
-- **The look**, top right, goes round RADAR, MAP, CLASSIC and WEATHER.
+- **The look**, top right, goes round RADAR, MAP, CLASSIC and WEATHER: its right half to the next one, its
+  left half back to the one before. An arrow at each end says which way.
 - **The three dots**, in the corner, take the panel away: the scope moves to the middle of the screen. A
   picked plane brings the panel back while it is picked, and the dots take it away again with the plane.
   Tapped once more, they bring it back to stay. The board remembers which way it was left; on the site
@@ -272,6 +279,12 @@ smaller letters and its list of the nearest planes without their heights.
   The page asks Open-Meteo for the same forecast itself, from the browser, and only while that look is
   up. The board's VIEW tab there has the look, the page that is up, the warnings and the units. A page
   turned on the board turns on the site's screen too, and the other way round.
+- SET, VIEW, **WEATHER FOR** and **LOOK FOR**: the weather and the look take turns by themselves.
+  WEATHER FOR is how long the weather stays (off, 1, 2, 3, 5 or 10 minutes), LOOK FOR how long the look
+  you chose stays before it comes again (1, 2, 3, 5, 10, 15, 30 or 60 minutes). The weather comes on its
+  dial and goes back to the look it came from: RADAR, MAP or CLASSIC. A touch, BOOT, a picked plane or
+  another page starts the count again, so it never turns away from what you are doing. Off at first; the
+  site's VIEW tab has both.
 
 ### Weather warnings
 
@@ -298,9 +311,10 @@ smaller letters and its list of the nearest planes without their heights.
 
 - Tabs on the bar: **VIEW** the range, map up, the screen upside down, its BACKLIGHT (100%, 50%,
   25% or 10%) and NIGHT, a dimmer light from dusk till dawn at home (both on the boards whose light
-  turns down), labels, colours, the look, the map, the map's names and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
+  turns down), labels, colours, the look, the weather and the look taking turns, the map, the map's names and the touch alignment; **DATA** planes on the ground shown or hidden, the watch list, where the
   planes come from, home, the WiFi, the weather's warnings and ABOUT; **UNITS** the distance, the height and the
-  weather's; **RADAR** the radar look's options; **LED** the light on the back (2.8" and 3.5" CYD).
+  weather's; **RADAR** the radar look's options; **LED** what lights the LED and the look's button (on the
+  boards with no LED the tab is **ALARM**, on the round glass these rows are under DATA).
 - **The gear** under the scope opens the RADAR tab. On the round glass these rows and the units are under VIEW. All of it
   is off until you turn it on, and all of it is for the radar look only:
   - **LOWEST** and **HIGHEST**: only planes between these two heights. The picked plane stays.
@@ -370,7 +384,7 @@ smaller letters and its list of the nearest planes without their heights.
 
 ### The LED
 
-- The 2.8" and 3.5" CYD have an RGB LED on the back, the ES3C28P and the NM-CYD-C5 a WS2812. SET's LED
+- The 2.8", 3.2" and 3.5" CYD have an RGB LED on the back, the ES3C28P and the NM-CYD-C5 a WS2812. SET's LED
   tab has a row for each thing that lights it, ON or OFF: **SOS** red and blinking fast, an emergency
   squawk (7500, 7600, 7700) round home; **WEATHER** yellow and slow, a weather warning comes;
   **IN RANGE** green, a watched plane comes; **TAKE-OFF** blue;
@@ -382,6 +396,12 @@ smaller letters and its list of the nearest planes without their heights.
 - **RED ON**, the CYDs only: GPIO 4 or GPIO 22. The red one is on GPIO 4 on the CYD and on GPIO 22 on
   LCDWIKI's (and Elegoo's) ESP32-32E boards, and nothing on the board tells which. No red in the test: tap
   it, the test runs again on the other pin.
+- **ON SCREEN**: what lights the LED lights the screen too, in the same colour. The look's button at the
+  top right fills with it and blinks with it, its name in dark letters; the round glass lights its rim
+  instead. On by itself, so the CYDs whose LED is on the back say it at the front. A blink shorter than
+  0.4 s is 0.4 s on the screen, as the big screens draw a few times a second. A touch puts out both.
+- The boards with no LED have the same rows on an **ALARM** tab (on the round glass under DATA), the screen
+  alone, with no BRIGHTNESS, TEST or RED ON. The e-paper screens have none: paper cannot blink.
 - The site's step 2 has a few ready sets of them, the brightness, how long and the red one's pin.
 
 ### ABOUT and a new version
@@ -406,7 +426,7 @@ smaller letters and its list of the nearest planes without their heights.
   Wrong colours or a mirrored picture: press **BOOT** in the first seconds after power on. It goes v2,
   v1 (micro USB), v3 (ST7789) and keeps the one you stop at.
 - The ES3C28P has the same three and starts as v2 too. The NM-CYD-C5 has two: RGB first, then BGR, for
-  red and blue swapped. The CrowPanel Advance and the ZLX-ESP32-2 have the same two, BGR first. The 5" boards have them too,
+  red and blue swapped, and so has the 3.2" CYD. The CrowPanel Advance and the ZLX-ESP32-2 have the same two, BGR first. The 5" boards have them too,
   RGB first.
 
 ### The round glass
@@ -468,7 +488,7 @@ The firmware is ESP-IDF 5.5. The screen code in `core/` is plain C, the same fil
 and a PC preview.
 
 - `firmware/BUILD.BAT <screen> [COMx]` builds one screen's firmware (and flashes it to COMx). Screens:
-  `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
+  `ili9341` (2.8" CYD, the default), `st7796` (3.5" CYD), `esp2432s032` (3.2" CYD), `gc9a01` (round), `ili9486` (RPi LCD),
   `es3c28p`, `nmcydc5`, `zlx2`, `crowadv28`, `crowadv50`, `crow50`, `jc8048w550`, `tab5`, `esp4827s043`, `crow70`,
   `wave7`, `wave7b`, `jc8012`. Each screen has its own build folder and sdkconfig.
 - `firmware/build.sh <screen> [port]` does the same on macOS and Linux for `wave7`, `wave7b`, `jc8012`,
@@ -532,7 +552,8 @@ the way a shell works on files, and a line typed there acts on the live board at
   MAC when two are alike. `use NAME` shows one, `use all` all of them.
 - `set NAME=VALUE ...` on the board on show, `--board NAME` on another, `--all` on every one: theme, look,
   range, vectors, clock, block, conflict, flip, backlight, night, alerts, names, temp, pressure, wind, rain,
-  wxpage. As many at once as you like: `set look=radar theme=amber backlight=25 --all`.
+  wxpage, wx_for, look_for, led_screen. As many at once as you like: `set look=radar theme=amber backlight=25 --all`,
+  `set wx_for=1 look_for=3`.
 - `home PLACE` moves a board's home to a town, a postcode or a point: `home Leuven`.
 - `wifi` lists the networks a board keeps, `wifi add NETWORK` asks for the password, `wifi forget NETWORK`.
 - `screen V2` (or V1, V3, RGB, BGR) says which screen a board was sold with.
@@ -560,7 +581,8 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   since 1970, 0 not known), `led`, `led_level`, `led_hold`, `led_near`, `led_red`, `version`, `newest` (the site's, `""` not heard
   yet), `uptime` and `ran` in seconds, `reset`, `help` (counted on the map of boards: 0 never asked, 1 yes,
   2 no), `bare` (1 the radar and the weather without their panel), `alerts` (the weather's warnings shown), `names`
-  (the map's names on the dark looks), the weather's
+  (the map's names on the dark looks), `wx_for` and `look_for` (the weather and the look taking turns, in
+  minutes), `led_screen` (1 the LED's events light the screen too; not on e-paper), the weather's
   units `temp_unit`, `pressure_unit`, `wind_unit`, `rain_unit` and `cc`, home's country by its two letters (`""` not known
   yet), `backlight` and `night` where the light turns down, and `screen` on the 2.8" boards. Never the password, never the key.
 - `OWLOS SET {...}` with any of `ssid`, `pass`, `key`, `lat`, `lon`, `place`, `country`, `src` (`free` or
@@ -574,11 +596,13 @@ The site talks to the board over the USB cable at 115200 baud, a line each way. 
   2 high), `led_hold` (0 till touched, 1 10 s, 2 while it lasts), `led_red` (4 or 22, the red one's GPIO),
   `led_test` (1: red, green, blue once), `help` (0, 1 or 2, as in GET), `bare` (1 the radar and the weather
   without their panel, 0 with it), `alerts` (the weather's warnings shown, added up: 1 storm, 2 pressure, 4 air,
-  8 radiation), `names` (the map's names on the dark looks: 0 soft, 1 thin, 2 bold), the weather's units, each 0
+  8 radiation), `names` (the map's names on the dark looks: 0 soft, 1 thin, 2 bold), `wx_for` (the weather
+  by itself, minutes: 0 off, 1, 2, 3, 5 or 10), `look_for` (the look between, minutes: 1, 2, 3, 5, 10, 15, 30
+  or 60), `led_screen` (1 on, 0 off), the weather's units, each 0
   home's country's own: `temp_unit` (1 C, 2 F), `pressure_unit` (1 hPa,
   2 mmHg, 3 inHg), `wind_unit` (1 km/h, 2 m/s, 3 mph, 4 knots), `rain_unit` (1 mm, 2 inches),
   `backlight` (0 100%, 1 50%, 2 25%, 3 10%), `night` (0 off, else a step as `backlight`),
-  `screen` (0 v1, 1 v2, 2 v3; on the NM-CYD-C5, the ZLX-ESP32-2, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
+  `screen` (0 v1, 1 v2, 2 v3; on the 3.2" CYD, the NM-CYD-C5, the ZLX-ESP32-2, the CrowPanel Advance and the 5" boards 0 RGB, 1 BGR).
   What is left out stays as it is. Answered with `OWLOS OK` or `OWLOS ERR <why>`.
 
 ## Data and licences

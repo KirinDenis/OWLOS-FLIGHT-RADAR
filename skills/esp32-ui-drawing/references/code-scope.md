@@ -737,9 +737,8 @@ static void corners(ui_t *u, canvas_t *cv)
         font_text_clip(cv, &FONT_SMALL, 9, 6, where, C_FOCUS, 255, SCX - 40);
         sky_status(u, buf, sizeof buf, &bad);
         micro_text(cv, 9, 18, buf, bad ? C_ALARM : C_DIM, 230, 1);
-        // the look: a tap goes to the next one
-        button(cv, look_x(u), LOOK_Y, look_w(u), LOOK_H, LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0],
-               u->t_down && !u->t_moved && u->t_hit == HIT_LOOK ? 2 : 0);
+        // the look: a tap on its right half goes to the next one, on its left half to the one before (0.17)
+        look_button(u, cv, LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0], 0);
         const char *up = u->cfg.up ? buf : "NORTH UP";
         if (u->cfg.up) snprintf(buf, sizeof buf, "UP %03d*", u->cfg.up);
         micro_text(cv, PX - 9 - micro_width(up, 1), LOOK_Y + LOOK_H + 4, up, u->cfg.up ? C_FOCUS : C_QUIET, 235, 1);

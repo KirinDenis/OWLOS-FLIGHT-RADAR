@@ -22,6 +22,15 @@ except the 2.8" CYD, which has its own pins.
   compatible). ESP32-2432S024N: no touch.
 - ESP32-2432S032R: 3.2" ST7789 IPS, RGB, BL 27, XPT2046 on the LCD bus.
 - ESP32-2432S032C: the same with GT911 at 0x5D. ESP32-2432S032N: no touch.
+- The 3.2" was asked for 2026-11-25, its raw JSONs read that day [docs]: every pin is the 3.5" ESP32-3248S035's (LCD,
+  backlight 27, XPT2046 CS 33 and pen 36, GT911 on 33/32 with reset 25 and interrupt 21), only the screen differs: ST7789
+  240x320 against ST7796 480x320, and rzeldent drives it in SPI mode 3 at 24 MHz. Its owner flashed the 3.5" build on
+  it: a garbled, flickering screen (their report). Built the same day in OWLOS Flight Radar 0.17 as `esp2432s032`
+  (board.h DISPLAY_2432S032_320x240): the 3.5"'s pins and touch, the 2.8" CYD's 320x240 picture and memory, ST7789 inverted,
+  RGB first, MADCTL 0xA0, SPI mode 0 at 40 MHz [built]. Not run on one yet: colours, the upright landscape, 40 MHz to learn.
+  2026-11-26 the maker's own pack (pan.jczn1688.com, "ESP32 module", 3.2inch_ESP32-2432S032.zip) confirmed every pin by
+  its schematics [docs], and its Arduino_GFX demos drive the ST7789 in SPI mode 3 with MADCTL 0xA0, RGB, inverted: the
+  build moved to mode 3 (`LCD_SPI_MODE`). Details: [esp2432s032](boards/esp2432s032.md).
 - Elecrow CrowPanel 2.8 and 2.4 ESP32 HMI, the plain ones: classic ESP32, ILI9341V, XPT2046 on the LCD bus, CS 33.
 - Elecrow CrowPanel Advance 2.4: S3, Elecrow's examples are shared with the 2.8's ([crowadv28](boards/crowadv28.md)).
 - ESP32-2424S012C: round 1.2", ESP32-C3, 4 MB, GC9A01 at 80 MHz, BGR, SCLK 6, MOSI 7, CS 10, DC 2, no MISO. Backlight is plain

@@ -49,6 +49,12 @@ void store_save_units(const wx_units_t *w);
 /* SET's MAP NAMES (core/ui.h NAMES_*): how bright a letter's soft edge is on the dark maps, SOFT till set. kept by itself */
 int  store_load_names(void);
 void store_save_names(int style);
+/* SET's WEATHER FOR and LOOK FOR (core/ui.c ui_turn), minutes: the weather's turns off till set. kept by themselves */
+void store_load_turns(uint8_t *wx, uint8_t *look);
+void store_save_turns(int wx, int look);
+/* SET's ON SCREEN (core/ui.h screen_alarm): the LED's events light the screen too. on till set */
+int  store_load_screen_alarm(void);
+void store_save_screen_alarm(int on);
 /* how long this run has lasted, s, saved once a minute: the next start says how long the run
  * before it was, whatever ended it (a reset by the USB line or a power cut too) */
 uint32_t store_load_ran(void);

@@ -6,6 +6,35 @@ The site keeps the firmware of each version: a new number here keeps the one bef
 A version marked (beta) is offered on the site beside the stable one, which stays what the site flashes
 unless the beta is picked. Only a board that runs a beta hears of a newer beta.
 
+## 0.17 (beta)
+
+- A build for the 3.2" CYD, ESP32-2432S032 (`esp2432s032`): ESP32, ST7789 320x240 IPS, in its R, C and N
+  versions. Experimental: the pins come from the maker's schematics and demos and from the board files in
+  rzeldent/platformio-espressif32-sunton, and it has not run on one yet. They are the 3.5" CYD's pins
+  with another screen, so the 3.5" build gave a garbled, flickering picture on it. RGB first, BGR behind
+  BOOT, inverted as an IPS panel is, the screen's bus in SPI mode 3 as the maker drives it. The stable has
+  no build for it, so the site flashes it the beta.
+- The look's button goes both ways (an owner's idea): its right half to the next look, its left half back
+  to the one before, an arrow at each end. Going back is one tap, not a whole round. The button is a
+  little wider, to the left, so WEATHER and CLASSIC keep their size beside the arrows. Boards without
+  touch keep the button as it was.
+- The weather and the look take turns by themselves (the same owner's idea): SET, VIEW, WEATHER FOR (off,
+  1, 2, 3, 5 or 10 minutes) and LOOK FOR (1 to 60 minutes). The weather comes on its dial for its
+  minutes, then the look that was up, RADAR, MAP or CLASSIC, for its own, and round again. A touch,
+  BOOT, a key, a picked plane or another page starts the count again; a look changed by hand, on the
+  board or from the site, is the one it goes back to. Without a forecast yet the look stays. Off until
+  set; GET and SET `wx_for` and `look_for`, the site's VIEW tab and its console's `set` too. Kept on
+  the board by themselves: a board flashed back to an older version keeps every other setting.
+- The LED lights again. Since 0.16 a counter named like the brightness hid it: each event's colour went
+  out at its place in the order instead, an emergency at nothing and the rest at 1 to 6 of 255, and
+  only TEST lit it.
+- What lights the LED lights the screen too (an owner's idea: the CYDs' LED is on the back, out of
+  sight): the look's button fills with the event's colour and blinks with it, its name in dark letters;
+  the round glass lights its rim. SET, LED, ON SCREEN, on by itself; GET and SET `led_screen`, a chip
+  on the site's VIEW tab and its console's `set`. The boards with no LED get the same rows on an ALARM
+  tab (the round glass under DATA), so their screens say an emergency, a watched plane or a weather
+  warning now too. A blink shorter than 0.4 s is 0.4 s on a screen. Not on e-paper.
+
 ## 0.16.2 (beta)
 
 - The planes move smoothly. The board hears where each plane is every 5 seconds from the free networks

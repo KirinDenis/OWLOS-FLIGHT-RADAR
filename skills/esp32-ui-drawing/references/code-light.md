@@ -1,8 +1,13 @@
 # The RGB LED, complete
 
-`core/light.h`, `core/light.c` and `firmware/main/led.c` from OWLOS-FLIGHT-RADAR. Status: `light.c`
-is PC-tested. The CYD's three pins were checked by a person looking at the LED (the agent cannot see
-it). The WS2812 path is built, not run on a board.
+`core/light.h`, `core/light.c` and `firmware/main/led.c` from OWLOS-FLIGHT-RADAR (0.17). Status: `light.c`
+is PC-tested, each event at each level and the screen's blink (`light_shown`). The CYD's three pins were checked by
+a person looking at the LED (the agent cannot see it). The WS2812 path is built, not run on a board.
+
+The trap this file once carried into 0.16: `light_colour` kept the brightness in `k` and then looped with
+`for (int k = 0; ...)`, which hid it. Each colour went out times its place in `ORDER`, an emergency times 0, and
+only TEST lit the LED [measured on the PC, 2026-11-27]. A loop counter never takes the name of a value outside
+it (MSVC `/W4` C4456, GCC `-Wshadow`), and a PC test asks each event for its colour.
 
 ## core/light.h
 
@@ -17,8 +22,9 @@ it). The WS2812 path is built, not run on a board.
 #include <stdint.h>
 #include "sky.h"
 
-/* in the order they win when several are lit */
-enum { LIGHT_SOS, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA, LIGHT_EVENTS };
+/* in the order they are kept and sent (light_cfg_t.on, the site's "led" bits): a new one goes last.
+ * which wins when several are lit is light.c's ORDER. WEATHER: a weather warning came (core/weather.h) */
+enum { LIGHT_SOS, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA, LIGHT_WEATHER, LIGHT_EVENTS };
 enum { LIGHT_LOW, LIGHT_MID, LIGHT_HIGH, LIGHT_LEVELS };
 enum { LIGHT_TOUCH, LIGHT_10S, LIGHT_WHILE, LIGHT_HOLDS };     /* till touched (a minute at most), 10 s, while it lasts */
 #define LIGHT_NEARS 4               /* how close is near: 1, 2, 5 or 10 of the distance unit */
@@ -27,7 +33,7 @@ enum { LIGHT_TOUCH, LIGHT_10S, LIGHT_WHILE, LIGHT_HOLDS };     /* till touched (
  * picks the one that is red in the LED test */
 enum { LIGHT_RED_4, LIGHT_RED_22, LIGHT_REDS };
 
-#define LIGHT_CFG_VERSION 3
+#define LIGHT_CFG_VERSION 4         /* 4: WEATHER. firmware/main/store.c reads 3 and 2 over the defaults */
 #define LIGHT_TEST_MS 4500u         /* red, green, blue, 1.5 s each */
 
 typedef struct {
@@ -60,6 +66,10 @@ void light_touch(light_t *l);                                 /* the screen was 
 void light_test(light_t *l, uint32_t now);                    /* red, green, blue in turn */
 /* what the LED shows now, 0..255 a colour, the brightness in it */
 void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t rgb[3]);
+/* the same on the screen (SET's ON SCREEN, core/ui.c ui_alarm): the event in the lit part of its blink, -1 none or
+ * dark. the blink is slower where the LED's is short, the test is the LED's alone */
+int  light_shown(const light_t *l, const light_cfg_t *c, uint32_t now);
+void light_screen_rgb(int ev, uint8_t rgb[3]);                /* an event's colour on a screen */
 ```
 
 ## core/light.c
@@ -78,7 +88,12 @@ static const struct { uint8_t r, g, b; uint16_t on_ms, period_ms; } LOOK[LIGHT_E
     [LIGHT_DOWN]   = { 0, 255, 255, 700, 1400 },     // cyan
     [LIGHT_NEAR]   = { 255, 255, 255, 300, 2000 },   // white, a short blink now and then
     [LIGHT_NODATA] = { 255, 80, 0, 1000, 1000 },     // amber
+    [LIGHT_WEATHER] = { 255, 170, 0, 1000, 2000 },   // yellow, slow: no data's amber does not blink
 };
+
+/* which wins when several are lit: an emergency, a weather warning, the watched planes, any plane
+ * near, no data last */
+static const uint8_t ORDER[LIGHT_EVENTS] = { LIGHT_SOS, LIGHT_WEATHER, LIGHT_RANGE, LIGHT_UP, LIGHT_DOWN, LIGHT_NEAR, LIGHT_NODATA };
 
 static const uint8_t LEVEL[LIGHT_LEVELS] = { 12, 64, 255 };   // the CYD's LED is bright: low is for the night
 static const uint8_t NEAR_UNITS[LIGHT_NEARS] = { 1, 2, 5, 10 };
@@ -88,7 +103,7 @@ void light_defaults(light_cfg_t *c)
 {
     memset(c, 0, sizeof *c);
     c->version = LIGHT_CFG_VERSION;
-    c->on[LIGHT_SOS] = c->on[LIGHT_RANGE] = c->on[LIGHT_UP] = c->on[LIGHT_DOWN] = 1;
+    c->on[LIGHT_SOS] = c->on[LIGHT_RANGE] = c->on[LIGHT_UP] = c->on[LIGHT_DOWN] = c->on[LIGHT_WEATHER] = 1;
     // any plane near and no data: off. next to an airport the one is on all day, a fresh board has the other
     c->level = LIGHT_MID;
     c->hold = LIGHT_TOUCH;
@@ -154,6 +169,14 @@ static int lit(const light_t *l, const light_cfg_t *c, int ev, uint32_t now)
     return age < 60000u;                                // till touched, a minute at most
 }
 
+// the one that wins of those lit now (ORDER), -1 none
+static int winner(const light_t *l, const light_cfg_t *c, uint32_t now)
+{
+    for (int i = 0; i < LIGHT_EVENTS; i++)
+        if (lit(l, c, ORDER[i], now)) return ORDER[i];
+    return -1;
+}
+
 void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t rgb[3])
 {
     const int k = LEVEL[c->level < LIGHT_LEVELS ? c->level : LIGHT_MID];
@@ -162,14 +185,40 @@ void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t 
         rgb[(now - l->test) / 1500u] = (uint8_t)k;
         return;
     }
-    for (int ev = 0; ev < LIGHT_EVENTS; ev++) {
-        if (!lit(l, c, ev, now)) continue;
-        if ((now - l->since[ev]) % LOOK[ev].period_ms >= LOOK[ev].on_ms) return;   // the dark part of its blink
-        rgb[0] = (uint8_t)(LOOK[ev].r * k / 255);
-        rgb[1] = (uint8_t)(LOOK[ev].g * k / 255);
-        rgb[2] = (uint8_t)(LOOK[ev].b * k / 255);
-        return;
-    }
+    const int ev = winner(l, c, now);
+    /* the brightness is k. 0.16 named its loop's counter k too, which hid it: each colour went out times its
+     * place in ORDER, an emergency times 0, the rest 1..6 of 255, and only TEST lit the LED (found 2026-11-27) */
+    if (ev < 0 || (now - l->since[ev]) % LOOK[ev].period_ms >= LOOK[ev].on_ms) return;   // none, or the dark part of its blink
+    rgb[0] = (uint8_t)(LOOK[ev].r * k / 255);
+    rgb[1] = (uint8_t)(LOOK[ev].g * k / 255);
+    rgb[2] = (uint8_t)(LOOK[ev].b * k / 255);
+}
+
+/* the screen's blink: a screen drawn a few times a second (the big ones' background) misses a short one, so
+ * the lit part is 400 ms at least and so is the dark part, unless the LED's has none (no data's amber) */
+int light_shown(const light_t *l, const light_cfg_t *c, uint32_t now)
+{
+    const int ev = winner(l, c, now);
+    if (ev < 0) return -1;
+    const uint32_t steady = LOOK[ev].on_ms >= LOOK[ev].period_ms;
+    const uint32_t on = LOOK[ev].on_ms < 400u ? 400u : LOOK[ev].on_ms;
+    const uint32_t period = steady ? on : (LOOK[ev].period_ms < on + 400u ? on + 400u : LOOK[ev].period_ms);
+    return (now - l->since[ev]) % period < on ? ev : -1;
+}
+
+void light_screen_rgb(int ev, uint8_t rgb[3])
+{
+    /* as the LED, made to read on a screen: the LED's blue is too dark behind dark letters, its white is the
+     * screens' own */
+    static const uint8_t S[LIGHT_EVENTS][3] = {
+        [LIGHT_SOS] = { 255, 56, 56 },   [LIGHT_RANGE] = { 70, 235, 100 }, [LIGHT_UP] = { 90, 150, 255 },
+        [LIGHT_DOWN] = { 40, 225, 235 }, [LIGHT_NEAR] = { 242, 246, 252 }, [LIGHT_NODATA] = { 255, 135, 20 },
+        [LIGHT_WEATHER] = { 255, 205, 40 },
+    };
+    const int e = ev >= 0 && ev < LIGHT_EVENTS ? ev : LIGHT_SOS;
+    rgb[0] = S[e][0];
+    rgb[1] = S[e][1];
+    rgb[2] = S[e][2];
 }
 ```
 

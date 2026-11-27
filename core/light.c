@@ -92,6 +92,14 @@ static int lit(const light_t *l, const light_cfg_t *c, int ev, uint32_t now)
     return age < 60000u;                                // till touched, a minute at most
 }
 
+// the one that wins of those lit now (ORDER), -1 none
+static int winner(const light_t *l, const light_cfg_t *c, uint32_t now)
+{
+    for (int i = 0; i < LIGHT_EVENTS; i++)
+        if (lit(l, c, ORDER[i], now)) return ORDER[i];
+    return -1;
+}
+
 void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t rgb[3])
 {
     const int k = LEVEL[c->level < LIGHT_LEVELS ? c->level : LIGHT_MID];
@@ -100,13 +108,38 @@ void light_colour(const light_t *l, const light_cfg_t *c, uint32_t now, uint8_t 
         rgb[(now - l->test) / 1500u] = (uint8_t)k;
         return;
     }
-    for (int k = 0; k < LIGHT_EVENTS; k++) {
-        const int ev = ORDER[k];
-        if (!lit(l, c, ev, now)) continue;
-        if ((now - l->since[ev]) % LOOK[ev].period_ms >= LOOK[ev].on_ms) return;   // the dark part of its blink
-        rgb[0] = (uint8_t)(LOOK[ev].r * k / 255);
-        rgb[1] = (uint8_t)(LOOK[ev].g * k / 255);
-        rgb[2] = (uint8_t)(LOOK[ev].b * k / 255);
-        return;
-    }
+    const int ev = winner(l, c, now);
+    /* the brightness is k. 0.16 named its loop's counter k too, which hid it: each colour went out times its
+     * place in ORDER, an emergency times 0, the rest 1..6 of 255, and only TEST lit the LED (found 2026-11-27) */
+    if (ev < 0 || (now - l->since[ev]) % LOOK[ev].period_ms >= LOOK[ev].on_ms) return;   // none, or the dark part of its blink
+    rgb[0] = (uint8_t)(LOOK[ev].r * k / 255);
+    rgb[1] = (uint8_t)(LOOK[ev].g * k / 255);
+    rgb[2] = (uint8_t)(LOOK[ev].b * k / 255);
+}
+
+/* the screen's blink: a screen drawn a few times a second (the big ones' background) misses a short one, so
+ * the lit part is 400 ms at least and so is the dark part, unless the LED's has none (no data's amber) */
+int light_shown(const light_t *l, const light_cfg_t *c, uint32_t now)
+{
+    const int ev = winner(l, c, now);
+    if (ev < 0) return -1;
+    const uint32_t steady = LOOK[ev].on_ms >= LOOK[ev].period_ms;
+    const uint32_t on = LOOK[ev].on_ms < 400u ? 400u : LOOK[ev].on_ms;
+    const uint32_t period = steady ? on : (LOOK[ev].period_ms < on + 400u ? on + 400u : LOOK[ev].period_ms);
+    return (now - l->since[ev]) % period < on ? ev : -1;
+}
+
+void light_screen_rgb(int ev, uint8_t rgb[3])
+{
+    /* as the LED, made to read on a screen: the LED's blue is too dark behind dark letters, its white is the
+     * screens' own */
+    static const uint8_t S[LIGHT_EVENTS][3] = {
+        [LIGHT_SOS] = { 255, 56, 56 },   [LIGHT_RANGE] = { 70, 235, 100 }, [LIGHT_UP] = { 90, 150, 255 },
+        [LIGHT_DOWN] = { 40, 225, 235 }, [LIGHT_NEAR] = { 242, 246, 252 }, [LIGHT_NODATA] = { 255, 135, 20 },
+        [LIGHT_WEATHER] = { 255, 205, 40 },
+    };
+    const int e = ev >= 0 && ev < LIGHT_EVENTS ? ev : LIGHT_SOS;
+    rgb[0] = S[e][0];
+    rgb[1] = S[e][1];
+    rgb[2] = S[e][2];
 }

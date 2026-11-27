@@ -31,6 +31,13 @@ Sureness words as in [SKILL.md](../SKILL.md).
   itself since it runs before the screen); different settings on one timer are not. Flight Radar gives the LED
   timer 1.
 - Not driven by the radar: the ZLX-ESP32-2's green LED, the JC8012's WS2812, the S3 RGB boards' (they have none).
+- **On the back, out of sight**: on the 2.8", 3.2" and 3.5" CYDs the LED faces away from the person [owner, and the
+  boards here]; on others it is on the front. Flight Radar 0.17 lights the screen too, the look's button in the
+  LED's colour (ui-drawing's touch-ux-and-controls.md, "A light out of sight").
+- **0.16's LED was dark for every event** [measured on the PC, 2026-11-27]: `light_colour` kept the brightness in
+  `k`, then looped `for (int k = 0; ...)` over the order, which hid it. Each colour times its place: SOS 0, the
+  rest 1 to 6 of 255. TEST, before the loop, lit it, so a look at the test said all was well. Ask each event for its
+  colour at each level in a PC test, not only the test on the board.
 
 ## led.c, all of it
 

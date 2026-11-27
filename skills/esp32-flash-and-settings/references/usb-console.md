@@ -45,7 +45,8 @@ The list of settings is in the README, so scripts can use them. The Flight Radar
   `vectors`, `beam_step`, `clock`, `block`, `autopilot`, `lost`, `conflict`, `fl_lo`, `fl_hi`, `utc` (seconds
   since 1970, 0 not known), `led`, `led_level`, `led_hold`, `led_near`, `led_red`, `version`, `newest` (the
   site's, `""` not heard yet), `uptime` and `ran` in seconds, `reset`, `help` (counted on the map of boards: 0
-  never asked, 1 yes, 2 no), `bare`, `alerts`, `names`, the weather units `temp_unit`, `pressure_unit`,
+  never asked, 1 yes, 2 no), `bare`, `alerts`, `names`, `wx_for` and `look_for` (minutes), `led_screen` (the
+  LED's events on the screen too; not on e-paper), the weather units `temp_unit`, `pressure_unit`,
   `wind_unit`, `rain_unit`, `cc` (home's country, `""` not known yet), `backlight`, `night`, and `screen` on
   the boards sold with several screens.
 - SET: any of `ssid`, `pass`, `forget` (a network out of the five kept), `key`, `lat`, `lon`, `place`,
@@ -54,7 +55,8 @@ The list of settings is in the README, so scripts can use them. The Flight Radar
   `fl_hi` flight levels, 0 no limit), `watch` (`""` empties it), `led` (bits: 1 SOS, 2 in range, 4 take-off,
   8 landing, 16 any near, 32 no data, 64 weather), `led_near` (1, 2, 5, 10), `led_level` (0 to 2), `led_hold`
   (0 till touched, 1 10 s, 2 while it lasts), `led_red` (4 or 22), `led_test` (1: run it once), `help`,
-  `bare`, `alerts` (bits: 1 storm, 2 pressure, 4 air, 8 radiation), `names` (0 to 2), the four units (each 0:
+  `bare`, `alerts` (bits: 1 storm, 2 pressure, 4 air, 8 radiation), `names` (0 to 2), `wx_for` (0 off, 1, 2, 3, 5, 10) and `look_for` (1, 2, 3, 5, 10, 15, 30, 60), minutes,
+  each only one of its steps, `led_screen` (1 on, 0 off), the four units (each 0:
   home's country's own), `backlight` (0 100%, 1 50%, 2 25%, 3 10%), `night` (0 off, else a step), `screen` (0 v1,
   1 v2, 2 v3 on the 2.8" CYD; 0 RGB, 1 BGR on the boards sold with two screens).
 - A new home without `place` and `country`: the board asks OpenStreetMap what it is called.

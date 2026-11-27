@@ -25,6 +25,12 @@
 
 static const char *TAG = "lcd";
 
+/* the clock's idle level and edge (board.h). 0 on most; the 3.2" CYD's maker and rzeldent both
+ * drive its ST7789 in 3. 0 and 3 both sample on the rising edge */
+#ifndef LCD_SPI_MODE
+#define LCD_SPI_MODE 0
+#endif
+
 static esp_lcd_panel_io_handle_t s_io;
 static uint16_t *s_buf[2];                      // fill one while DMA sends the other
 static int s_k;                                 // which one is next
@@ -450,7 +456,7 @@ void disp_init(void)
         .pclk_hz = LCD_SPI_HZ,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
-        .spi_mode = 0,
+        .spi_mode = LCD_SPI_MODE,
         .trans_queue_depth = 4,
         .on_color_trans_done = on_strip_done,
     };

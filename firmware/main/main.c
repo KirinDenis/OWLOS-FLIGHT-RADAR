@@ -546,6 +546,12 @@ static volatile int      s_units_new;      // the site changed them: the screen 
 /* the map's names on the dark looks, SET's MAP NAMES or the site: NAMES_* (core/ui.h), kept like help */
 static uint8_t           s_names;          // store_load_names. under s_lock
 static volatile int      s_names_new;      // the site changed it: the screen takes it
+/* the weather and the look taking turns, SET's WEATHER FOR and LOOK FOR or the site: minutes (core/ui.c ui_turn) */
+static uint8_t           s_turn_wx, s_turn_look;   // store_load_turns. under s_lock
+static volatile int      s_turns_new;      // the site changed them: the screen takes them
+/* SET's ON SCREEN or the site's led_screen: the LED's events light the screen too (core/ui.h screen_alarm) */
+static uint8_t           s_screen_alarm = 1;   // store_load_screen_alarm. under s_lock
+static volatile int      s_screen_alarm_new;   // the site changed it: the screen takes it
 
 static const char *board_name(void);
 
@@ -1070,8 +1076,10 @@ static void say_cfg(void)
     /* static, and used only under the lock: the site's line and the screen both say this. a GET says it on
      * the console's task, 4 KB of stack, and this printf of fifty fields needs much of it: with these on
      * the stack too, a GET overflowed it and the board restarted (2026-11-18, the CYD and the 3.5") */
-    static char ssid[70], place[84], country[68], watch[WATCH_TEXT], dim[40], units[112], nets[NETS_KEPT * 72];
+    static char ssid[70], place[84], country[68], watch[WATCH_TEXT], dim[40], units[112], turns[64], nets[NETS_KEPT * 72];
     lock();
+    const int nt = snprintf(turns, sizeof turns, ",\"wx_for\":%d,\"look_for\":%d", s_turn_wx, s_turn_look);   // the weather's turns, minutes
+    if (!RADAR_EPAPER) snprintf(turns + nt, sizeof turns - (size_t)nt, ",\"led_screen\":%d", s_screen_alarm);   // and ON SCREEN: paper has none
     dim[0] = 0;
 #if RADAR_HAS_DIM
     snprintf(dim, sizeof dim, ",\"backlight\":%d,\"night\":%d", s_backlight, s_night);   // only where the light turns down: the site shows them then
@@ -1092,7 +1100,7 @@ static void say_cfg(void)
            "\"fl_lo\":%d,\"fl_hi\":%d,\"utc\":%u,"
            "\"led\":%d,\"led_level\":%d,\"led_hold\":%d,\"led_near\":%d,\"led_red\":%d,\"version\":\"%s\",\"newest\":\"%s\","
            "\"uptime\":%u,\"ran\":%u,\"reset\":\"%s\",\"screen\":%d,"
-           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d,\"alerts\":%d,\"names\":%d%s%s}\n",
+           "\"range\":%.2f,\"dist_unit\":%d,\"alt_unit\":%d,\"labels\":%d,\"help\":%d,\"bare\":%d,\"alerts\":%d,\"names\":%d%s%s%s}\n",
            json_esc(s_sec.ssid, ssid, sizeof ssid), nets, (double)s_cfg.lat, (double)s_cfg.lon,
            json_esc(s_cfg.place, place, sizeof place), json_esc(s_cfg.country, country, sizeof country),
            s_cfg.source == SRC_FR24 ? "fr24" : "free", s_sec.key[0] ? "true" : "false", s_cfg.up, s_cfg.flip,
@@ -1101,7 +1109,7 @@ static void say_cfg(void)
            (unsigned)net_utc(), led, s_light_cfg.level, s_light_cfg.hold,
            light_near_units(&s_light_cfg), light_red_gpio(&s_light_cfg), FLIGHT_VERSION, s_newest,
            (unsigned)(now_ms() / 1000u), (unsigned)s_ran_s, s_reset, s_screen,
-           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, s_names, dim, units);
+           (double)s_cfg.range, s_cfg.dist_unit, s_cfg.alt_unit, s_cfg.labels, s_help, s_bare, s_alerts, s_names, dim, units, turns);
     unlock();
 }
 
@@ -1120,6 +1128,8 @@ static const char *board_name(void)
     return "ili9341";
 #elif RADAR_DISPLAY == DISPLAY_ST7796_480x320
     return "st7796";
+#elif RADAR_DISPLAY == DISPLAY_2432S032_320x240
+    return "esp2432s032";
 #elif RADAR_DISPLAY == DISPLAY_ILI9486_480x320
     return "ili9486";
 #elif RADAR_DISPLAY == DISPLAY_GC9A01_240x240
@@ -1328,6 +1338,34 @@ static void on_line(const char *line)
         unlock();
         if (changed) {
             store_save_names((int)v);
+        }
+    }
+    /* the weather's turns from the site, minutes: each only a step of its own, saved only when they change */
+    {
+        double w;
+        const int has_wx = json_num(j, "wx_for", &w) && w >= 0 && w <= 60 && w == (int)w && ui_turn_step((int)w, 0, 1) >= 0;
+        const int has_look = json_num(j, "look_for", &v) && v >= 0 && v <= 60 && v == (int)v && ui_turn_step((int)v, 0, 0) >= 0;
+        if (has_wx || has_look) {
+            lock();
+            const uint8_t wx = has_wx ? (uint8_t)w : s_turn_wx, lk = has_look ? (uint8_t)v : s_turn_look;
+            const int changed = wx != s_turn_wx || lk != s_turn_look;
+            s_turn_wx = wx;
+            s_turn_look = lk;
+            s_turns_new = 1;
+            unlock();
+            if (changed) {
+                store_save_turns(wx, lk);
+            }
+        }
+    }
+    if (!RADAR_EPAPER && json_num(j, "led_screen", &v) && (v == 0 || v == 1)) {   // ON SCREEN, saved only when it changes
+        lock();
+        const int changed = (uint8_t)v != s_screen_alarm;
+        s_screen_alarm = (uint8_t)v;
+        s_screen_alarm_new = 1;
+        unlock();
+        if (changed) {
+            store_save_screen_alarm((int)v);
         }
     }
     {                                                  // the weather's units from the site, 0 home's country's own
@@ -2630,6 +2668,9 @@ static void ui_task(void *arg)
     s_ui.alerts = s_alerts;                            // the weather's warnings shown
     s_ui.units = s_units;                              // and its units
     s_ui.names = s_names;                              // the map's names on the dark looks
+    s_ui.turn_wx = s_turn_wx;                          // the weather and the look taking turns
+    s_ui.turn_look = s_turn_look;
+    s_ui.screen_alarm = s_screen_alarm;                // the LED's events on the screen too
     unlock();
     led_init(light_red_gpio(&s_ui.light));
     s_ui.map = &s_map;                                 // the fetch task makes it, the scope draws it
@@ -2788,6 +2829,26 @@ static void ui_task(void *arg)
             unlock();
             ui_set_cfg(&s_ui, &c);
             if (c.flip != was) screen_flip(c.flip);
+        }
+        if (s_turns_new) {                             // the site's: the weather's turns
+            lock();
+            s_ui.turn_wx = s_turn_wx;
+            s_ui.turn_look = s_turn_look;
+            s_turns_new = 0;
+            unlock();
+        }
+        if (s_screen_alarm_new) {                      // the site's: ON SCREEN
+            lock();
+            s_ui.screen_alarm = s_screen_alarm;
+            s_screen_alarm_new = 0;
+            unlock();
+        }
+        if (ui_turn(&s_ui, now, finger || ev || key, &cmd)) {   // the weather came by itself, or the look again
+            ESP_LOGI(TAG, "the look turned by itself: %d", s_ui.cfg.look);
+#if DISP_EPD
+            disp_full_next();                          // a whole new sheet, as a key's look
+            paper_due(now, 1);
+#endif
         }
         if (cmd.cfg) {
             int flipped = s_ui.cfg.flip != c.flip;
@@ -2955,12 +3016,26 @@ static void ui_task(void *arg)
             unlock();
             store_save_names(s_ui.names);
         }
+        if (cmd.turns) {                               // SET's WEATHER FOR and LOOK FOR
+            lock();
+            s_turn_wx = s_ui.turn_wx;
+            s_turn_look = s_ui.turn_look;
+            unlock();
+            store_save_turns(s_ui.turn_wx, s_ui.turn_look);
+        }
+        if (cmd.screen_alarm) {                        // SET's ON SCREEN
+            lock();
+            s_screen_alarm = s_ui.screen_alarm;
+            unlock();
+            store_save_screen_alarm(s_ui.screen_alarm);
+        }
         if (s_pick_new) {                              // tapped on the page: picked here too
             s_pick_new = 0;
             s_ui.sel = s_sel_told = s_pick;
         }
         if (page_there()) {                            // and what a finger did here goes there
-            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare || cmd.backlight || cmd.night || cmd.alerts || cmd.units || cmd.names)
+            if (cmd.cfg || cmd.opt || cmd.help || cmd.bare || cmd.backlight || cmd.night || cmd.alerts || cmd.units || cmd.names ||
+                cmd.turns || cmd.screen_alarm)
                 say_cfg();
             if (s_ui.sel != s_sel_told) {
                 s_sel_told = s_ui.sel;
@@ -2983,6 +3058,7 @@ static void ui_task(void *arg)
             s_light_test = 0;
         }
         light_colour(&s_light, &s_ui.light, now, rgb);
+        ui_alarm(&s_ui, light_shown(&s_light, &s_ui.light, now));   // and on the screen: the look's button, the round's rim
         int red = light_red_gpio(&s_ui.light);
         unlock();
         led_red(red);                                  // SET's RED ON row or the site moved it
@@ -3324,6 +3400,8 @@ void app_main(void)
     s_alerts = (uint8_t)store_load_alerts();
     store_load_units(&s_units);
     s_names = (uint8_t)store_load_names();
+    store_load_turns(&s_turn_wx, &s_turn_look);
+    s_screen_alarm = (uint8_t)store_load_screen_alarm();
     s_demo_on = !s_sec.ssid[0];                         // no WiFi set: the demo from the first frame
     sky_init(&s_sky, s_cfg.lat, s_cfg.lon);
     demo_init(&s_demo, range_km(&s_cfg), esp_random());

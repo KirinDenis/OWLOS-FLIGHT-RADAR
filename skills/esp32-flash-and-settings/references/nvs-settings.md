@@ -18,7 +18,11 @@ Namespace `"flight"`, one per project. Four kinds of thing:
 - **Strings on their own keys**: `"ssid"`, `"pass"`, `"key"` (the secrets), `"watch"`.
 - **The networks after the first**: blob `"nets"` (below).
 - **Small values on their own keys**, each "kept by itself": `"cal"` (touch alignment blob), `"screen"` (u8),
-  `"ran"` (u32), and one byte each for `"help"`, `"bare"`, `"backlight"`, `"night"`, `"alerts"`, `"names"`.
+  `"ran"` (u32), and one byte each for `"help"`, `"bare"`, `"backlight"`, `"night"`, `"alerts"`, `"names"`,
+  `"ledscreen"` (SET's ON SCREEN, the LED's events on the screen too; not 0 or 1 reads as on), and two for
+  `"turns"` (WEATHER FOR and LOOK FOR, minutes; one byte not a step of its own and both go back to the defaults,
+  off and 3). ON SCREEN belongs with the LED, yet it is not a fifth version of `"light"`: a board flashed back
+  reads a newer version as the defaults and loses all its LED settings.
 
 ```c
 typedef struct {
@@ -44,7 +48,7 @@ downgrade.
 
 Since the LED (0.3) every new group of settings went to a key of its own instead of into `fr_cfg_t`: the LED's
 blob, the radar options' (0.6), the networks (0.8), then `help`, `bare`, `backlight`, `night`, `alerts`,
-`units`, `names`. `fr_cfg_t` has stayed at version 4 since the ground filter in 0.3.
+`units`, `names`, `turns`, `ledscreen`. `fr_cfg_t` has stayed at version 4 since the ground filter in 0.3.
 
 - An older firmware flashed back finds everything it knows as it left it, and the new keys simply wait.
 - No migration is needed: a key that is not there reads as the default.

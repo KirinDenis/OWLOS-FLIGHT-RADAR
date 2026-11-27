@@ -72,7 +72,10 @@ cmd /c "<repo>\firmware\BUILD.BAT <screen> > %TEMP%\build.log 2>&1"
 ## Small things
 
 - A shell `rm -rf "$VAR"` is refused by a safety check. Copy over the old folder, or use a new folder.
-- Files for DOS need CRLF; the ESP32 repositories are LF in the working copy (git turns them on checkout).
+- Files for DOS need CRLF. The ESP32 repositories keep LF in git; a Windows checkout with `core.autocrlf` has CRLF
+  in the working copy, a few files LF, and an edit keeps each file's own. Git Bash's `sed -i` drops the CRs of a
+  CRLF file: two core files came back LF (measured). `unix2dos` puts them back; count them with
+  `tr -cd '\r' < f | wc -c` against `wc -l`, since `grep -c $'\r$'` miscounted an LF file as all CRLF (measured).
 - Comparing sizes before and after a change is the cheapest regression test there is.
 - A rig run through `powershell -File` loses the quotes in its JSON arguments: call it in the same process with
   `& script -Send @(...)` [measured].

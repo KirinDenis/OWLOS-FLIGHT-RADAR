@@ -1223,10 +1223,7 @@ static void sq_chrome(ui_t *u, canvas_t *cv)
         font_text_clip(cv, &FONT_SMALL, 7, 4, where, ink, 255, w - 8);
         micro_text(cv, 7, 17, buf, bad ? (classic ? CL_ALARM : C_ALARM) : dim, 230, 1);
         // top right: the look, the three dots, and under them north and how to zoom
-        const int lx = look_x(u), pressed = u->t_down && !u->t_moved && u->t_hit == HIT_LOOK;
-        const char *name = LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0];
-        if (classic) map_button(cv, lx, LOOK_Y, look_w(u), LOOK_H, name, pressed ? 2 : 0);
-        else button(cv, lx, LOOK_Y, look_w(u), LOOK_H, name, pressed ? 2 : 0);
+        look_button(u, cv, LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0], classic);
         panel_dots(u, cv, right - 6 - DOTS_W, LOOK_Y, DOTS_W);
         int nx = right - 9 - micro_width("NORTH UP", 1) - 9;
         sq_card(u, cv, nx - 4, LOOK_Y + LOOK_H + 4, right - 9 - nx + 6, RADAR_HAS_TOUCH ? 16 : 9);
@@ -1532,9 +1529,8 @@ static void corners(ui_t *u, canvas_t *cv)
         font_text_clip(cv, &FONT_SMALL, 9, 6, home_name(u), C_FOCUS, 255, cx - 40);
         sky_status(u, buf, sizeof buf, &bad);
         micro_text(cv, 9, 18, buf, bad ? C_ALARM : C_DIM, 230, 1);
-        // the look: a tap goes to the next one
-        button(cv, look_x(u), LOOK_Y, look_w(u), LOOK_H, LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0],
-               u->t_down && !u->t_moved && u->t_hit == HIT_LOOK ? 2 : 0);
+        // the look: a tap on its right half goes to the next one, on its left half to the one before
+        look_button(u, cv, LOOK_NAME[u->cfg.look < LOOKS ? u->cfg.look : 0], 0);
         const char *up = u->cfg.up ? buf : "NORTH UP";
         if (u->cfg.up) snprintf(buf, sizeof buf, "UP %03d*", u->cfg.up);
         micro_text(cv, edge - 9 - micro_width(up, 1), LOOK_Y + LOOK_H + 4, up, u->cfg.up ? C_FOCUS : C_QUIET, 235, 1);
@@ -2021,6 +2017,17 @@ void update_note(ui_t *u, canvas_t *cv)
     micro_text(cv, tx, ty, t, C_FOCUS, 250, 1);
 }
 
+#if RADAR_ROUND
+/* an alarm (ui_t.alarm) on the round glass: its look's name shows only with the menu, so the rim lights, a band
+ * round the edge of the glass outside the disc. that is dark on every look, the light map's too: no paper ink */
+static void alarm_rim(const ui_t *u, canvas_t *cv)
+{
+    uint32_t fill, ink;
+    if (!alarm_colours(u, 0, &fill, &ink)) return;
+    gfx_arc(cv, (float)SCX, (float)SCY, GFX_W / 2.0f - 3.0f, 0.0f, 360.0f, 4.0f, fill, 255);
+}
+#endif
+
 void main_draw(ui_t *u, canvas_t *cv)
 {
     if (u->cfg.look == LOOK_WEATHER) {                 // the next day on the dial (ui_weather.c), the same glass and panel
@@ -2028,6 +2035,7 @@ void main_draw(ui_t *u, canvas_t *cv)
         alert_chip(u, cv);                             // the round glass's: the others say it in the panel
 #if RADAR_ROUND
         if (menu_up(u)) round_menu(u, cv);
+        alarm_rim(u, cv);
 #endif
         ui_lap(u, cv, 4);
         return;
@@ -2085,6 +2093,7 @@ void main_draw(ui_t *u, canvas_t *cv)
         alert_chip(u, cv);
         update_note(u, cv);
     }
+    alarm_rim(u, cv);
 #else
     demo_card(u, cv);
     corners(u, cv);
@@ -2237,7 +2246,7 @@ int main_hit(const ui_t *u, int x, int y)
 #if RADAR_HAS_TOUCH
         if (y < (panel ? LOOK_Y + LOOK_H + 2 : ly) && x >= RDOTS_X - 4) return HIT_DOTS;
 #endif
-        if (y < ly && x >= lx - 12 && x < (panel ? PX - 2 : RDOTS_X - 4)) return HIT_LOOK;
+        if (y < ly && x >= lx - 12 && x < (panel ? PX - 2 : RDOTS_X - 4)) return look_hit(u, x);
         if (!panel || x < PX - 2) return HIT_WXPAGE;
         if (y >= BTN_Y - 2) {
             int b = (x - btn_x(0)) / (BTN_W + 3);
@@ -2270,10 +2279,10 @@ int main_hit(const ui_t *u, int x, int y)
 #endif
     if (square_look(u)) {
         if (y < ly && x >= lx + LOOK_W + 2 && x < view_right(u)) return HIT_DOTS;
-        if (y < ly && x >= lx - 10 && x < lx + LOOK_W + 2) return HIT_LOOK;
+        if (y < ly && x >= lx - 10 && x < lx + LOOK_W + 2) return look_hit(u, x);
         if (!panel_shown(u) || x < PX - 2) return HIT_SCOPE;   // the square map: all of it but the panel
     } else if (y < ly && x >= lx - 12 && x < (panel_shown(u) ? PX - 2 : RDOTS_X - 4)) {
-        return HIT_LOOK;
+        return look_hit(u, x);
     }
 #if RADAR_HAS_TOUCH
     if (!square_look(u) && in_box(x, y, GEAR_X(u) - 8, GEAR_Y - 8, GEAR_W + 16, GEAR_W + 16)) return HIT_GEAR;

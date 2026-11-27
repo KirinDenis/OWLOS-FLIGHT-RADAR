@@ -288,6 +288,40 @@ void store_save_names(int style)
     save_blob("names", &v, sizeof v);
 }
 
+/* SET's WEATHER FOR and LOOK FOR, two bytes of minutes. never set, or one of them not a step of its own: the
+ * weather's turns off and the look's ready for them, as a fresh board has them */
+void store_load_turns(uint8_t *wx, uint8_t *look)
+{
+    uint8_t v[2] = { 0, TURN_LOOK_DEFAULT };
+    if (!load_blob(NS, "turns", v, sizeof v) || ui_turn_step(v[0], 0, 1) < 0 || ui_turn_step(v[1], 0, 0) < 0) {
+        v[0] = 0;
+        v[1] = TURN_LOOK_DEFAULT;
+    }
+    *wx = v[0];
+    *look = v[1];
+}
+
+void store_save_turns(int wx, int look)
+{
+    const uint8_t v[2] = { (uint8_t)wx, (uint8_t)look };
+    save_blob("turns", v, sizeof v);
+}
+
+/* SET's ON SCREEN, one byte, not in the LED's blob (a new version of that one reads as the defaults on a board
+ * flashed back): never set, or not 0 or 1, it is on */
+int store_load_screen_alarm(void)
+{
+    uint8_t v = 1;
+    if (!load_blob(NS, "ledscreen", &v, sizeof v) || v > 1) v = 1;
+    return v;
+}
+
+void store_save_screen_alarm(int on)
+{
+    const uint8_t v = (uint8_t)(on != 0);
+    save_blob("ledscreen", &v, sizeof v);
+}
+
 uint32_t store_load_ran(void)
 {
     nvs_handle_t h;

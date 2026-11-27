@@ -949,8 +949,7 @@ static void corners(ui_t *u, canvas_t *cv, const weather_t *w)
         snprintf(v, sizeof v, "OPEN-METEO %02d:%02d", (int)h, (int)(fmodf(h, 1.0f) * 60.0f));   // its licence asks for the name
         micro_text(cv, 6, 6 + FONT_LINE_H(&FONT_SMALL), v, C_DIM, 220, 1);
     }
-    const int pressed = u->t_down && !u->t_moved && u->t_hit == HIT_LOOK;
-    button(cv, look_x(u), LOOK_Y, look_w(u), LOOK_H, "WEATHER", pressed ? 2 : 0);
+    look_button(u, cv, "WEATHER", 0);
 }
 
 /* the panel, row by row. a strip only words the rows it reaches: the panel is as tall as the screen,

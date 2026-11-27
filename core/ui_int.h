@@ -65,7 +65,11 @@ extern const theme_t *TH;
 #define BTN_Y    (GFX_H - 38)
 #define BTN_H    32
 #define BTN_W    ((PW - 13) / 3)
-#define LOOK_W   62           /* the look's button: top right of the scope, or of the square map */
+/* the look's button: top right of the scope, or of the square map. with touch an arrow at each end, each half a
+ * way round the looks (ui.c look_button): 14 wider, to the left, so the seven-letter names keep their size. the
+ * scaled screens write the name in a smooth font whose letters stand wider than the pixel font's: 18 there */
+#define LOOK_ARROW (RADAR_HAS_TOUCH ? (GFX_SCALED ? 9 : 7) : 0)
+#define LOOK_W   (62 + 2 * LOOK_ARROW)
 #define LOOK_H   20
 #define LOOK_Y   2
 #define DOTS_W   24           /* three dots, the panel in and out: the square map's, the radar's on a wide panel */
@@ -110,6 +114,7 @@ enum {
     HIT_BTN = 10,                  /* + panel button index */
     HIT_BAR = 20,                  /* + bottom bar button index */
     HIT_WXPAGE = 30,               /* the WEATHER look's dial or graph: its next page */
+    HIT_LOOK_BACK = 31,            /* the look's button, its left half: the look before. HIT_LOOK, the right half: the next */
     HIT_ROW = 40,                  /* + list row */
     HIT_SDEC = 100, HIT_SINC = 160, HIT_SBTN = 220,  /* setup rows: 60 at most (S_ROWS, ui_pages.c) */
     HIT_NET = 280,                 /* + a network on the WiFi page */
@@ -122,6 +127,11 @@ enum {
 #define RADAR_WEB 0                                    /* web/: the screen in a page, the board has the WiFi */
 #endif
 #define UI_WIFI_PAGE (RADAR_HAS_TOUCH && !RADAR_ROUND && !RADAR_WEB)
+/* the LED's events lit on the screen (ui_t.alarm): every board's own screen but paper, whose picture cannot
+ * blink, and the site's radar, which has no events of its own. SET has the events' rows where the LED or the
+ * screen shows them: LED's tab, ALARM's where there is no LED, the round's under DATA */
+#define UI_SCREEN_ALARM (!RADAR_EPAPER && !RADAR_WEB)
+#define UI_EVENTS (RADAR_HAS_LED || UI_SCREEN_ALARM)
 
 #define D2R (3.14159265f / 180.0f)
 #define BEAM_TURN_MS 6000u    /* the sweep goes round once in this */
@@ -171,6 +181,11 @@ void ui_lap(ui_t *u, const canvas_t *cv, int layer);  /* timing of the layers, s
 void chamfer_box(canvas_t *cv, int x, int y, int w, int h, uint32_t fill, int fill_a, uint32_t line, int line_a);
 void button(canvas_t *cv, int x, int y, int w, int h, const char *label, int state);   /* 0 normal, 1 lit, 2 pressed */
 void button_font(canvas_t *cv, int x, int y, int w, int h, const char *label, int state, const font_t *f);
+/* the look's button with its two arrows, and which half x is in (HIT_LOOK_BACK or HIT_LOOK). paper: the light map's */
+void look_button(const ui_t *u, canvas_t *cv, const char *name, int paper);
+int  look_hit(const ui_t *u, int x);
+/* what an alarm (ui_t.alarm) lights now, a face and its letters, the look's button and the round glass's rim. 0: none */
+int  alarm_colours(const ui_t *u, int paper, uint32_t *fill, uint32_t *ink);
 /* the classic look: things on the light map are light, rounded, inked dark */
 #define CL_PAPER RGB(250, 250, 247)
 #define CL_RIM   RGB(176, 181, 190)
@@ -255,7 +270,8 @@ void step_wx_page(ui_t *u, int d);                   /* the page after (d 1) or 
  * and the 320x240 screens */
 #define WX_HUD (RADAR_DISPLAY == DISPLAY_ST7796_480x320 || RADAR_DISPLAY == DISPLAY_ILI9486_480x320 || \
                 RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ES3C28P_320x240 || \
-                RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240 || RADAR_DISPLAY == DISPLAY_CROWADV28_320x240)
+                RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240 || RADAR_DISPLAY == DISPLAY_CROWADV28_320x240 || \
+                RADAR_DISPLAY == DISPLAY_2432S032_320x240)
 #if RADAR_EPAPER
 int  weather_sheet_up(const ui_t *u);                /* the weather's first page is the printed dial (paper_style 1) */
 int  weather_paper_page(const ui_t *u);              /* the weather is the paper's own, all three pages (the 4.2"'s) */

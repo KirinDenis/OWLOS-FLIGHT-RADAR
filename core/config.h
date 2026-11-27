@@ -22,6 +22,7 @@
 #define DISPLAY_JC8012_1280x800 17   // Guition JC8012P4A1C 10.1": ESP32-P4, 800x1280 standing on MIPI-DSI, GSL3680, chipguy's driver (chipguyhere)
 #define DISPLAY_CROW50_800x480  18   // Elecrow CrowPanel 5.0" plain (DIS07050H), not the Advance: ESP32-S3, RGB bus, GT911, backlight on GPIO 2
 #define DISPLAY_ZLX2_320x240    19   // ZLX-ESP32-2 2.8": ESP32-C5, ST7789, XPT2046 touch on its own pins
+#define DISPLAY_2432S032_320x240 20  // ESP32-2432S032 3.2" CYD: ESP32, ST7789 IPS, the 3.5" CYD's pins and touch
 
 #ifndef RADAR_DISPLAY
 #define RADAR_DISPLAY DISPLAY_ILI9341_320x240
@@ -29,7 +30,7 @@
 
 #if RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ES3C28P_320x240 || \
     RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240 || RADAR_DISPLAY == DISPLAY_CROWADV28_320x240 || \
-    RADAR_DISPLAY == DISPLAY_ZLX2_320x240
+    RADAR_DISPLAY == DISPLAY_ZLX2_320x240 || RADAR_DISPLAY == DISPLAY_2432S032_320x240
 #define GFX_W 320
 #define GFX_H 240
 #elif RADAR_DISPLAY == DISPLAY_ST7796_480x320 || RADAR_DISPLAY == DISPLAY_ILI9486_480x320
@@ -148,18 +149,20 @@
 #define RADAR_TOUCH_CAL (RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ST7796_480x320 || \
                          RADAR_DISPLAY == DISPLAY_GC9A01_240x240 || RADAR_DISPLAY == DISPLAY_ES3C28P_320x240 || \
                          RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240 || RADAR_DISPLAY == DISPLAY_CROWADV28_320x240 || \
-                         RADAR_DISPLAY == DISPLAY_ZLX2_320x240 || \
+                         RADAR_DISPLAY == DISPLAY_ZLX2_320x240 || RADAR_DISPLAY == DISPLAY_2432S032_320x240 || \
                          RADAR_DISPLAY == DISPLAY_4827S043_480x272 || GFX_SCALED)
 
 /* the RPi LCD has no touch: BOOT does what it can there, the site sends the rest */
 #define RADAR_HAS_TOUCH RADAR_TOUCH_CAL
 
-/* the RGB LED: on three pins on the back of the 2.8" and the 3.5" CYD, a WS2812 on one pin on the
- * ES3C28P and the NM-CYD-C5 (firmware/main/board.h has the pins) */
+/* the RGB LED: on three pins on the back of the 2.8", the 3.2" and the 3.5" CYD, a WS2812 on one pin on
+ * the ES3C28P and the NM-CYD-C5 (firmware/main/board.h has the pins) */
 #define RADAR_HAS_LED (RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ST7796_480x320 || \
+                       RADAR_DISPLAY == DISPLAY_2432S032_320x240 || \
                        RADAR_DISPLAY == DISPLAY_ES3C28P_320x240 || RADAR_DISPLAY == DISPLAY_NMCYDC5_320x240)
 /* the CYDs' red is on one of two pins and nothing tells which: the user picks (core/light.h) */
-#define RADAR_LED_RED_PIN (RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ST7796_480x320)
+#define RADAR_LED_RED_PIN (RADAR_DISPLAY == DISPLAY_ILI9341_320x240 || RADAR_DISPLAY == DISPLAY_ST7796_480x320 || \
+                           RADAR_DISPLAY == DISPLAY_2432S032_320x240)
 
 /* a BOOT button the firmware can read: every board but the Tab5, whose buttons go to its power
  * chip and its C6, not the P4, and the plain CrowPanel 5.0 and the CrowPanel 7.0, whose BOOT is
@@ -181,6 +184,8 @@
 #define RADAR_BOARD "2.8\" CYD, 320x240"
 #elif RADAR_DISPLAY == DISPLAY_ST7796_480x320
 #define RADAR_BOARD "3.5\" CYD, ST7796 480x320"
+#elif RADAR_DISPLAY == DISPLAY_2432S032_320x240
+#define RADAR_BOARD "3.2\" CYD, ST7789 320x240"
 #elif RADAR_DISPLAY == DISPLAY_ILI9486_480x320
 #define RADAR_BOARD "3.5\" RPI LCD, ILI9486 480x320"
 #elif RADAR_DISPLAY == DISPLAY_GC9A01_240x240

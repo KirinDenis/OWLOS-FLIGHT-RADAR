@@ -266,6 +266,49 @@ on the site; none of the built ones here has been run on that board yet unless i
   alone unless the touch is silent, then the touch's reset as Elecrow does it. GPIO 0 is the panel's
   clock and BOOT: no button read.
 
+## ESP32-2432S032, the 3.2" CYD: asked 2026-11-25, built the same day as `esp2432s032` (0.17 beta), not run on one yet
+
+- Asked under a post, with two photos: the board's back with the marking ESP32-2432S032 and a CYD
+  logo, USB-C. They flashed the 3.5" CYD build on it and got a garbled, flickering screen, and asked
+  for the right build. They did not say C, R or N.
+- 2026-11-26 they answered "32R", and sent the seller's box: its label says "ESP32 3.2-inch capacitive
+  touch display board Wi-Fi + BLE, LVGL", that is a C. One of the two is wrong; the build asks for the
+  GT911 first and falls back to the XPT2046, so it runs either way, and which one answered settles it.
+  The box's leaflet points to the maker's downloads, pan.jczn1688.com (Sunton's): the second source for
+  the pins, read the same day, below.
+- The 3.5" CYD's pins exactly, another screen. From the raw board JSONs of
+  github.com/rzeldent/platformio-espressif32-sunton (esp32-2432S032C, R and N, read 2026-11-25 beside
+  esp32-3248S035R): the screen on SPI MOSI 13, MISO 12, SCLK 14, CS 15, DC 2, no reset, backlight 27.
+  R: an XPT2046 on the screen's bus, CS 33, pen interrupt 36. C: a GT911 at 0x5D on SDA 33, SCL 32,
+  reset 25, interrupt 21. N: no touch. RGB LED 4, 16, 17, speaker 26, light sensor 34, SD card on 5,
+  23, 18, 19. The 3.5" build has these pins, and already asks for a GT911 first and falls back to the
+  XPT2046 (TOUCH_GT911_TOO).
+- The screen is an ST7789 240x320 IPS, RGB, where the 3.5" has an ST7796 480x320, BGR. So the 3.5" build
+  sends it start-up commands it half knows and a picture twice its size: garbled [reasoned]. No harm to
+  the board: the same pins, used the same way.
+- rzeldent drives this ST7789 in SPI mode 3 at 24 MHz, the radar's ST7789 boards run mode 0 at 40.
+- The build (board.h DISPLAY_2432S032_320x240 = 20) is pins only, with chips the firmware has: the
+  ST7789 as on the CrowPanel Advance 2.8 (IPS, LCD_INVERT 1), RGB first and BGR behind BOOT, MADCTL 0xA0,
+  40 MHz; the 2.8" CYD's picture size and memory (320x240, strips of 24, the second core on half of each,
+  no PSRAM); the 3.5"'s pins and touch. Built here with ESP-IDF 5.5 on 2026-11-25, 1.2 MB, 41% of the app
+  partition free.
+- 2026-11-26, the second source: the maker's downloads (pan.jczn1688.com, "ESP32 module",
+  3.2inch_ESP32-2432S032.zip, 119 MB, read in the browser by its table of contents, nothing kept). Its
+  schematics (ESP32-2432S032-MCU and -LCM V1.0) give every pin above: the screen on 13, 12 (through 0
+  ohm), 14, 15, DC 2, its reset the ESP32's EN, the backlight through an AO3402 MOSFET on 27 (high is on,
+  10K pull-down). XPT2046 on 14, 33 (CS), 13, 12, pen IRQ 36 with a 10K pull-up. GT911's six-pin FPC:
+  SDA 33, SCL 32 (4.7K pull-ups), reset 25, INT 21 through 0 ohm; 21 also goes to the 4-pin CN1 with a
+  10K pull-up (with 22), so the GT911 may wake at 0x14: touch.c asks both. RGB LED 17, 4, 16 to 3.3 V
+  through 1K (low is lit). Speaker 26 through an FM8002A, light sensor 34, SD 5, 23, 18, 19, BOOT 0, a
+  lithium battery connector with a charger, a DHT11 socket, P3 with 21, 22, 35. The spec sheet: ST7789,
+  240x320, IPS, 64.8 x 48.6 mm shown (square pixels), sold as N, R, C. The demos: Arduino_GFX's
+  ST7789 with IPS, rotation 3 (MADCTL MY|MV, RGB: 0xA0, the build's guess) and SPI mode 3 on an ESP32,
+  at 80 MHz; one TFT_eSPI User_Setup.h says BGR at 80 MHz, but its header is copied from an ILI9341 file.
+  So the build now runs the screen's bus in mode 3 (board.h LCD_SPI_MODE, lcd_spi.c, 0 on every other
+  board) and keeps RGB first.
+- To learn from a tester: colours (RGB or BGR, inversion), which landscape is upright, C or R, whether
+  40 MHz is clean.
+
 ## Others on sale, nobody asked yet
 
 Looked up 2026-11-03 to see what else people build things like this on. Pins are in the board JSONs
@@ -275,7 +318,7 @@ check each against a second source before a build. From the easiest port to the 
 - Pins only, chips the firmware knows: Guition JC2432W328C (the capacitive 2.8" CYD, ESP32, ST7789 or
   ILI9341 by batch, CST816/CST820 at 0x15 on SDA 33 SCL 32, backlight 27, looks the most common now);
   ESP32-2432S024 C/R/N (2.4", ILI9341, CST820 or XPT2046); ESP32-2432S032 C/R/N (3.2", ST7789, GT911 or
-  XPT2046); Elecrow CrowPanel 2.8 and 2.4 ESP32 HMI, the plain ones (ILI9341V, XPT2046 on the LCD
+  XPT2046; asked 2026-11-25, above); Elecrow CrowPanel 2.8 and 2.4 ESP32 HMI, the plain ones (ILI9341V, XPT2046 on the LCD
   bus, CS 33); the CrowPanel Advance 2.4 (S3, Elecrow's examples are shared with the 2.8's);
   ESP32-2424S012C (round, ESP32-C3, GC9A01 and CST816, near the CrowPanel 1.28); WT32-SC01 (3.5"
   ST7796, FT6336, ESP32 with PSRAM); LilyGO T-Deck (S3, ST7789 320x240, keyboard).

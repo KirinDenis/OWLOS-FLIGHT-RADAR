@@ -333,6 +333,15 @@ if the first guess was wrong. The README's "not run on one here yet" goes last, 
 - 19 zlx2 (2026-11-22). GitHub issue #13 gave the pins from the maker's manual; they were checked against the maker's
   pins.h and factory test before a line was written. Pins only and three small switches. New in a beta, so beta-only on
   the site.
+- 20 esp2432s032 (2026-11-25). A comment with a photo of the back gave the model; its owner had flashed the 3.5" build
+  and got a garbled, flickering screen. The raw rzeldent JSONs showed every pin the 3.5"'s and only the screen another
+  (ST7789 240x320), so the build is two existing ones put together: the 3.5"'s pins and touch with the 2.8" CYD's
+  picture and memory, and the ST7789 of the CrowPanel Advance 2.8. No new code. A board that shares a sibling's pins is
+  first checked for exactly this: which build already has its pins, which already has its screen. The next day the
+  owner's box pointed to the maker's downloads: a 119 MB zip, read in the browser by HTTP ranges (its table of contents,
+  then only the files wanted, nothing saved), its schematics viewed as pictures. They agreed on every pin and gave one
+  change, the screen's SPI mode. The second source is worth that hour: it is where mode 3 and the GT911's pulled-up INT
+  showed.
 
 ## A board a contributor brings in
 
